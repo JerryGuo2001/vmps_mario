@@ -13,7 +13,7 @@ body {
     padding: 30px;
     border-radius: 8px;
     box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
-    width: 400px;
+    width: 800px;
     text-align: center;
 }
 
@@ -30,6 +30,13 @@ button {
     background-color: #007BFF;
     color: white;
     transition: background-color 0.3s ease;
+    text-align: center;
+}
+
+#next {
+    display: none;
+    margin: 20px auto;
+    text-align: center;
 }
 
 button:hover {
