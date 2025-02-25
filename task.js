@@ -1,5 +1,10 @@
 // Global Variables
 let canvas, ctx, character, gravity, keys, currentCanvas, mushroomCollected, showPrompt, currentQuestion, totalMushrooms, collectedMushrooms;
+let leftMushroomSet = [];
+let rightMushroomSet = [];
+let mushrooms = []; // ✅ Declare mushrooms globally
+let totalQuestions = 5;
+currentQuestion = 1;
 
 window.onload = () => {
     document.getElementById('welcome').style.display = 'block';
@@ -18,7 +23,7 @@ function completeTask() {
     document.getElementById('task').style.display = 'none';
     document.getElementById('thankyou').style.display = 'block';
 }
-// Initialize Game (Starting on Left for First Room)
+
 function initGame() {
     canvas = document.getElementById('gameCanvas');
     canvas.width = 600;
@@ -28,17 +33,16 @@ function initGame() {
     character = createCharacter();
     gravity = 0.5;
     keys = {};
+    currentQuestion = 1; // Initialize here
     currentCanvas = (currentQuestion > 1 && character.hp > 0) ? 4 : 1;
-    currentQuestion = 1;
     mushroomCollected = false;
     showPrompt = false;
 
     totalMushrooms = 3;
-    collectedMushrooms = 0;
+    collectedMushrooms = [];
 
-    mushroom = generateMushroom();
+    generateMushroomSets();
 
-    // Character starts on the left in the first room
     character.x = currentCanvas === 1 ? 10 : canvas.width / 2;
     character.y = canvas.height * 0.8 - character.height;
 
@@ -47,6 +51,9 @@ function initGame() {
 
     requestAnimationFrame(updateGame);
 }
+
+
+
 // Draw Obstacles for Rooms 1-3
 function drawObstacles() {
     ctx.fillStyle = '#A9A9A9'; // Gray for obstacles
@@ -238,52 +245,115 @@ function createCharacter() {
     };
 }
 
-// Generate Mushroom
-function generateMushroom() {
-    return {
-        color: Math.random() > 0.5 ? '#00FF00' : '#FF0000',
-        value: Math.random() > 0.5 ? 1 : -1
-    };
+function generateMushroomSets() {
+    const mushroomTypes = [
+        { color: '#FF0000', value: 1 },        // Red: +1
+        { color: '#FFA500', value: 4 },        // Shiny Orange: +4
+        { color: '#00FF00', value: -1 },       // Green: -1
+        { color: '#800080', value: 'reset' }   // Purple: HP becomes 0
+    ];
+
+    for (let i = 0; i < totalQuestions; i++) {
+        // Randomly select mushroom types for left and right
+        let leftMushroomType = mushroomTypes[Math.floor(Math.random() * mushroomTypes.length)];
+        let rightMushroomType = mushroomTypes[Math.floor(Math.random() * mushroomTypes.length)];
+
+        leftMushroomSet.push({
+            x: canvas.width * 0.25,
+            y: canvas.height * 0.8 - 140,
+            color: leftMushroomType.color,
+            value: leftMushroomType.value
+        });
+
+        rightMushroomSet.push({
+            x: canvas.width * 0.75,
+            y: canvas.height * 0.8 - 140,
+            color: rightMushroomType.color,
+            value: rightMushroomType.value
+        });
+    }
 }
 
-// Handle Key Down
+
+function getRandomColor() {
+    const colors = ['#FF0000', '#00FF00', '#0000FF', '#FFFF00', '#FF00FF'];
+    return colors[Math.floor(Math.random() * colors.length)];
+}
+
 function handleKeyDown(e) {
     keys[e.key] = true;
+
     if (showPrompt && e.key === 'e') {
         if (currentCanvas < 4) {
             nextCanvas();
         } else if (currentCanvas === 4 && !mushroomCollected) {
-            mushroomCollected = true;
-            character.hp += mushroom.value;
-            collectedMushrooms++;
+            // Check for mushroom collision
+            let mushroomEaten = false;
+            mushrooms.forEach((mushroom) => {
+                if (
+                    Math.abs((character.x + character.width / 2) - mushroom.x) <= 20 &&
+                    Math.abs((character.y + character.height) - mushroom.y) <= 20
+                ) {
+                    mushroomEaten = true;
+                    mushroomCollected = true;
 
-            // Create and show the floating result message
-            const messageDiv = document.createElement('div');
-            messageDiv.style.position = 'fixed'; // Fixed position for centering
-            messageDiv.style.top = '50%';
-            messageDiv.style.left = '50%';
-            messageDiv.style.transform = 'translate(-50%, -50%)';
-            messageDiv.style.fontSize = '60px'; // Larger font size
-            messageDiv.style.fontWeight = 'bold';
-            messageDiv.style.color = mushroom.value > 0 ? 'green' : 'red';
-            messageDiv.innerText = mushroom.value > 0 ? '+ ❤️' : '- 💔'; // Actual heart symbols
-            messageDiv.style.zIndex = '1000'; // Ensure it's on top
-            document.body.appendChild(messageDiv);
+                    // Apply HP change
+                    if (mushroom.value === 'reset') {
+                        character.hp = 0; // Purple mushroom resets HP
+                    } else {
+                        character.hp += mushroom.value;
+                    }
 
-            // Wait 2 seconds before proceeding to next question or completing the task
-            setTimeout(() => {
-                document.body.removeChild(messageDiv);
+                    // Floating result message
+                    const messageDiv = document.createElement('div');
+                    messageDiv.style.position = 'fixed';
+                    messageDiv.style.top = '50%';
+                    messageDiv.style.left = '50%';
+                    messageDiv.style.transform = 'translate(-50%, -50%)';
+                    messageDiv.style.fontSize = '60px';
+                    messageDiv.style.fontWeight = 'bold';
+                    messageDiv.style.color = mushroom.value > 0 ? 'red' : (mushroom.value === 'reset' ? 'purple' : 'green');
+                    messageDiv.innerText = 
+                        mushroom.value === 'reset' ? '💜TOXIC!' : 
+                        (mushroom.value > 0 ? `+ ❤️ ${mushroom.value}` : `- 💔 ${Math.abs(mushroom.value)}`);
+                    document.body.appendChild(messageDiv);
+                    
+                    collectedMushrooms.push(mushroom)
+                    // Wait 2 seconds before proceeding
+                    setTimeout(() => {
+                        document.body.removeChild(messageDiv);
 
-                if (collectedMushrooms >= totalMushrooms) {
-                    completeTask();
-                } else {
-                    currentCanvas = character.hp > 0 ? 4 : 1;
-                    mushroomCollected = false;
-                    mushroom = generateMushroom();
-                    character.x = 10;
-                    character.y = canvas.height * 0.8 - character.height;
+                        // ✅ Remove both mushrooms after eating
+                        mushrooms = [];
+
+                        // ✅ Reset mushroomCollected
+                        mushroomCollected = false;
+                        // ✅ Move to next canvas or reset if HP is 0
+                        if (character.hp <= 0) {
+                            currentQuestion++;
+                            currentCanvas = 1;
+                            character.hp = 0;
+                            heartCollected = false; // Respawn heart
+
+                            // ✅ Reset character position
+                            character.x = 10; // Starting X position (adjust as needed)
+                            character.y = canvas.height * 0.8 - character.height; // Ground level
+
+                            // Optional: Reset velocity and movement state
+                            character.velocityY = 0;
+                            character.onBlock = false;
+                        }else {
+                            currentQuestion++; // Move to next question
+                            nextCanvas();
+                        }
+                    }, 3000); // 3 seconds delay
                 }
-            }, 2000); // 2-second delay before moving forward
+            });
+
+            // In case of no collision, ensure mushrooms remain
+            if (!mushroomEaten) {
+                mushroomCollected = false;
+            }
         }
     }
 }
@@ -353,72 +423,108 @@ function handleCollisions() {
     if (currentCanvas === 4) handleBlockCollision();
 }
 
-// Handle Block Collision
 function handleBlockCollision() {
-    let blockX = canvas.width - 150;
     let blockY = canvas.height * 0.8 - 120;
     let blockWidth = 100;
     let blockHeight = 20;
 
+    // Left Block
+    let leftBlockX = canvas.width * 0.25 - blockWidth / 2;
+
+    // Right Block
+    let rightBlockX = canvas.width * 0.75 - blockWidth / 2;
+
+    // Draw Blocks
     ctx.fillStyle = '#A9A9A9';
-    ctx.fillRect(blockX, blockY, blockWidth, blockHeight);
+    ctx.fillRect(leftBlockX, blockY, blockWidth, blockHeight);
+    ctx.fillRect(rightBlockX, blockY, blockWidth, blockHeight);
 
-    if (character.velocityY >= 0 &&
-        character.y + character.height <= blockY &&
-        character.y + character.height + character.velocityY >= blockY &&
-        character.x + character.width > blockX &&
-        character.x < blockX + blockWidth) {
+    // Reset onBlock before checking collisions
+    let isOnBlock = false;
 
-        character.y = blockY - character.height;
-        character.velocityY = 0;
-        character.onBlock = true;
-    } else if (character.onBlock &&
-        character.x + character.width > blockX &&
-        character.x < blockX + blockWidth &&
-        Math.abs(character.y + character.height - blockY) <= 1) {
+    // ✅ Handle Block Collisions for Both Blocks
+    [leftBlockX, rightBlockX].forEach(blockX => {
+        // ✅ Top collision (Standing on block)
+        if (character.velocityY >= 0 &&
+            character.y + character.height <= blockY + 5 &&
+            character.y + character.height + character.velocityY >= blockY &&
+            character.x + character.width > blockX &&
+            character.x < blockX + blockWidth) {
 
-        character.velocityY = 0;
-        character.y = blockY - character.height;
-    } else if (
-        (character.x + character.width > blockX && character.x < blockX &&
-        character.y + character.height > blockY && character.y < blockY + blockHeight) ||
-        (character.x < blockX + blockWidth && character.x + character.width > blockX + blockWidth &&
-        character.y + character.height > blockY && character.y < blockY + blockHeight)
-    ) {
-        if (character.x < blockX) {
-            character.x = blockX - character.width;
-        } else {
-            character.x = blockX + blockWidth;
+            character.y = blockY - character.height;
+            character.velocityY = 0;
+            isOnBlock = true;
         }
-    } else if (
-        character.y < blockY + blockHeight &&
-        character.y + character.height > blockY + blockHeight &&
-        character.x + character.width > blockX &&
-        character.x < blockX + blockWidth
-    ) {
-        character.velocityY = Math.max(character.velocityY, 0);
-    } else {
-        character.onBlock = false;
+
+        // ✅ Side collision (Prevent moving through blocks)
+        if (character.y + character.height > blockY &&
+            character.y < blockY + blockHeight) {
+
+            if (character.x + character.width > blockX &&
+                character.x < blockX &&
+                keys['ArrowRight']) {
+
+                character.x = blockX - character.width;
+            }
+
+            if (character.x < blockX + blockWidth &&
+                character.x + character.width > blockX + blockWidth &&
+                keys['ArrowLeft']) {
+
+                character.x = blockX + blockWidth;
+            }
+        }
+
+        // ✅ Bottom collision (Hitting from below)
+        if (character.y < blockY + blockHeight &&
+            character.y + character.height > blockY + blockHeight &&
+            character.x + character.width > blockX &&
+            character.x < blockX + blockWidth &&
+            character.velocityY < 0) {
+
+            character.velocityY = 0;
+        }
+    });
+
+    // ✅ Update character onBlock flag
+    character.onBlock = isOnBlock;
+
+    // ✅ Ensure mushrooms regenerate when re-entering Room 4
+    if (!mushrooms || mushrooms.length === 0) {
+        mushrooms = [
+            leftMushroomSet[currentQuestion - 1],
+            rightMushroomSet[currentQuestion - 1]
+        ];
     }
 
-    if (!mushroomCollected) {
+    // ✅ Draw Mushrooms and Handle Interaction
+    mushrooms.forEach((mushroom) => {
         ctx.fillStyle = mushroom.color;
         ctx.beginPath();
-        ctx.arc(blockX + blockWidth / 2, blockY - 15, 15, 0, Math.PI * 2);
+        ctx.arc(mushroom.x, mushroom.y, 15, 0, Math.PI * 2);
         ctx.fill();
-    
-        // Increased tolerance range for proximity detection
-        if (Math.abs((character.x + character.width / 2) - (blockX + blockWidth / 2)) <= 20 &&
-            Math.abs((character.y + character.height) - (blockY - 15)) <= 20) { // Increased range
+
+        // Show prompt if near mushroom
+        if (!mushroomCollected &&
+            Math.abs((character.x + character.width / 2) - mushroom.x) <= 20 &&
+            Math.abs((character.y + character.height) - mushroom.y) <= 20) {
+
             showPrompt = true;
             ctx.fillStyle = '#000';
             ctx.font = '16px Arial';
-            ctx.fillText('Press E to eat', blockX - 40, blockY - 50);
-        } else {
-            showPrompt = false;
+            ctx.fillText('Press E to eat', mushroom.x - 40, mushroom.y - 30);
         }
+    });
+
+    // Hide prompt if not near any mushroom
+    if (!mushrooms.some(mushroom =>
+        Math.abs((character.x + character.width / 2) - mushroom.x) <= 20 &&
+        Math.abs((character.y + character.height) - mushroom.y) <= 20)) {
+        showPrompt = false;
     }
 }
+
+
 
 // Draw Character
 function drawCharacter() {
@@ -446,11 +552,23 @@ function drawHP() {
     }
 }
 
-// Move to Next Canvas
+
 function nextCanvas() {
     if (currentCanvas < 4) {
         currentCanvas++;
         character.x = 10;
         character.y = canvas.height * 0.8 - character.height;
+    } else if (currentCanvas === 4) {
+        if (currentQuestion <= totalQuestions) {
+            mushrooms = [
+                leftMushroomSet[currentQuestion - 1],
+                rightMushroomSet[currentQuestion - 1]
+            ];
+            handleBlockCollision()
+            character.x = canvas.width / 2 - character.width / 2;
+            character.y = canvas.height * 0.8 - character.height;
+        } else {
+            completeTask(); // End the game after totalQuestions
+        }
     }
 }
