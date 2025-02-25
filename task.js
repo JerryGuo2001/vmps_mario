@@ -18,8 +18,7 @@ function completeTask() {
     document.getElementById('task').style.display = 'none';
     document.getElementById('thankyou').style.display = 'block';
 }
-
-// Initialize Game
+// Initialize Game (Starting on Left for First Room)
 function initGame() {
     canvas = document.getElementById('gameCanvas');
     canvas.width = 600;
@@ -29,20 +28,199 @@ function initGame() {
     character = createCharacter();
     gravity = 0.5;
     keys = {};
-    currentCanvas = (currentQuestion > 1 && character.hp > 0) ? 4 : 1; // Skip to room 4 if HP > 0
+    currentCanvas = (currentQuestion > 1 && character.hp > 0) ? 4 : 1;
     currentQuestion = 1;
     mushroomCollected = false;
     showPrompt = false;
 
-    totalMushrooms = 3; // Total mushrooms required to finish
+    totalMushrooms = 3;
     collectedMushrooms = 0;
 
     mushroom = generateMushroom();
+
+    // Character starts on the left in the first room
+    character.x = currentCanvas === 1 ? 10 : canvas.width / 2;
+    character.y = canvas.height * 0.8 - character.height;
 
     window.addEventListener('keydown', handleKeyDown);
     window.addEventListener('keyup', handleKeyUp);
 
     requestAnimationFrame(updateGame);
+}
+// Draw Obstacles for Rooms 1-3
+function drawObstacles() {
+    ctx.fillStyle = '#A9A9A9'; // Gray for obstacles
+
+    if (currentCanvas === 1) {
+        // Room 1: Single block forces jump
+        ctx.fillRect(200, canvas.height * 0.8 - 40, 50, 40); // Blocking block
+        checkObstacleCollision(200, canvas.height * 0.8 - 40, 50, 40);
+
+        // Initialize heartCollected if undefined
+        if (typeof heartCollected === 'undefined') {
+            heartCollected = false;
+        }
+
+        // Re-spawn heart if HP is 0
+        if (character.hp <= 0 && heartCollected) {
+            heartCollected = false;
+        }
+
+        let heartX = 300;
+        let heartY = canvas.height * 0.8 - 30;
+        let heartSize = 10;
+
+        // Draw Heart if not collected
+        if (!heartCollected) {
+            ctx.fillStyle = '#FF0000';
+            ctx.beginPath();
+            ctx.moveTo(heartX, heartY);
+            ctx.bezierCurveTo(heartX - heartSize, heartY - heartSize, heartX - heartSize * 2, heartY + heartSize / 2, heartX, heartY + heartSize * 1.5);
+            ctx.bezierCurveTo(heartX + heartSize * 2, heartY + heartSize / 2, heartX + heartSize, heartY - heartSize, heartX, heartY);
+            ctx.closePath();
+            ctx.fill();
+
+            // Heart Collection Logic
+            if (Math.abs((character.x + character.width / 2) - heartX) <= 15 &&
+                Math.abs((character.y + character.height) - heartY) <= 15) {
+
+                character.hp = Math.max(character.hp, 1); // Ensure at least 1 HP
+                heartCollected = true; // Mark as collected
+
+                // Display floating heart message
+                const heartMessage = document.createElement('div');
+                heartMessage.style.position = 'fixed';
+                heartMessage.style.top = '50%';
+                heartMessage.style.left = '50%';
+                heartMessage.style.transform = 'translate(-50%, -50%)';
+                heartMessage.style.fontSize = '50px';
+                heartMessage.style.fontWeight = 'bold';
+                heartMessage.style.color = 'red';
+                heartMessage.innerText = '❤️ +1';
+                heartMessage.style.zIndex = '1000';
+                document.body.appendChild(heartMessage);
+
+                setTimeout(() => {
+                    document.body.removeChild(heartMessage);
+                }, 2000);
+            }
+        }
+    }
+    else if (currentCanvas === 2) {
+        // Room 2: Two obstacles to jump over
+        ctx.fillRect(150, canvas.height * 0.8 - 60, 50, 60);
+        checkObstacleCollision(150, canvas.height * 0.8 - 60, 50, 60);
+    } else if (currentCanvas === 3) {
+        // Room 3: Tall obstacle and a pit
+        ctx.fillRect(250, canvas.height * 0.8 - 100, 50, 100);
+        checkObstacleCollision(250, canvas.height * 0.8 - 100, 50, 100);
+
+        // Draw the Pit
+        ctx.fillStyle = '#000';
+        ctx.fillRect(400, canvas.height * 0.8, 100, 20);
+
+        // Pit penalty: Check if player falls into it
+        if (character.x > 400 && character.x < 500 &&
+            character.y + character.height >= canvas.height * 0.8) {
+
+            character.hp = Math.max(0, character.hp - 1);
+
+            if (character.hp <= 0) {
+                currentCanvas = 1; // Move to Room 1
+                character.hp = 0;  // Prevent negative HP
+                heartCollected = false; // Trigger heart reappearance
+            }
+
+            character.x = 10;
+            character.y = canvas.height * 0.8 - character.height;
+        }
+
+        ctx.fillStyle = '#A9A9A9';
+    }
+}
+
+
+
+// Check Obstacle Collision
+function checkObstacleCollision(obstacleX, obstacleY, obstacleWidth, obstacleHeight) {
+    // Landing on top of the obstacle
+    if (character.velocityY >= 0 &&
+        character.y + character.height <= obstacleY &&
+        character.y + character.height + character.velocityY >= obstacleY &&
+        character.x + character.width > obstacleX &&
+        character.x < obstacleX + obstacleWidth) {
+
+        character.y = obstacleY - character.height;
+        character.velocityY = 0;
+        character.onBlock = true;
+    } else if (character.onBlock &&
+        character.x + character.width > obstacleX &&
+        character.x < obstacleX + obstacleWidth &&
+        Math.abs(character.y + character.height - obstacleY) <= 1) {
+
+        character.velocityY = 0;
+        character.y = obstacleY - character.height;
+    } 
+    // Side collisions (left and right)
+    else if (
+        (character.x + character.width > obstacleX && character.x < obstacleX &&
+        character.y + character.height > obstacleY && character.y < obstacleY + obstacleHeight) ||
+        (character.x < obstacleX + obstacleWidth && character.x + character.width > obstacleX + obstacleWidth &&
+        character.y + character.height > obstacleY && character.y < obstacleY + obstacleHeight)
+    ) {
+        if (character.x < obstacleX) {
+            character.x = obstacleX - character.width; // Left wall
+        } else {
+            character.x = obstacleX + obstacleWidth; // Right wall
+        }
+    }
+    // Bottom collision (hitting from below)
+    else if (
+        character.y < obstacleY + obstacleHeight &&
+        character.y + character.height > obstacleY + obstacleHeight &&
+        character.x + character.width > obstacleX &&
+        character.x < obstacleX + obstacleWidth
+    ) {
+        character.velocityY = Math.max(character.velocityY, 0);
+    } 
+    // Reset onBlock if not on top anymore
+    else {
+        character.onBlock = false;
+    }
+}
+
+
+
+// Draw Door (Placed After Obstacles)
+function drawDoor() {
+    if (currentCanvas < 4) {
+        let doorWidth = 30;
+        let doorHeight = 50;
+        let doorX = canvas.width - doorWidth - 50;
+        let doorY = canvas.height * 0.8 - doorHeight;
+
+        ctx.fillStyle = '#8B4513';
+        ctx.fillRect(doorX, doorY, doorWidth, doorHeight);
+
+        ctx.fillStyle = '#FFD700';
+        let handleRadius = 4;
+        let handleX = doorX + doorWidth - 8;
+        let handleY = doorY + doorHeight / 2;
+
+        ctx.beginPath();
+        ctx.arc(handleX, handleY, handleRadius, 0, Math.PI * 2);
+        ctx.fill();
+
+        if (character.x + character.width > doorX && character.x < doorX + doorWidth &&
+            character.y + character.height > doorY) {
+            showPrompt = true;
+            ctx.fillStyle = '#000';
+            ctx.font = '16px Arial';
+            ctx.fillText('Press E to enter', doorX - 40, doorY - 10);
+        } else {
+            showPrompt = false;
+        }
+    }
 }
 
 // Create Character
@@ -56,7 +234,7 @@ function createCharacter() {
         velocityY: 0,
         speed: 5,
         onBlock: false,
-        hp: 2
+        hp: 0
     };
 }
 
@@ -121,11 +299,13 @@ function updateGame() {
     clearCanvas();
     drawBackground();
     handleMovement();
+    drawObstacles(); // <-- Call this to apply obstacles in rooms 1-3
     drawCharacter();
     drawHP();
     drawDoor();
     requestAnimationFrame(updateGame);
 }
+
 
 // Clear Canvas
 function clearCanvas() {
@@ -263,37 +443,6 @@ function drawHP() {
 
         ctx.closePath();
         ctx.fill();
-    }
-}
-
-// Draw Door
-function drawDoor() {
-    if (currentCanvas < 4) {
-        let doorWidth = 30;
-        let doorHeight = 50;
-        let doorX = canvas.width - doorWidth - 50;
-        let doorY = canvas.height * 0.8 - doorHeight;
-
-        ctx.fillStyle = '#8B4513';
-        ctx.fillRect(doorX, doorY, doorWidth, doorHeight);
-
-        ctx.fillStyle = '#FFD700';
-        let handleRadius = 4;
-        let handleX = doorX + doorWidth - 8;
-        let handleY = doorY + doorHeight / 2;
-
-        ctx.beginPath();
-        ctx.arc(handleX, handleY, handleRadius, 0, Math.PI * 2);
-        ctx.fill();
-
-        if (character.x + character.width > doorX && character.x < doorX + doorWidth && character.y + character.height > doorY) {
-            showPrompt = true;
-            ctx.fillStyle = '#000';
-            ctx.font = '16px Arial';
-            ctx.fillText('Press E to enter', doorX - 40, doorY - 10);
-        } else {
-            showPrompt = false;
-        }
     }
 }
 
