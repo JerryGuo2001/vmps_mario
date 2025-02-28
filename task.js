@@ -239,7 +239,7 @@ function createCharacter() {
         height: 20,
         color: 'red',
         velocityY: 0,
-        speed: 5,
+        speed: 7,
         onBlock: false,
         hp: 0
     };
@@ -499,11 +499,16 @@ function handleBlockCollision() {
 
     // ✅ Draw Mushrooms and Handle Interaction
     mushrooms.forEach((mushroom) => {
-        ctx.fillStyle = mushroom.color;
+        ctx.fillStyle = mushroom.color; // Set color for the cap
         ctx.beginPath();
-        ctx.arc(mushroom.x, mushroom.y, 15, 0, Math.PI * 2);
+        ctx.arc(mushroom.x, mushroom.y, 20, Math.PI, 0); // Cap (semi-circle)
         ctx.fill();
 
+        ctx.fillStyle = "#8B4513"; // Brown color for stem
+        ctx.beginPath();
+        ctx.rect(mushroom.x - 5, mushroom.y, 10, 20); // Stem (rectangle)
+        ctx.fill();
+    
         // Show prompt if near mushroom
         if (!mushroomCollected &&
             Math.abs((character.x + character.width / 2) - mushroom.x) <= 20 &&
@@ -558,14 +563,14 @@ function nextCanvas() {
         currentCanvas++;
         character.x = 10;
         character.y = canvas.height * 0.8 - character.height;
-    } else if (currentCanvas === 4) {
+    } else if (currentCanvas == 4) {
         if (currentQuestion <= totalQuestions) {
             mushrooms = [
                 leftMushroomSet[currentQuestion - 1],
                 rightMushroomSet[currentQuestion - 1]
             ];
             handleBlockCollision()
-            character.x = canvas.width / 2 - character.width / 2;
+            character.x = canvas.width/2;
             character.y = canvas.height * 0.8 - character.height;
         } else {
             completeTask(); // End the game after totalQuestions
