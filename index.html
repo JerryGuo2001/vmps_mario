@@ -28,6 +28,30 @@
         </div>
     </div>
 
+    <script src="game_env.js"></script>
+    <script src="game_function.js"></script>
     <script src="task.js"></script>
 </body>
 </html>
+<script>
+    let wakeLock = null;
+  
+    async function enableWakeLock() {
+      try {
+        wakeLock = await navigator.wakeLock.request('screen');
+        wakeLock.addEventListener('release', () => {
+          console.log('Wake Lock was released');
+        });
+      } catch (err) {
+        console.error(`${err.name}, ${err.message}`);
+      }
+    }
+  
+    document.addEventListener("visibilitychange", async () => {
+      if (wakeLock !== null && document.visibilityState === "visible") {
+        enableWakeLock();
+      }
+    });
+  
+    enableWakeLock();
+  </script>
