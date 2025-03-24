@@ -2,7 +2,6 @@
 let character, gravity, keys, currentCanvas, showPrompt, currentQuestion, totalMushrooms, collectedMushrooms;
 let totalQuestions = 3;
 currentQuestion = 0;
-
 let cameraOffset = 0; // Tracks world movement in Canvas 4
 let worldWidth = 2000; // 🔹 Increase this to extend the map size
 let worldHeight = 600; // Optional: Increase height if needed
@@ -107,24 +106,31 @@ let mushroomHeight = 45; // Height of each mushroom in the sprite sheet
 let mushroomSpacing = 25; // Space between each mushroom (horizontal)
 
 let mushrooms = [
-    { x: groundPlatforms[0].startX + 400, y: groundPlatforms[0].y - 20, type: 0, value: 1 }, // Red Mushroom (frame 0)
-    { x: groundPlatforms[1].startX + 100, y: groundPlatforms[1].y - 20, type: 1, value: -1 }, // Green Mushroom (frame 1)
-    { x: groundPlatforms[0].startX + 330, y: groundPlatforms[0].y - 20, type: 2, value: 3 }, // Orange Mushroom (frame 2)
-    { x: groundPlatforms[1].startX + 150, y: groundPlatforms[1].y - 20, type: 3, value: 'reset' }, // Purple Mushroom (frame 3)
-    { x: groundPlatforms[0].startX + 50, y: groundPlatforms[0].y - 20, type: 4, value: 5 } // Blue Mushroom (frame 4)
+    { x: groundPlatforms[0].startX + 400, y: groundPlatforms[0].y-150 , type: 0, value: 1,isVisible:true }, // Red Mushroom (frame 0)
+    { x: groundPlatforms[1].startX + 100, y: groundPlatforms[1].y-150, type: 1, value: -1 ,isVisible:true}, // Green Mushroom (frame 1)
+    { x: groundPlatforms[0].startX + 330, y: groundPlatforms[0].y-150 , type: 2, value: 3 ,isVisible:true}, // Orange Mushroom (frame 2)
+    { x: groundPlatforms[1].startX + 150, y: groundPlatforms[1].y-150 , type: 3, value: 'reset' ,isVisible:true}, // Purple Mushroom (frame 3)
+    { x: groundPlatforms[0].startX + 50, y: groundPlatforms[0].y -150, type: 4, value: 5 ,isVisible:true} // Blue Mushroom (frame 4)
 ];
+
+
 
 // **Handle mushroom collisions and draw**
 function handleMushroomCollision_canvas4(atLeftEdge, atRightEdge) {
     let offset = cameraOffset;
 
     mushrooms.forEach((mushroom, index) => {
+        // If the mushroom is not visible, skip drawing
+        if (!mushroom.isVisible) {
+            return;
+        }
+
         let mushroomX = atLeftEdge ? mushroom.x : atRightEdge ? mushroom.x - offset : mushroom.x - offset;
         let mushroomY = mushroom.y;
 
         // **Set custom sprite sheet positions manually (adjust these values as needed)**
         let spriteX = 17; // Horizontal position of the frame
-        let spriteY = 17 + mushroom.type * (mushroomWidth + mushroomSpacing); // Vertical position, you can manually adjust this if needed (the Y position on the sprite sheet)
+        let spriteY = 17 + mushroom.type * (mushroomWidth + mushroomSpacing); // Vertical position, adjust if needed
 
         // **Draw mushroom from sprite sheet (using mushroom.type as the frame index)**
         ctx.drawImage(
@@ -144,7 +150,7 @@ function handleMushroomCollision_canvas4(atLeftEdge, atRightEdge) {
             showPrompt = true;
             ctx.fillStyle = '#000';
             ctx.font = '16px Arial';
-            ctx.fillText('Press E to eat', mushroomX - 40, mushroomY - 30);
+            ctx.fillText('Press E to eat', mushroomX - 40, mushroomY - 50);
 
             if (keys['e']) {
                 if (mushroom.value === 'reset') {
@@ -157,6 +163,7 @@ function handleMushroomCollision_canvas4(atLeftEdge, atRightEdge) {
         }
     });
 }
+
 
 
 
@@ -264,13 +271,10 @@ function handleMovement_canvas4() {
         );
     }
 
+
+
     // **Right Movement**
     if (keys['ArrowRight']) {
-        // Accelerate to the right
-        if (character.speed < MAX_SPEED) {
-            character.speed += ACCELERATION; // Increase speed
-        }
-
         let newX = character.x + character.speed;
         let newWorldX = characterWorldX + character.speed;
 
@@ -287,13 +291,9 @@ function handleMovement_canvas4() {
 
     // **Left Movement**
     if (keys['ArrowLeft']) {
-        // Accelerate to the left
-        if (character.speed > -MAX_SPEED) {
-            character.speed -= ACCELERATION; // Increase negative speed
-        }
 
-        let newX = character.x + character.speed;
-        let newWorldX = characterWorldX + character.speed;
+        let newX = character.x - character.speed;
+        let newWorldX = characterWorldX - character.speed;
 
         if (!isCollidingWithWall(newWorldX, character.y)) {
             if (atLeftEdge) {
@@ -301,14 +301,9 @@ function handleMovement_canvas4() {
             } else if (character.x > canvas.width / 2) {
                 character.x = newX;
             } else {
-                cameraOffset = Math.max(cameraOffset + character.speed, 0);
+                cameraOffset = Math.max(cameraOffset - character.speed, 0);
             }
         }
-    }
-
-    // **Stop when no movement keys are pressed**
-    if (!keys['ArrowRight'] && !keys['ArrowLeft']) {
-        character.speed = 0;  // Reset speed to 0 when no movement keys are pressed
     }
 
     // **Calculate proper ground position using world coordinates**

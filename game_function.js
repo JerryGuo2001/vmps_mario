@@ -460,10 +460,10 @@ function drawHP() {
 
 
 function nextCanvas() {
+    if(currentCanvas==4){
+        currentQuestion++
+    }
     if (currentCanvas < 4) {
-        if(currentCanvas==1){
-            currentQuestion++
-        }
         currentCanvas++;
         character.x = 10;
         character.y = canvas.height * 0.8 - character.height;
