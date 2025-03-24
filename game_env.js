@@ -266,34 +266,49 @@ function handleMovement_canvas4() {
 
     // **Right Movement**
     if (keys['ArrowRight']) {
-        let newX = character.x + moveSpeed;
-        let newWorldX = characterWorldX + moveSpeed;
-        
+        // Accelerate to the right
+        if (character.speed < MAX_SPEED) {
+            character.speed += ACCELERATION; // Increase speed
+        }
+
+        let newX = character.x + character.speed;
+        let newWorldX = characterWorldX + character.speed;
+
         if (!isCollidingWithWall(newWorldX, character.y)) {
             if (atRightEdge) {
                 character.x = Math.min(newX, 570);
             } else if (character.x < canvas.width / 2) {
                 character.x = newX;
             } else {
-                cameraOffset = Math.min(cameraOffset + moveSpeed, worldWidth);
+                cameraOffset = Math.min(cameraOffset + character.speed, worldWidth);
             }
         }
     }
 
     // **Left Movement**
     if (keys['ArrowLeft']) {
-        let newX = character.x - moveSpeed;
-        let newWorldX = characterWorldX - moveSpeed;
-        
+        // Accelerate to the left
+        if (character.speed > -MAX_SPEED) {
+            character.speed -= ACCELERATION; // Increase negative speed
+        }
+
+        let newX = character.x + character.speed;
+        let newWorldX = characterWorldX + character.speed;
+
         if (!isCollidingWithWall(newWorldX, character.y)) {
             if (atLeftEdge) {
                 character.x = Math.max(newX, 0);
             } else if (character.x > canvas.width / 2) {
                 character.x = newX;
             } else {
-                cameraOffset = Math.max(cameraOffset - moveSpeed, 0);
+                cameraOffset = Math.max(cameraOffset + character.speed, 0);
             }
         }
+    }
+
+    // **Stop when no movement keys are pressed**
+    if (!keys['ArrowRight'] && !keys['ArrowLeft']) {
+        character.speed = 0;  // Reset speed to 0 when no movement keys are pressed
     }
 
     // **Calculate proper ground position using world coordinates**
@@ -320,9 +335,8 @@ function handleMovement_canvas4() {
     }
 
     handleCollisions_canvas4();
-    handleMushroomCollision_canvas4(atLeftEdge,atRightEdge)
+    handleMushroomCollision_canvas4(atLeftEdge, atRightEdge);
 }
-
 
 
 
