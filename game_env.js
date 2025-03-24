@@ -97,30 +97,43 @@ function checkHP_canvas4() {
         }
     }
 }
+// **Load mushroom sprite sheet**
+let mushroomSheet = new Image();
+mushroomSheet.src = 'TexturePack/mushroom_pack/mushroom_variations_sheet_720.png';
 
-// Define mushrooms as objects and position them on the ground
+// **Define mushroom frame dimensions and positions**
+let mushroomWidth = 45; // Width of each mushroom in the sprite sheet
+let mushroomHeight = 45; // Height of each mushroom in the sprite sheet
+let mushroomSpacing = 25; // Space between each mushroom (horizontal)
+
 let mushrooms = [
-    { x: groundPlatforms[0].startX + 400, y: groundPlatforms[0].y - 20, color: '#FF0000', value: 1, type: OBJECT_TYPES.MUSHROOM },
-    { x: groundPlatforms[1].startX + 100, y: groundPlatforms[1].y - 20, color: '#00FF00', value: -1, type: OBJECT_TYPES.MUSHROOM },
-    { x: groundPlatforms[0].startX + 330, y: groundPlatforms[0].y - 20, color: '#FFA500', value: 3, type: OBJECT_TYPES.MUSHROOM },
-    { x: groundPlatforms[1].startX + 150, y: groundPlatforms[1].y - 20, color: '#800080', value: 'reset', type: OBJECT_TYPES.MUSHROOM },
-    { x: groundPlatforms[0].startX +50, y: groundPlatforms[0].y - 20, color: '#0000FF', value: 5, type: OBJECT_TYPES.MUSHROOM }
+    { x: groundPlatforms[0].startX + 400, y: groundPlatforms[0].y - 20, type: 0, value: 1 }, // Red Mushroom (frame 0)
+    { x: groundPlatforms[1].startX + 100, y: groundPlatforms[1].y - 20, type: 1, value: -1 }, // Green Mushroom (frame 1)
+    { x: groundPlatforms[0].startX + 330, y: groundPlatforms[0].y - 20, type: 2, value: 3 }, // Orange Mushroom (frame 2)
+    { x: groundPlatforms[1].startX + 150, y: groundPlatforms[1].y - 20, type: 3, value: 'reset' }, // Purple Mushroom (frame 3)
+    { x: groundPlatforms[0].startX + 50, y: groundPlatforms[0].y - 20, type: 4, value: 5 } // Blue Mushroom (frame 4)
 ];
 
-function handleMushroomCollision_canvas4(atLeftEdge,atRightEdge) {
+// **Handle mushroom collisions and draw**
+function handleMushroomCollision_canvas4(atLeftEdge, atRightEdge) {
     let offset = cameraOffset;
 
     mushrooms.forEach((mushroom, index) => {
-        let mushroomX = atLeftEdge ? mushroom.x : atRightEdge ?  mushroom.x- offset : mushroom.x - offset;
+        let mushroomX = atLeftEdge ? mushroom.x : atRightEdge ? mushroom.x - offset : mushroom.x - offset;
         let mushroomY = mushroom.y;
 
-        ctx.fillStyle = mushroom.color;
-        ctx.beginPath();
-        ctx.arc(mushroomX, mushroomY, 20, Math.PI, 0);
-        ctx.fill();
+        // **Set custom sprite sheet positions manually (adjust these values as needed)**
+        let spriteX = 17; // Horizontal position of the frame
+        let spriteY = 17 + mushroom.type * (mushroomWidth + mushroomSpacing); // Vertical position, you can manually adjust this if needed (the Y position on the sprite sheet)
 
-        ctx.fillStyle = "#8B4513";
-        ctx.fillRect(mushroomX - 5, mushroomY, 10, 20);
+        // **Draw mushroom from sprite sheet (using mushroom.type as the frame index)**
+        ctx.drawImage(
+            mushroomSheet,
+            spriteX, spriteY, // Frame position in the sprite sheet (horizontal and vertical)
+            mushroomWidth, mushroomHeight, // Frame dimensions
+            mushroomX - mushroomWidth / 2, mushroomY - mushroomHeight, // Position on canvas
+            mushroomWidth, mushroomHeight // Scale to the same size
+        );
 
         let characterScreenX = atLeftEdge ? character.x : atRightEdge ? character.x : canvas.width / 2;
 
@@ -144,6 +157,9 @@ function handleMushroomCollision_canvas4(atLeftEdge,atRightEdge) {
         }
     });
 }
+
+
+
 
 function handleBlockCollision_canvas4() {
     let floatingBlocks = [
@@ -228,10 +244,8 @@ function handleBlockCollision_canvas4() {
 }
 
 
-
-
 function handleMovement_canvas4() {
-    let moveSpeed = character.speed;
+    let moveSpeed = character.speed;  // Initialize move speed based on character's current speed
     let canJump = true; // Allow only one jump at a time
 
     // **Check if Character is at World Edges**
