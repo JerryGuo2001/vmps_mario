@@ -29,6 +29,7 @@ function initGame() {
     keys = {};
     currentQuestion = 1; // Initialize here
     currentCanvas = (currentQuestion > 1 && character.hp > 0) ? 4 : 1;
+
     showPrompt = false;
 
     totalMushrooms = 3;

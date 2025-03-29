@@ -1,5 +1,5 @@
 // Global Variables
-let character, gravity, keys, currentCanvas, showPrompt, currentQuestion, totalMushrooms, collectedMushrooms;
+let character, gravity, keys, currentCanvas, showPrompt, currentQuestion, totalMushrooms, collectedMushrooms,atRightEdge,atLeftEdge,change_detect_right,change_detect_left;
 let totalQuestions = 3;
 currentQuestion = 0;
 let cameraOffset = 0; // Tracks world movement in Canvas 4
@@ -88,14 +88,6 @@ function handleCollisions_canvas4() {
     if (currentCanvas === 4) handleBlockCollision_canvas4();
 }
 
-function checkHP_canvas4() {
-    if (character.hp <= 0) {
-        currentCanvas = 1;
-        if (currentQuestion > totalQuestions) {
-            completeTask();
-        }
-    }
-}
 // **Load mushroom sprite sheet**
 let mushroomSheet = new Image();
 mushroomSheet.src = 'TexturePack/mushroom_pack/mushroom_variations_sheet_720.png';
@@ -106,12 +98,128 @@ let mushroomHeight = 45; // Height of each mushroom in the sprite sheet
 let mushroomSpacing = 25; // Space between each mushroom (horizontal)
 
 let mushrooms = [
-    { x: groundPlatforms[0].startX + 400, y: groundPlatforms[0].y-150 , type: 0, value: 1,isVisible:true }, // Red Mushroom (frame 0)
-    { x: groundPlatforms[1].startX + 100, y: groundPlatforms[1].y-150, type: 1, value: -1 ,isVisible:true}, // Green Mushroom (frame 1)
-    { x: groundPlatforms[0].startX + 330, y: groundPlatforms[0].y-150 , type: 2, value: 3 ,isVisible:true}, // Orange Mushroom (frame 2)
-    { x: groundPlatforms[1].startX + 150, y: groundPlatforms[1].y-150 , type: 3, value: 'reset' ,isVisible:true}, // Purple Mushroom (frame 3)
-    { x: groundPlatforms[0].startX + 50, y: groundPlatforms[0].y -150, type: 4, value: 5 ,isVisible:true} // Blue Mushroom (frame 4)
+    { x: groundPlatforms[0].startX + 400, y: groundPlatforms[0].y-150 , type: 0, value: 1,isVisible:false }, // Red Mushroom (frame 0)
+    { x: groundPlatforms[1].startX + 100, y: groundPlatforms[1].y-150, type: 1, value: -1 ,isVisible:false}, // Green Mushroom (frame 1)
+    { x: groundPlatforms[0].startX + 330, y: groundPlatforms[0].y-150 , type: 2, value: 3 ,isVisible:false}, // Orange Mushroom (frame 2)
+    { x: groundPlatforms[1].startX + 150, y: groundPlatforms[1].y-150 , type: 3, value: 'reset' ,isVisible:false}, // Purple Mushroom (frame 3)
+    { x: groundPlatforms[0].startX + 50, y: groundPlatforms[0].y -150, type: 4, value: 5 ,isVisible:false} // Blue Mushroom (frame 4)
 ];
+
+const boxImage = new Image();
+boxImage.src = 'TexturePack/box.jpg'; // Replace with the correct path to your box image
+
+function drawMysBox() {
+    let offset = cameraOffset;
+
+    mushrooms.forEach(mushroom => { 
+
+        let boxX = mushroom.x - offset;
+        let boxY = mushroom.y;
+        // Draw the box image below the mushroom
+        ctx.drawImage(
+            boxImage, 
+            boxX - 25, // Adjust the X position of the box relative to the mushroom
+            boxY, // Position the box below the mushroom
+            50, 50 // Set the size of the box
+        );
+        if(atLeftEdge||atRightEdge){
+            // ✅ Side collision (Prevent moving through blocks)
+            if (character.y + character.height > boxY+5 &&
+                character.y < boxY + 25) {
+                if (character.x + character.width > boxX &&
+                    character.x < boxX &&
+                    keys['ArrowRight']) {
+                        console.log('hit')
+                    character.x = boxX - character.width;
+                }
+
+                if (character.x < boxX + 25 &&
+                    character.x + character.width > boxX + 25 &&
+                    keys['ArrowLeft']) {
+
+                    character.x = boxX + 25;
+                }
+            }
+
+            // ✅ Bottom collision (Hitting from below)
+            if (character.y < boxY+50&&
+                character.y + character.height > boxY+50&&
+                character.x + character.width > boxX &&
+                character.x < boxX + 25 &&
+                character.velocityY < 0) {
+                mushroom.isVisible=true
+                character.velocityY = 0;
+            }
+            if (character.velocityY >= 0 &&
+                character.y + character.height <= boxY + 5 &&
+                character.y + character.height + character.velocityY >= boxY &&
+                character.x + character.width > boxX &&
+                character.x < boxX + 25) {
+    
+                character.y = boxY - character.height;
+                character.velocityY = 0;
+                isOnBlock = true;
+            }
+        }else{
+            if (
+                character.velocityY >= 0 &&
+                character.y + character.height <= boxY + 5 &&
+                character.y + character.height + character.velocityY >= boxY &&
+                (canvas.width / 2) + character.width > boxX &&
+                (canvas.width / 2) < boxX + 25
+            ) {
+                character.y = boxY - character.height;
+                character.velocityY = 0;
+                isOnBlock = true;
+            }
+            
+            // Check for side collision (left and right)
+            // if (
+            //     (character.x + character.width > boxX && character.x < boxX + 25) &&
+            //     (character.y + character.height > boxY && character.y < boxY + 25)
+            // ) {
+            //     console.log('left side collision');
+            //     // Handle horizontal collision by stopping movement or pushing back
+            //     if (character.speed > 0) {
+            //         character.x = boxX - character.width;  // Character is on the left side of the block
+            //     } else if (character.speed < 0) {
+            //         character.x = boxX + 25;  // Character is on the right side of the block
+            //     }
+            //     character.speed = 0;  // Stop horizontal movement
+            //     isOnBlock = true;  // You can modify this depending on if side collision should impact the block state
+            // }
+            if (
+                (character.x + character.width > boxX && character.x < boxX + 25) &&
+                (character.y + character.height > boxY+20 && character.y < boxY)
+            ) {
+                // Handle horizontal collision by stopping movement or pushing back
+                if (character.speed > 0) {
+                    cameraOffset = Math.min(Math.max(cameraOffset-character.speed, 0), worldWidth);
+                }else if(character.speed < 0) {
+                    cameraOffset = Math.min(Math.max(cameraOffset+character.speed, 0), worldWidth);
+                }
+                character.speed = 0;  // Stop horizontal movement
+                isOnBlock = true;  // You can modify this depending on if side collision should impact the block state
+            }
+
+            if (
+                character.velocityY <= 0 &&
+                character.y - character.height <= boxY+25 &&
+                character.y - character.height >= boxY+20 &&
+                (canvas.width / 2) + character.width > boxX &&
+                (canvas.width / 2) < boxX + 25
+            ) {
+                console.log('hit head!');
+                mushroom.isVisible=true
+                character.y = boxY + character.height;
+                character.velocityY = 0;
+                isOnBlock = true;
+            }
+        }
+    });
+}
+
+
 
 
 
@@ -177,54 +285,6 @@ function handleBlockCollision_canvas4() {
 
     ctx.fillStyle = '#A9A9A9';
 
-    floatingBlocks.forEach(block => {
-        let blockX = block.x - cameraOffset;
-        ctx.fillRect(blockX, block.y, 100, 20);
-    });
-
-    let isOnBlock = false;
-
-    floatingBlocks.forEach(block => {
-        let blockX = block.x - cameraOffset;
-        if (
-            character.velocityY >= 0 &&
-            character.y + character.height <= block.y + 5 &&
-            character.y + character.height + character.velocityY >= block.y &&
-            (canvas.width / 2) + character.width > blockX &&
-            (canvas.width / 2) < blockX + 100
-        ) {
-            character.y = block.y - character.height;
-            character.velocityY = 0;
-            isOnBlock = true;
-        }
-    });
-
-    character.onBlock = isOnBlock;
-}
-
-
-
-
-function checkHP_canvas4() {
-    if (character.hp <= 0) {
-        currentCanvas = 1;
-        if (currentQuestion > totalQuestions) {
-            completeTask();
-        }
-    }
-}
-
-
-
-function handleBlockCollision_canvas4() {
-    let floatingBlocks = [
-        { x: worldWidth - 400, y: canvas.height * 0.3 + 80, type: OBJECT_TYPES.OBSTACLE },
-        { x: worldWidth - 350, y: canvas.height * 0.3 + 50, type: OBJECT_TYPES.OBSTACLE },
-        { x: worldWidth - 300, y: canvas.height * 0.3 + 20, type: OBJECT_TYPES.OBSTACLE }
-    ];
-
-    ctx.fillStyle = '#A9A9A9';
-
     // floatingBlocks.forEach(block => {
     //     let blockX = block.x - cameraOffset;
     //     ctx.fillRect(blockX, block.y, 100, 20);
@@ -251,14 +311,26 @@ function handleBlockCollision_canvas4() {
 }
 
 
+
+
+function checkHP_canvas4() {
+    if (character.hp <= 0) {
+        currentCanvas = 1;
+        if (currentQuestion > totalQuestions) {
+            completeTask();
+        }
+    }
+}
+
+
+
+
 function handleMovement_canvas4() {
-    let moveSpeed = character.speed;  // Initialize move speed based on character's current speed
     let canJump = true; // Allow only one jump at a time
 
     // **Check if Character is at World Edges**
-    let atLeftEdge = cameraOffset === 0;
-    let atRightEdge = cameraOffset >= worldWidth - canvas.width;
-
+    atLeftEdge = cameraOffset <= 0;
+    atRightEdge = cameraOffset >= worldWidth - canvas.width;
     // **Determine character's world position considering camera offset**
     let characterWorldX = character.x + cameraOffset;
 
@@ -270,49 +342,75 @@ function handleMovement_canvas4() {
             y + character.height > platform.y // Ensure entry is blocked if below platform
         );
     }
-
-
-
+    let newX=character.x
+    let newWorldX = characterWorldX
     // **Right Movement**
-    if (keys['ArrowRight']) {
-        let newX = character.x + character.speed;
-        let newWorldX = characterWorldX + character.speed;
-
-        if (!isCollidingWithWall(newWorldX, character.y)) {
-            if (atRightEdge) {
-                character.x = Math.min(newX, 570);
-            } else if (character.x < canvas.width / 2) {
-                character.x = newX;
-            } else {
-                cameraOffset = Math.min(cameraOffset + character.speed, worldWidth);
+    if(keys['ArrowLeft']&&keys['ArrowRight']){
+        if (character.speed > 0) {
+            character.speed -= character.deceleration;
+            if (character.speed < 0) character.speed = 0;
+        } else if (character.speed < 0) {
+            character.speed += character.deceleration;
+            if (character.speed > 0) character.speed = 0;
+        }
+        newX = character.x + character.speed;
+        newWorldX = characterWorldX + character.speed;
+    }
+    else if (keys['ArrowRight']) {
+        character.speed += character.acceleration;
+        if (character.speed > character.max_speed) {
+            character.speed = character.max_speed;  // Cap max speed
+        }
+        newX = character.x + character.speed;
+        newWorldX = characterWorldX + character.speed;
+    }else if (keys['ArrowLeft']) {
+        character.speed -= character.acceleration;
+        if (character.speed < -character.max_speed) {
+            character.speed = - character.max_speed;  // Cap max speed
+        }
+        newX = character.x + character.speed;
+        newWorldX = characterWorldX + character.speed;
+    }else if(!keys['ArrowLeft']&&!keys['ArrowRight']){
+        if (character.speed > 0) {
+            character.speed -= character.deceleration;
+            if (character.speed < 0) character.speed = 0;
+        } else if (character.speed < 0) {
+            character.speed += character.deceleration;
+            if (character.speed > 0) character.speed = 0;
+        }
+        newX = character.x + character.speed;
+        newWorldX = characterWorldX + character.speed;
+    }
+    
+    if (!isCollidingWithWall(newWorldX, character.y)) {
+        if(change_detect_right==false){
+            if (change_detect_right!=atRightEdge){
+                character.x=(canvas.width / 2)+20
             }
         }
-    }
-
-    // **Left Movement**
-    if (keys['ArrowLeft']) {
-
-        let newX = character.x - character.speed;
-        let newWorldX = characterWorldX - character.speed;
-
-        if (!isCollidingWithWall(newWorldX, character.y)) {
-            if (atLeftEdge) {
-                character.x = Math.max(newX, 0);
-            } else if (character.x > canvas.width / 2) {
-                character.x = newX;
-            } else {
-                cameraOffset = Math.max(cameraOffset - character.speed, 0);
+        if(change_detect_left==false){
+            if(change_detect_left!=atLeftEdge){
+                character.x=(canvas.width / 2)-20
             }
         }
-    }
 
+        if (atRightEdge&&character.x>(canvas.width / 2)) {
+            character.x = Math.min(newX, 570);
+        } else if (atLeftEdge&&character.x<(canvas.width / 2)) {
+            character.x = Math.max(newX, 0);
+        }else if(character.x>(canvas.width / 2)-10&&character.x<(canvas.width / 2)+10){
+            cameraOffset = Math.min(Math.max(cameraOffset + character.speed, 0), worldWidth);
+        }
+        change_detect_right=atRightEdge,
+        change_detect_left=atLeftEdge
+    }
     // **Calculate proper ground position using world coordinates**
     let characterGroundY = getGroundY(characterWorldX + character.width / 2);
     let onGround = character.y + character.height >= characterGroundY;
 
     // **Jumping Logic**
     if (keys['ArrowUp'] && canJump && onGround) {
-        character.velocityY = -12; // Jump force
+        character.velocityY = -13; // Jump force
         canJump = false; // Prevent multiple jumps
     }
 
@@ -331,6 +429,7 @@ function handleMovement_canvas4() {
 
     handleCollisions_canvas4();
     handleMushroomCollision_canvas4(atLeftEdge, atRightEdge);
+    drawMysBox()
 }
 
 

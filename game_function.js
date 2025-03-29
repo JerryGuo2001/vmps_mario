@@ -186,10 +186,13 @@ function createCharacter() {
         height: 40,
         color: 'red',
         velocityY: 0,
-        speed: 7,
+        speed: 0,
         onBlock: false,
-        hp: 0
-    };
+        hp: 1,
+        acceleration : 0.2,
+        deceleration: 0.2,
+        max_speed :6
+    }
 }
 
 
@@ -305,13 +308,39 @@ function drawBackground() {
 
 // Handle Character Movement
 function handleMovement() {
-    if (keys['ArrowLeft']) character.x -= character.speed;
-    if (keys['ArrowRight']) character.x += character.speed;
-
+    if (keys['ArrowLeft']&&keys['ArrowRight']){
+        if (character.speed > 0) {
+            character.speed -= character.deceleration;
+            if (character.speed < 0) character.speed = 0;
+        } else if (character.speed < 0) {
+            character.speed += character.deceleration;
+            if (character.speed > 0) character.speed = 0;
+        }
+    }else if (keys['ArrowLeft']){
+        character.speed -= character.acceleration;
+        if (character.speed < -character.max_speed) {
+            character.speed = - character.max_speed;  // Cap max speed
+        }
+    }else if (keys['ArrowRight']) {
+        character.speed += character.acceleration;
+        if (character.speed > character.max_speed) {
+            character.speed = character.max_speed;  // Cap max speed
+        }
+    }
+    else if (!keys['ArrowLeft'] && !keys['ArrowRight']) {
+        if (character.speed > 0) {
+            character.speed -= character.deceleration;
+            if (character.speed < 0) character.speed = 0;
+        } else if (character.speed < 0) {
+            character.speed += character.deceleration;
+            if (character.speed > 0) character.speed = 0;
+        }
+    }
     if (keys['ArrowUp'] && (character.y + character.height >= canvas.height * 0.8 || character.onBlock)) {
-        character.velocityY = -12;
+        character.velocityY = -13;
     }
 
+    character.x += character.speed;
     character.velocityY += gravity;
     character.y += character.velocityY;
 
