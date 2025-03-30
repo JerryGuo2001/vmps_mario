@@ -98,19 +98,20 @@ let mushroomHeight = 45; // Height of each mushroom in the sprite sheet
 let mushroomSpacing = 25; // Space between each mushroom (horizontal)
 
 let mushrooms = [
-    { x: groundPlatforms[0].startX + 400, y: groundPlatforms[0].y-150 , type: 0, value: 1,isVisible:false }, // Red Mushroom (frame 0)
-    { x: groundPlatforms[1].startX + 100, y: groundPlatforms[1].y-150, type: 1, value: -1 ,isVisible:false}, // Green Mushroom (frame 1)
-    { x: groundPlatforms[0].startX + 330, y: groundPlatforms[0].y-150 , type: 2, value: 3 ,isVisible:false}, // Orange Mushroom (frame 2)
-    { x: groundPlatforms[1].startX + 150, y: groundPlatforms[1].y-150 , type: 3, value: 'reset' ,isVisible:false}, // Purple Mushroom (frame 3)
-    { x: groundPlatforms[0].startX + 50, y: groundPlatforms[0].y -150, type: 4, value: 5 ,isVisible:false} // Blue Mushroom (frame 4)
+    { x: groundPlatforms[0].startX + 400, y: groundPlatforms[0].y - 150, type: 0, value: 1, isVisible: false, growthFactor: 0, growthSpeed: 0.05, growthComplete: false }, // Red Mushroom (frame 0)
+    { x: groundPlatforms[1].startX + 100, y: groundPlatforms[1].y - 150, type: 1, value: -1, isVisible: false, growthFactor: 0, growthSpeed: 0.05, growthComplete: false }, // Green Mushroom (frame 1)
+    { x: groundPlatforms[0].startX + 330, y: groundPlatforms[0].y - 150, type: 2, value: 3, isVisible: false, growthFactor: 0, growthSpeed: 0.05, growthComplete: false }, // Orange Mushroom (frame 2)
+    { x: groundPlatforms[1].startX + 150, y: groundPlatforms[1].y - 150, type: 3, value: 'reset', isVisible: false, growthFactor: 0, growthSpeed: 0.05, growthComplete: false }, // Purple Mushroom (frame 3)
+    { x: groundPlatforms[0].startX + 50, y: groundPlatforms[0].y - 150, type: 4, value: 5, isVisible: false, growthFactor: 0, growthSpeed: 0.05, growthComplete: false } // Blue Mushroom (frame 4)
 ];
+
 
 const boxImage = new Image();
 boxImage.src = 'TexturePack/box.jpg'; // Replace with the correct path to your box image
 
 function drawMysBox() {
+    let canJump
     let offset = cameraOffset;
-
     mushrooms.forEach(mushroom => { 
 
         let boxX = mushroom.x - offset;
@@ -126,15 +127,14 @@ function drawMysBox() {
             // ✅ Side collision (Prevent moving through blocks)
             if (character.y + character.height > boxY+5 &&
                 character.y < boxY + 25) {
-                if (character.x + character.width > boxX &&
+                if (character.x + character.width > boxX-25 &&
                     character.x < boxX &&
                     keys['ArrowRight']) {
-                        console.log('hit')
-                    character.x = boxX - character.width;
+                    character.x = boxX - character.width-25;
                 }
 
                 if (character.x < boxX + 25 &&
-                    character.x + character.width > boxX + 25 &&
+                    character.x + character.width > boxX &&
                     keys['ArrowLeft']) {
 
                     character.x = boxX + 25;
@@ -144,7 +144,7 @@ function drawMysBox() {
             // ✅ Bottom collision (Hitting from below)
             if (character.y < boxY+50&&
                 character.y + character.height > boxY+50&&
-                character.x + character.width > boxX &&
+                character.x + character.width > boxX-25 &&
                 character.x < boxX + 25 &&
                 character.velocityY < 0) {
                 mushroom.isVisible=true
@@ -153,12 +153,13 @@ function drawMysBox() {
             if (character.velocityY >= 0 &&
                 character.y + character.height <= boxY + 5 &&
                 character.y + character.height + character.velocityY >= boxY &&
-                character.x + character.width > boxX &&
+                character.x + character.width > boxX-25 &&
                 character.x < boxX + 25) {
     
                 character.y = boxY - character.height;
                 character.velocityY = 0;
                 isOnBlock = true;
+                canJump = true;
             }
         }else{
             if (
@@ -171,6 +172,7 @@ function drawMysBox() {
                 character.y = boxY - character.height;
                 character.velocityY = 0;
                 isOnBlock = true;
+                canJump = true;
             }
             
             // Check for side collision (left and right)
@@ -189,7 +191,7 @@ function drawMysBox() {
             //     isOnBlock = true;  // You can modify this depending on if side collision should impact the block state
             // }
             if (
-                (character.x + character.width > boxX && character.x < boxX + 25) &&
+                (character.x + character.width > boxX-25 && character.x < boxX + 25) &&
                 (character.y + character.height > boxY+20 && character.y < boxY)
             ) {
                 // Handle horizontal collision by stopping movement or pushing back
@@ -206,7 +208,7 @@ function drawMysBox() {
                 character.velocityY <= 0 &&
                 character.y - character.height <= boxY+25 &&
                 character.y - character.height >= boxY+20 &&
-                (canvas.width / 2) + character.width > boxX &&
+                (canvas.width / 2) + character.width > boxX -25 &&
                 (canvas.width / 2) < boxX + 25
             ) {
                 console.log('hit head!');
@@ -216,14 +218,12 @@ function drawMysBox() {
                 isOnBlock = true;
             }
         }
-    });
+    });return canJump
 }
 
 
 
 
-
-// **Handle mushroom collisions and draw**
 function handleMushroomCollision_canvas4(atLeftEdge, atRightEdge) {
     let offset = cameraOffset;
 
@@ -233,24 +233,39 @@ function handleMushroomCollision_canvas4(atLeftEdge, atRightEdge) {
             return;
         }
 
+        // Animate growth only once
+        if (!mushroom.growthComplete) {
+            // Increase the growth factor over time (animation)
+            mushroom.growthFactor = Math.min(mushroom.growthFactor + mushroom.growthSpeed, 1);  // Ensure it stops growing at 1 (full size)
+
+            if (mushroom.growthFactor === 1) {
+                mushroom.growthComplete = true;  // Mark the growth as complete
+            }
+        }
+
         let mushroomX = atLeftEdge ? mushroom.x : atRightEdge ? mushroom.x - offset : mushroom.x - offset;
         let mushroomY = mushroom.y;
 
-        // **Set custom sprite sheet positions manually (adjust these values as needed)**
-        let spriteX = 17; // Horizontal position of the frame
-        let spriteY = 17 + mushroom.type * (mushroomWidth + mushroomSpacing); // Vertical position, adjust if needed
+        // **Set mushroom width and height based on growth factor**
+        let mushroomWidth = 30 + 20 * mushroom.growthFactor;  // Grow width from 30px to 50px
+        let mushroomHeight = 30 + 20 * mushroom.growthFactor;  // Grow height from 30px to 50px
 
-        // **Draw mushroom from sprite sheet (using mushroom.type as the frame index)**
+        // Set fixed sprite sheet positions (no change in sprite position)
+        let spriteX = 17;  // Horizontal position of the frame in the sprite sheet (fixed)
+        let spriteY = 17 + mushroom.type * (45 + mushroomSpacing);  // Vertical position in the sprite sheet (fixed)
+
+        // **Draw mushroom from sprite sheet (fixed sprite position, but dynamic size)**
         ctx.drawImage(
             mushroomSheet,
-            spriteX, spriteY, // Frame position in the sprite sheet (horizontal and vertical)
-            mushroomWidth, mushroomHeight, // Frame dimensions
-            mushroomX - mushroomWidth / 2, mushroomY - mushroomHeight, // Position on canvas
-            mushroomWidth, mushroomHeight // Scale to the same size
+            spriteX, spriteY,  // Fixed position in the sprite sheet
+            mushroomWidth, mushroomHeight,  // Draw with dynamic size
+            mushroomX - mushroomWidth / 2, mushroomY - mushroomHeight,  // Position on canvas
+            mushroomWidth, mushroomHeight  // Scale to the growing size
         );
 
         let characterScreenX = atLeftEdge ? character.x : atRightEdge ? character.x : canvas.width / 2;
 
+        // Interaction logic (e.g., pressing 'E' to eat the mushroom)
         if (
             Math.abs(characterScreenX - mushroomX) <= 30 &&
             Math.abs(character.y + character.height - mushroomY) <= 30
@@ -266,7 +281,7 @@ function handleMushroomCollision_canvas4(atLeftEdge, atRightEdge) {
                 } else {
                     character.hp += mushroom.value;
                 }
-                mushrooms.splice(index, 1);
+                mushrooms.splice(index, 1);  // Remove the mushroom after eating it
             }
         }
     });
@@ -326,8 +341,7 @@ function checkHP_canvas4() {
 
 
 function handleMovement_canvas4() {
-    let canJump = true; // Allow only one jump at a time
-
+    let canJump
     // **Check if Character is at World Edges**
     atLeftEdge = cameraOffset <= 0;
     atRightEdge = cameraOffset >= worldWidth - canvas.width;
@@ -407,9 +421,12 @@ function handleMovement_canvas4() {
     // **Calculate proper ground position using world coordinates**
     let characterGroundY = getGroundY(characterWorldX + character.width / 2);
     let onGround = character.y + character.height >= characterGroundY;
-
     // **Jumping Logic**
-    if (keys['ArrowUp'] && canJump && onGround) {
+    canJump=drawMysBox()
+    if(onGround){
+        canJump=true
+    }
+    if (keys['ArrowUp'] && canJump) {
         character.velocityY = -13; // Jump force
         canJump = false; // Prevent multiple jumps
     }
@@ -429,7 +446,6 @@ function handleMovement_canvas4() {
 
     handleCollisions_canvas4();
     handleMushroomCollision_canvas4(atLeftEdge, atRightEdge);
-    drawMysBox()
 }
 
 

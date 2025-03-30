@@ -29,6 +29,7 @@ function initGame() {
     keys = {};
     currentQuestion = 1; // Initialize here
     currentCanvas = (currentQuestion > 1 && character.hp > 0) ? 4 : 1;
+    currentCanvas = 4
 
     showPrompt = false;
 
@@ -46,42 +47,63 @@ function initGame() {
 }
 
 var init_position=true
+const targetFPS = 60; // Target frame rate (60 FPS)
+const targetTimeStep = 1 / targetFPS; // Time step per frame (in seconds)
+let lastTime = 0; // To store the time of the last frame
+let accumulatedTime = 0; // Time accumulated since the last update
 
-function updateGame() {
-    clearCanvas();
+function updateGame(currentTime) {
+    // Calculate time elapsed since the last frame
+    let deltaTime = (currentTime - lastTime) / 1000; // Convert from ms to seconds
+    lastTime = currentTime;
 
-    if (currentCanvas !== 4) {
-        if (init_position==true){
-            character.x=0
+    // Accumulate the time
+    accumulatedTime += deltaTime;
+
+    // Run the game logic until we've accumulated enough time for one frame
+    while (accumulatedTime >= targetTimeStep) {
+        clearCanvas();
+
+        if (currentCanvas !== 4) {
+            if (init_position == true) {
+                character.x = 0;
+            }
+            drawBackground();
+            handleMovement();
+            drawObstacles();
+            drawCharacter();
+            drawHP();
+            drawDoor();
+            init_position = false;
+        } else {
+            if (init_position == false) {
+                cameraOffset = 0;
+            }
+            drawBackground_canvas4();
+            handleMovement_canvas4();
+            handleBlockCollision_canvas4();
+            drawCharacter_canvas4();
+            drawHP_canvas4();
+            drawHungerCountdown();
+            hungry();
+            checkHP_canvas4();
+            init_position = true;
+            if (character.y > 450) character.hp = 0;
         }
-        drawBackground();
-        handleMovement();
-        drawObstacles();
-        drawCharacter();
-        drawHP();
-        drawDoor();
-        init_position=false
-    } else {
-        if (init_position==false){
-            cameraOffset=0
-        }
-        drawBackground_canvas4();
-        handleMovement_canvas4();
-        handleBlockCollision_canvas4();
-        drawCharacter_canvas4();
-        drawHP_canvas4();
-        drawHungerCountdown();
-        hungry();
-        checkHP_canvas4 ()
-        init_position=true
-        if (character.y > 450) character.hp=0
+
+        accumulatedTime -= targetTimeStep; // Decrease accumulated time by the time step
     }
 
+    // Request the next frame
     requestAnimationFrame(updateGame);
 
+    // Complete the task when the question count exceeds total questions
     if (currentQuestion > totalQuestions) {
         completeTask();
     }
 }
+
+// Start the game loop
+requestAnimationFrame(updateGame);
 
 
