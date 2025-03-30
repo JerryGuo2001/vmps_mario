@@ -1,6 +1,6 @@
 // Global Variables
 let character, gravity, keys, currentCanvas, showPrompt, currentQuestion, totalMushrooms, collectedMushrooms,atRightEdge,atLeftEdge,change_detect_right,change_detect_left;
-let totalQuestions = 2;
+let totalQuestions = 1;
 currentQuestion = 0;
 let cameraOffset = 0; // Tracks world movement in Canvas 4
 let worldWidth = 2000; // 🔹 Increase this to extend the map size
@@ -99,14 +99,26 @@ let door = {
 // Add a flag to prevent multiple interactions with the door
 let doorInteractionCompleted = false;
 
-// **Draw the door in the game world**
+// **Draw the door in the game world with a yellow handle**
 function drawDoor_canvas4() {
     // Draw the door in the center of the screen
     if (door.isVisible) {
         ctx.fillStyle = '#8B4513';  // Brown color for the door
-        ctx.fillRect(door.x - cameraOffset, door.y, door.width, door.height);  // Draw door at the center
+        ctx.fillRect(door.x - cameraOffset, door.y, door.width, door.height);  // Draw the door itself
+
+        // Draw the yellow handle
+        const handleWidth = 5;  // Handle width
+        const handleHeight = 5; // Handle height (circle diameter)
+
+        let handleX = door.x + door.width - 8;
+        let handleY = door.y + door.height / 2;
+        ctx.fillStyle = '#FFD700';  // Yellow color for the handle
+        ctx.beginPath();
+        ctx.arc(handleX + handleWidth / 2-cameraOffset, handleY + handleHeight / 2, handleWidth / 2, 0, Math.PI * 2); // Draw a circle for the handle
+        ctx.fill();
     }
 }
+
 
 // **Handle door interaction logic:**
 function handleDoorInteraction_canvas4() {
@@ -121,12 +133,12 @@ function handleDoorInteraction_canvas4() {
         if (character.hp < 5) {
             ctx.fillStyle = '#000';
             ctx.font = '16px Arial';
-            ctx.fillText('Collect 5 HP to proceed', door.x - cameraOffset, door.y - 20);
+            ctx.fillText('Collect 5 HP to proceed', door.x - cameraOffset-50, door.y - 20);
         } else {
             // If HP is greater than 5, let the player proceed
             ctx.fillStyle = '#000';
             ctx.font = '16px Arial';
-            ctx.fillText('Press E to proceed', door.x - cameraOffset, door.y - 20);
+            ctx.fillText('Press E to proceed', door.x - cameraOffset-50, door.y - 20);
 
             // Check for player pressing 'E' to interact with the door
             if (keys['e'] && !doorInteractionCompleted) {
@@ -157,14 +169,21 @@ let mushroomWidth = 45; // Width of each mushroom in the sprite sheet
 let mushroomHeight = 45; // Height of each mushroom in the sprite sheet
 let mushroomSpacing = 25; // Space between each mushroom (horizontal)
 
-let mushrooms = [
-    { x: groundPlatforms[0].startX + 400, y: groundPlatforms[0].y - 150, type: 0, value: 1, isVisible: false, growthFactor: 0, growthSpeed: 0.05, growthComplete: false }, // Red Mushroom (frame 0)
-    { x: groundPlatforms[1].startX + 100, y: groundPlatforms[1].y - 150, type: 1, value: -1, isVisible: false, growthFactor: 0, growthSpeed: 0.05, growthComplete: false }, // Green Mushroom (frame 1)
-    { x: groundPlatforms[0].startX + 330, y: groundPlatforms[0].y - 150, type: 2, value: 3, isVisible: false, growthFactor: 0, growthSpeed: 0.05, growthComplete: false }, // Orange Mushroom (frame 2)
-    { x: groundPlatforms[1].startX + 150, y: groundPlatforms[1].y - 150, type: 3, value: 'reset', isVisible: false, growthFactor: 0, growthSpeed: 0.05, growthComplete: false }, // Purple Mushroom (frame 3)
-    { x: groundPlatforms[0].startX + 50, y: groundPlatforms[0].y - 150, type: 4, value: 5, isVisible: false, growthFactor: 0, growthSpeed: 0.05, growthComplete: false } // Blue Mushroom (frame 4)
-];
+let mushrooms = generateMushroom(1)
 
+function generateMushroom(number){
+    let mushrooms
+    if (number==1){
+        mushrooms = [
+            { x: groundPlatforms[0].startX + 400, y: groundPlatforms[0].y - 150, type: 0, value: 1, isVisible: false, growthFactor: 0, growthSpeed: 0.05, growthComplete: false }, // Red Mushroom (frame 0)
+            { x: groundPlatforms[1].startX + 100, y: groundPlatforms[1].y - 150, type: 1, value: -1, isVisible: false, growthFactor: 0, growthSpeed: 0.05, growthComplete: false }, // Green Mushroom (frame 1)
+            { x: groundPlatforms[0].startX + 330, y: groundPlatforms[0].y - 150, type: 2, value: 3, isVisible: false, growthFactor: 0, growthSpeed: 0.05, growthComplete: false }, // Orange Mushroom (frame 2)
+            { x: groundPlatforms[1].startX + 150, y: groundPlatforms[1].y - 150, type: 3, value: 'reset', isVisible: false, growthFactor: 0, growthSpeed: 0.05, growthComplete: false }, // Purple Mushroom (frame 3)
+            { x: groundPlatforms[0].startX + 50, y: groundPlatforms[0].y - 150, type: 4, value: 5, isVisible: false, growthFactor: 0, growthSpeed: 0.05, growthComplete: false } // Blue Mushroom (frame 4)
+        ];
+    }
+    return mushrooms
+}
 
 const boxImage = new Image();
 boxImage.src = 'TexturePack/box.jpg'; // Replace with the correct path to your box image
@@ -391,9 +410,7 @@ function handleBlockCollision_canvas4() {
 function checkHP_canvas4() {
     if (character.hp <= 0) {
         currentCanvas = 1;
-        if (currentQuestion > totalQuestions) {
-            completeTask();
-        }
+        mushrooms = generateMushroom(1)
     }
 }
 

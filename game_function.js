@@ -225,7 +225,7 @@ let hungerCountdown = 10;
 function hungry(){
     if (currentCanvas === 4 && character.hp > 0) {
         if (!hungerInterval) {
-            hungerCountdown = 50;
+            hungerCountdown = 10;
             hungerInterval = setInterval(() => {
                 if (currentCanvas === 4) {
                     if (hungerCountdown > 0) {
@@ -489,9 +489,6 @@ function drawHP() {
 
 
 function nextCanvas() {
-    if(currentCanvas==4){
-        currentQuestion++
-    }
     if (currentCanvas < 4) {
         currentCanvas++;
         character.x = 10;
