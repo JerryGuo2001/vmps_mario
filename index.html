@@ -17,7 +17,8 @@
 
         <div id="identificationphase" class="phase" style="display:none;">
           <h1>Identification Phase</h1>
-          <button onclick="startExplore()">Next Task</button>
+          <canvas id="idenCanvas" width="500" height="500"></canvas>
+          <button id='next_iden' onclick="startExplore()">Next Task</button>
         </div>
 
         <div id="explorephase" class="phase" style="display:none;">
@@ -44,7 +45,7 @@
         </div>
     </div>
 
-
+    <script src="static/js/mushroom.js"></script>
     <script src="static/js/idenphase.js"></script>
     <script src="static/js/memory.js"></script>
     <script src="static/js/game_env.js"></script>

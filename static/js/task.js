@@ -8,10 +8,13 @@ window.onload = () => {
 function startiden() {
     document.getElementById('welcome').style.display = 'none';
     document.getElementById('identificationphase').style.display = 'block';
+    document.getElementById('next_iden').style.display = 'none';
+    startIdenPhase();
 }
 
 
 function startExplore() {
+    document.getElementById('next_iden').style.display = 'none';
     document.getElementById('identificationphase').style.display = 'none';
     document.getElementById('explorephase').style.display = 'block';
     document.getElementById('next').style.display = 'none';

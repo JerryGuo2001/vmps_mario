@@ -160,15 +160,6 @@ function resetDoorInteraction() {
 
 
 
-// **Load mushroom sprite sheet**
-let mushroomSheet = new Image();
-mushroomSheet.src = 'TexturePack/mushroom_pack/mushroom_variations_sheet_720.png';
-
-// **Define mushroom frame dimensions and positions**
-let mushroomWidth = 45; // Width of each mushroom in the sprite sheet
-let mushroomHeight = 45; // Height of each mushroom in the sprite sheet
-let mushroomSpacing = 25; // Space between each mushroom (horizontal)
-
 let mushrooms = generateMushroom(1)
 
 function generateMushroom(number){
