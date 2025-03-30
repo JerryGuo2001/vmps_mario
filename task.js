@@ -29,7 +29,6 @@ function initGame() {
     keys = {};
     currentQuestion = 1; // Initialize here
     currentCanvas = (currentQuestion > 1 && character.hp > 0) ? 4 : 1;
-    currentCanvas = 4
 
     showPrompt = false;
 
@@ -52,6 +51,8 @@ const targetTimeStep = 1 / targetFPS; // Time step per frame (in seconds)
 let lastTime = 0; // To store the time of the last frame
 let accumulatedTime = 0; // Time accumulated since the last update
 
+
+
 function updateGame(currentTime) {
     // Calculate time elapsed since the last frame
     let deltaTime = (currentTime - lastTime) / 1000; // Convert from ms to seconds
@@ -73,13 +74,15 @@ function updateGame(currentTime) {
             drawObstacles();
             drawCharacter();
             drawHP();
-            drawDoor();
+            drawDoor();  // Draw the door
             init_position = false;
         } else {
             if (init_position == false) {
                 cameraOffset = 0;
             }
             drawBackground_canvas4();
+            drawDoor_canvas4();  // Draw the door in canvas 4
+            handleDoorInteraction_canvas4();  // Handle the door interaction logic
             handleMovement_canvas4();
             handleBlockCollision_canvas4();
             drawCharacter_canvas4();
@@ -105,5 +108,4 @@ function updateGame(currentTime) {
 
 // Start the game loop
 requestAnimationFrame(updateGame);
-
 

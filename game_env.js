@@ -1,6 +1,6 @@
 // Global Variables
 let character, gravity, keys, currentCanvas, showPrompt, currentQuestion, totalMushrooms, collectedMushrooms,atRightEdge,atLeftEdge,change_detect_right,change_detect_left;
-let totalQuestions = 3;
+let totalQuestions = 2;
 currentQuestion = 0;
 let cameraOffset = 0; // Tracks world movement in Canvas 4
 let worldWidth = 2000; // 🔹 Increase this to extend the map size
@@ -87,6 +87,66 @@ function handleCollisions_canvas4() {
 
     if (currentCanvas === 4) handleBlockCollision_canvas4();
 }
+// Add a door object to the game world
+let door = {
+    x: worldWidth *0.2,  // Center the door horizontally (width: 100px)
+    y: canvas.height * 0.75,  // Position door slightly above the ground
+    width: 30,              // Door width
+    height: 50,             // Door height
+    isVisible: true          // Make the door visible
+};
+
+// Add a flag to prevent multiple interactions with the door
+let doorInteractionCompleted = false;
+
+// **Draw the door in the game world**
+function drawDoor_canvas4() {
+    // Draw the door in the center of the screen
+    if (door.isVisible) {
+        ctx.fillStyle = '#8B4513';  // Brown color for the door
+        ctx.fillRect(door.x - cameraOffset, door.y, door.width, door.height);  // Draw door at the center
+    }
+}
+
+// **Handle door interaction logic:**
+function handleDoorInteraction_canvas4() {
+    // Check if the character is near the door and the door is visible
+    if (
+        character.x + character.width > door.x - cameraOffset &&
+        character.x < door.x + door.width - cameraOffset &&
+        character.y + character.height > door.y &&
+        character.y < door.y + door.height
+    ) {
+        // Display the message above the door if HP is less than 5
+        if (character.hp < 5) {
+            ctx.fillStyle = '#000';
+            ctx.font = '16px Arial';
+            ctx.fillText('Collect 5 HP to proceed', door.x - cameraOffset, door.y - 20);
+        } else {
+            // If HP is greater than 5, let the player proceed
+            ctx.fillStyle = '#000';
+            ctx.font = '16px Arial';
+            ctx.fillText('Press E to proceed', door.x - cameraOffset, door.y - 20);
+
+            // Check for player pressing 'E' to interact with the door
+            if (keys['e'] && !doorInteractionCompleted) {
+                currentQuestion += 1;  // Increment the question number when the player presses 'E'
+                console.log("Proceeding to next question: " + currentQuestion);
+
+                // Mark the door interaction as completed
+                doorInteractionCompleted = true;  // Prevent further interactions until reset
+            }
+        }
+    }
+}
+
+// **Reset the door interaction flag when necessary (e.g., at the beginning of a new level or after the question is updated)**
+// You can call this function at the appropriate point in your game logic when you want to reset the interaction flag
+function resetDoorInteraction() {
+    doorInteractionCompleted = false;
+}
+
+
 
 // **Load mushroom sprite sheet**
 let mushroomSheet = new Image();
