@@ -12,15 +12,31 @@
         <div id="welcome" class="phase">
             <h1>Welcome to the Task</h1>
             <p>Click the button to start the task.</p>
-            <button onclick="startTask()">Start Task</button>
+            <button onclick="startiden()">Start Task</button>
         </div>
 
-        <div id="task" class="phase" style="display:none;">
+        <div id="identificationphase" class="phase" style="display:none;">
+          <h1>Identification Phase</h1>
+          <button onclick="startExplore()">Next Task</button>
+        </div>
+
+        <div id="explorephase" class="phase" style="display:none;">
             <h1>Task Phase</h1>
             <canvas id="gameCanvas" width="500" height="500"></canvas>
             <p>Use arrow keys to move the character.</p>
-            <button id='next' onclick="completeTask()">Complete Task</button>
+            <button id='next' onclick="completeExplore()">Next Task</button>
         </div>
+
+        <div id="identificationphasetwo" class="phase" style="display:none;">
+          <h1>Identification Phase Two</h1>
+          <button onclick="startmem()">Next Task</button>
+        </div>
+
+        <div id="memoryphase" class="phase" style="display:none;">
+          <h1>Memory Phase</h1>
+          <button onclick="completemem()">Complete Task</button>
+        </div>
+
 
         <div id="thankyou" class="phase" style="display:none;">
             <h1>Thank You!</h1>
@@ -33,25 +49,3 @@
     <script src="task.js"></script>
 </body>
 </html>
-<script>
-    let wakeLock = null;
-  
-    async function enableWakeLock() {
-      try {
-        wakeLock = await navigator.wakeLock.request('screen');
-        wakeLock.addEventListener('release', () => {
-          console.log('Wake Lock was released');
-        });
-      } catch (err) {
-        console.error(`${err.name}, ${err.message}`);
-      }
-    }
-  
-    document.addEventListener("visibilitychange", async () => {
-      if (wakeLock !== null && document.visibilityState === "visible") {
-        enableWakeLock();
-      }
-    });
-  
-    enableWakeLock();
-  </script>

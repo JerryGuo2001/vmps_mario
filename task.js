@@ -5,16 +5,44 @@ window.onload = () => {
 };
 
 // Start Task
-function startTask() {
+function startiden() {
     document.getElementById('welcome').style.display = 'none';
-    document.getElementById('task').style.display = 'block';
+    document.getElementById('identificationphase').style.display = 'block';
+}
+
+
+function startExplore() {
+    document.getElementById('identificationphase').style.display = 'none';
+    document.getElementById('explorephase').style.display = 'block';
     document.getElementById('next').style.display = 'none';
     initGame();
 }
 
 // Complete Task
-function completeTask() {
-    document.getElementById('task').style.display = 'none';
+function completeExplore() {
+    console.log("Complete Explore triggered");
+
+    // Stop the game loop
+    gameRunning = false;  // Set gameRunning flag to false to stop the loop
+
+    // Hide all phases
+    const phases = document.querySelectorAll('.phase');
+    phases.forEach(phase => {
+        phase.style.display = 'none';
+    });
+
+    // Show the identificationphasetwo phase
+    document.getElementById('identificationphasetwo').style.display = 'block';
+}
+
+
+function startmem() {
+    document.getElementById('identificationphasetwo').style.display = 'none';
+    document.getElementById('memoryphase').style.display = 'block';
+}
+
+function completemem() {
+    document.getElementById('memoryphase').style.display = 'none';
     document.getElementById('thankyou').style.display = 'block';
 }
 
@@ -52,8 +80,12 @@ let lastTime = 0; // To store the time of the last frame
 let accumulatedTime = 0; // Time accumulated since the last update
 
 
+let gameRunning = true; // Flag to control whether the game should continue running
 
 function updateGame(currentTime) {
+    // If game is not running, stop the update loop
+    if (!gameRunning) return;
+
     // Calculate time elapsed since the last frame
     let deltaTime = (currentTime - lastTime) / 1000; // Convert from ms to seconds
     lastTime = currentTime;
@@ -97,15 +129,13 @@ function updateGame(currentTime) {
         accumulatedTime -= targetTimeStep; // Decrease accumulated time by the time step
     }
 
-    // Request the next frame
-    requestAnimationFrame(updateGame);
+    // Request the next frame if the game is still running
+    if (gameRunning) {
+        requestAnimationFrame(updateGame);
+    }
 
     // Complete the task when the question count exceeds total questions
     if (currentQuestion > totalQuestions) {
-        completeTask();
+        completeExplore();
     }
 }
-
-// Start the game loop
-requestAnimationFrame(updateGame);
-
