@@ -24,9 +24,9 @@ function displayMushroom() {
 
     // Get the current mushroom from the list
     let mushroom = mushroom_ident_list[currentMushroomIndex];
-    let mushroomX = mushroom.position.x * (mushroomWidth + mushroomSpacing); // X position in sprite sheet
-    let mushroomY = mushroom.position.y * (mushroomHeight + mushroomSpacing); // Y position in sprite sheet
-    
+    let mushroomX = mushroom.position.x * (mushroomWidth + mushroomSpacing)+17; // X position in sprite sheet
+    let mushroomY = mushroom.position.y * (mushroomHeight + mushroomSpacing)+17; // Y position in sprite sheet
+
     // Draw the mushroom on the canvas
     idenCtx.drawImage(mushroomSheet, mushroomX, mushroomY, mushroomWidth, mushroomHeight, centerX, centerY, mushroomWidth, mushroomHeight);
 
@@ -35,6 +35,8 @@ function displayMushroom() {
     idenCtx.fillText("Guess the mushroom name: (Press 'a' to 'z')", 20, 30);
     idenCtx.fillText("Mushroom " + (currentMushroomIndex + 1), 20, 60); // Display mushroom number
 }
+
+
 
 // Handle keyboard input
 function iden_handleKeyDown(event) {
