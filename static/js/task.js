@@ -116,8 +116,7 @@ function updateGame(currentTime) {
                 cameraOffset = 0;
             }
             drawBackground_canvas4();
-            drawDoor_canvas4();  // Draw the door in canvas 4
-            handleDoorInteraction_canvas4();  // Handle the door interaction logic
+            handleTextInteraction_canvas4();
             handleMovement_canvas4();
             handleBlockCollision_canvas4();
             drawCharacter_canvas4();

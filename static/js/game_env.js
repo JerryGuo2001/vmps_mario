@@ -87,76 +87,38 @@ function handleCollisions_canvas4() {
 
     if (currentCanvas === 4) handleBlockCollision_canvas4();
 }
-// Add a door object to the game world
-let door = {
-    x: worldWidth *0.2,  // Center the door horizontally (width: 100px)
-    y: canvas.height * 0.75,  // Position door slightly above the ground
-    width: 30,              // Door width
-    height: 50,             // Door height
-    isVisible: true          // Make the door visible
-};
 
-// Add a flag to prevent multiple interactions with the door
-let doorInteractionCompleted = false;
+// **Handle text interaction logic:**
+function handleTextInteraction_canvas4() {
+    // Check if the character's HP is less than 5
+    if (character.hp < 5) {
+        // Display the message to collect half of stamina to proceed
+        ctx.fillStyle = '#000';
+        ctx.font = '16px Arial';
+        const text = 'Collect Half of Stamina to Proceed';
+        const textWidth = ctx.measureText(text).width;
+        const xPos = (canvas.width - textWidth) / 2;  // Center the text horizontally
+        const yPos = canvas.height / 4;  // Position the text at the top of the center vertically
+        ctx.fillText(text, xPos, yPos);
+    } else {
+        // If HP is greater than 5, show "Press E to proceed"
+        ctx.fillStyle = '#000';
+        ctx.font = '16px Arial';
+        const text = 'Press P to Proceed';
+        const textWidth = ctx.measureText(text).width;
+        const xPos = (canvas.width - textWidth) / 2;  // Center the text horizontally
+        const yPos = canvas.height / 4;  // Position the text at the top of the center vertically
+        ctx.fillText(text, xPos, yPos);
 
-// **Draw the door in the game world with a yellow handle**
-function drawDoor_canvas4() {
-    // Draw the door in the center of the screen
-    if (door.isVisible) {
-        ctx.fillStyle = '#8B4513';  // Brown color for the door
-        ctx.fillRect(door.x - cameraOffset, door.y, door.width, door.height);  // Draw the door itself
-
-        // Draw the yellow handle
-        const handleWidth = 5;  // Handle width
-        const handleHeight = 5; // Handle height (circle diameter)
-
-        let handleX = door.x + door.width - 8;
-        let handleY = door.y + door.height / 2;
-        ctx.fillStyle = '#FFD700';  // Yellow color for the handle
-        ctx.beginPath();
-        ctx.arc(handleX + handleWidth / 2-cameraOffset, handleY + handleHeight / 2, handleWidth / 2, 0, Math.PI * 2); // Draw a circle for the handle
-        ctx.fill();
-    }
-}
-
-
-// **Handle door interaction logic:**
-function handleDoorInteraction_canvas4() {
-    // Check if the character is near the door and the door is visible
-    if (
-        character.x + character.width > door.x - cameraOffset &&
-        character.x < door.x + door.width - cameraOffset &&
-        character.y + character.height > door.y &&
-        character.y < door.y + door.height
-    ) {
-        // Display the message above the door if HP is less than 5
-        if (character.hp < 5) {
-            ctx.fillStyle = '#000';
-            ctx.font = '16px Arial';
-            ctx.fillText('Collect 5 HP to proceed', door.x - cameraOffset-50, door.y - 20);
-        } else {
-            // If HP is greater than 5, let the player proceed
-            ctx.fillStyle = '#000';
-            ctx.font = '16px Arial';
-            ctx.fillText('Press E to proceed', door.x - cameraOffset-50, door.y - 20);
-
-            // Check for player pressing 'E' to interact with the door
-            if (keys['e'] && !doorInteractionCompleted) {
-                currentQuestion += 1;  // Increment the question number when the player presses 'E'
-                console.log("Proceeding to next question: " + currentQuestion);
-
-                // Mark the door interaction as completed
-                doorInteractionCompleted = true;  // Prevent further interactions until reset
-            }
+        // Check for player pressing 'E' and if their HP is greater than 5 to proceed to the next question
+        if (keys['p'] && character.hp > 5) {
+            currentQuestion += 1;  // Increment the question number when the player presses 'E' and HP > 5
+            console.log("Proceeding to next question: " + currentQuestion);
         }
     }
 }
 
-// **Reset the door interaction flag when necessary (e.g., at the beginning of a new level or after the question is updated)**
-// You can call this function at the appropriate point in your game logic when you want to reset the interaction flag
-function resetDoorInteraction() {
-    doorInteractionCompleted = false;
-}
+
 
 
 
@@ -595,23 +557,35 @@ function drawCharacter_canvas4() {
 
 
 
-
-// Draw HP
+// **Draw Stamina Bar Logic:**
 function drawHP_canvas4() {
-    for (let i = 0; i < character.hp; i++) {
-        ctx.fillStyle = '#FF0000';
+    // Maximum HP (stamina bar max length)
+    const maxHP = 10;
 
-        let x = canvas.width - 24 - i * 30;
-        let y = 20;
-        let size = 8;
+    // Calculate the width of the stamina bar based on current HP
+    const barWidth = 200;  // Total width of the stamina bar
+    const barHeight = 20;  // Height of the stamina bar
 
-        ctx.beginPath();
+    // Determine the current width of the stamina bar
+    const currentWidth = (character.hp / maxHP) * barWidth;
 
-        ctx.moveTo(x, y);
-        ctx.bezierCurveTo(x - size, y - size, x - size * 2, y + size / 2, x, y + size * 1.5);
-        ctx.bezierCurveTo(x + size * 2, y + size / 2, x + size, y - size, x, y);
-
-        ctx.closePath();
-        ctx.fill();
+    // Set color based on HP (blue for high, orange for low)
+    if (character.hp >= 5) {
+        ctx.fillStyle = 'blue';  // Blue for high HP
+    } else {
+        ctx.fillStyle = 'orange';  // Orange for low HP
     }
+
+    // Draw the outer background of the stamina bar
+    ctx.fillStyle = '#ddd';  // Light grey background for the bar
+    ctx.fillRect(canvas.width - barWidth - 20, 20, barWidth, barHeight);  // Position the bar
+
+    // Draw the current stamina (HP)
+    ctx.fillStyle = ctx.fillStyle;  // Use the color based on HP
+    ctx.fillRect(canvas.width - barWidth - 20, 20, currentWidth, barHeight);  // Draw filled portion
+
+    // Optionally, draw a border around the stamina bar
+    ctx.strokeStyle = '#000';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(canvas.width - barWidth - 20, 20, barWidth, barHeight);
 }
