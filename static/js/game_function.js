@@ -188,7 +188,7 @@ function createCharacter() {
         velocityY: 0,
         speed: 0,
         onBlock: false,
-        hp: 1,
+        hp: 0,
         acceleration : 0.2,
         deceleration: 0.2,
         max_speed :6
@@ -261,7 +261,7 @@ function drawHungerCountdown() {
     if (currentCanvas === 4) {
         ctx.fillStyle = '#FF0000';
         ctx.font = '16px Arial';
-        ctx.fillText(`Next HP loss: ${hungerCountdown}s`, 20, 40);
+        ctx.fillText(`Next Stamina loss: ${hungerCountdown}s`, 20, 40);
     }
 }
 
@@ -469,22 +469,34 @@ function drawCharacter() {
 
 // Draw HP
 function drawHP() {
-    for (let i = 0; i < character.hp; i++) {
-        ctx.fillStyle = '#FF0000';
+    // Maximum HP (stamina bar max length)
+    const maxHP = 10;
 
-        let x = canvas.width - 24 - i * 30;
-        let y = 20;
-        let size = 8;
+    // Calculate the width of the stamina bar based on current HP
+    const barWidth = 200;  // Total width of the stamina bar
+    const barHeight = 20;  // Height of the stamina bar
 
-        ctx.beginPath();
+    // Determine the current width of the stamina bar
+    const currentWidth = (character.hp / maxHP) * barWidth;
 
-        ctx.moveTo(x, y);
-        ctx.bezierCurveTo(x - size, y - size, x - size * 2, y + size / 2, x, y + size * 1.5);
-        ctx.bezierCurveTo(x + size * 2, y + size / 2, x + size, y - size, x, y);
+    // Set the outer background color first (light grey)
+    ctx.fillStyle = '#ddd';  // Light grey background for the bar
+    ctx.fillRect(canvas.width - barWidth - 20, 20, barWidth, barHeight);  // Position the bar
 
-        ctx.closePath();
-        ctx.fill();
+    // Set color based on HP (blue for high, orange for low)
+    if (character.hp >= 5) {
+        ctx.fillStyle = 'blue';  // Blue for high HP
+    } else {
+        ctx.fillStyle = 'orange';  // Orange for low HP
     }
+
+    // Draw the current stamina (HP)
+    ctx.fillRect(canvas.width - barWidth - 20, 20, currentWidth, barHeight);  // Draw filled portion
+
+    // Optionally, draw a border around the stamina bar
+    ctx.strokeStyle = '#000';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(canvas.width - barWidth - 20, 20, barWidth, barHeight);
 }
 
 

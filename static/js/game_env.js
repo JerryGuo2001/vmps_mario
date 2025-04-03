@@ -556,8 +556,6 @@ function drawCharacter_canvas4() {
 }
 
 
-
-// **Draw Stamina Bar Logic:**
 function drawHP_canvas4() {
     // Maximum HP (stamina bar max length)
     const maxHP = 10;
@@ -569,6 +567,10 @@ function drawHP_canvas4() {
     // Determine the current width of the stamina bar
     const currentWidth = (character.hp / maxHP) * barWidth;
 
+    // Set the outer background color first
+    ctx.fillStyle = '#ddd';  // Light grey background for the bar
+    ctx.fillRect(canvas.width - barWidth - 20, 20, barWidth, barHeight);  // Position the bar
+
     // Set color based on HP (blue for high, orange for low)
     if (character.hp >= 5) {
         ctx.fillStyle = 'blue';  // Blue for high HP
@@ -576,12 +578,7 @@ function drawHP_canvas4() {
         ctx.fillStyle = 'orange';  // Orange for low HP
     }
 
-    // Draw the outer background of the stamina bar
-    ctx.fillStyle = '#ddd';  // Light grey background for the bar
-    ctx.fillRect(canvas.width - barWidth - 20, 20, barWidth, barHeight);  // Position the bar
-
     // Draw the current stamina (HP)
-    ctx.fillStyle = ctx.fillStyle;  // Use the color based on HP
     ctx.fillRect(canvas.width - barWidth - 20, 20, currentWidth, barHeight);  // Draw filled portion
 
     // Optionally, draw a border around the stamina bar
