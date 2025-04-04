@@ -9,7 +9,7 @@ function startiden() {
     document.getElementById('welcome').style.display = 'none';
     document.getElementById('identificationphase').style.display = 'block';
     document.getElementById('next_iden').style.display = 'none';
-    startIdenPhase();
+    startIdenPhase(a="idenCanvas");
 }
 
 
@@ -36,6 +36,7 @@ function completeExplore() {
 
     // Show the identificationphasetwo phase
     document.getElementById('identificationphasetwo').style.display = 'block';
+    startIdenPhase(a="two_idenCanvas");
 }
 
 
@@ -86,7 +87,14 @@ let accumulatedTime = 0; // Time accumulated since the last update
 let gameRunning = true; // Flag to control whether the game should continue running
 
 function updateGame(currentTime) {
+    if (freezeTime > 0) {
+        freezeTime -= 16;  // Decrease freeze time (assuming 60 FPS, 16ms per frame)
+        requestAnimationFrame(updateGame);
+        return;  // Don't process any further updates during the freeze time
+    }
+    freezeTime=0
     // If game is not running, stop the update loop
+    // If the screen is frozen, don't allow movement or keyboard input
     if (!gameRunning) return;
 
     // Calculate time elapsed since the last frame

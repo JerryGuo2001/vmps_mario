@@ -124,19 +124,6 @@ function handleTextInteraction_canvas4() {
 
 let mushrooms = generateMushroom(1)
 
-function generateMushroom(number){
-    let mushrooms
-    if (number==1){
-        mushrooms = [
-            { x: groundPlatforms[0].startX + 400, y: groundPlatforms[0].y - 150, type: 0, value: 1, isVisible: false, growthFactor: 0, growthSpeed: 0.05, growthComplete: false }, // Red Mushroom (frame 0)
-            { x: groundPlatforms[1].startX + 100, y: groundPlatforms[1].y - 150, type: 1, value: -1, isVisible: false, growthFactor: 0, growthSpeed: 0.05, growthComplete: false }, // Green Mushroom (frame 1)
-            { x: groundPlatforms[0].startX + 330, y: groundPlatforms[0].y - 150, type: 2, value: 3, isVisible: false, growthFactor: 0, growthSpeed: 0.05, growthComplete: false }, // Orange Mushroom (frame 2)
-            { x: groundPlatforms[1].startX + 150, y: groundPlatforms[1].y - 150, type: 3, value: 'reset', isVisible: false, growthFactor: 0, growthSpeed: 0.05, growthComplete: false }, // Purple Mushroom (frame 3)
-            { x: groundPlatforms[0].startX + 50, y: groundPlatforms[0].y - 150, type: 4, value: 5, isVisible: false, growthFactor: 0, growthSpeed: 0.05, growthComplete: false } // Blue Mushroom (frame 4)
-        ];
-    }
-    return mushrooms
-}
 
 const boxImage = new Image();
 boxImage.src = 'TexturePack/box.jpg'; // Replace with the correct path to your box image
@@ -255,7 +242,6 @@ function drawMysBox() {
 
 
 
-
 function handleMushroomCollision_canvas4(atLeftEdge, atRightEdge) {
     let offset = cameraOffset;
 
@@ -308,16 +294,72 @@ function handleMushroomCollision_canvas4(atLeftEdge, atRightEdge) {
             ctx.fillText('Press E to eat', mushroomX - 40, mushroomY - 50);
 
             if (keys['e']) {
+                let staminaChange = 0;
                 if (mushroom.value === 'reset') {
+                    staminaChange = 'reset'
                     character.hp = 0;
+                    // Display "Toxic!" text
+                    ctx.font = '20px Arial';
+                    ctx.fillStyle = 'red';
                 } else {
                     character.hp += mushroom.value;
+                    staminaChange = mushroom.value;  // Increase stamina (up arrows)
+                }
+                if (staminaChange>0){
+                    // Display floating heart message
+                    const heartMessage = document.createElement('div');
+                    heartMessage.style.position = 'fixed';
+                    heartMessage.style.top = '50%';
+                    heartMessage.style.left = '50%';
+                    heartMessage.style.transform = 'translate(-50%, -50%)';
+                    heartMessage.style.fontSize = '50px';
+                    heartMessage.style.fontWeight = 'bold';
+                    heartMessage.style.color = 'red';
+                    heartMessage.innerText = '❤️ + '+ staminaChange;
+                    heartMessage.style.zIndex = '1000';
+                    document.body.appendChild(heartMessage);
+                    setTimeout(() => {
+                        document.body.removeChild(heartMessage);
+                    }, 2000);
+                }else if (staminaChange<0){
+                    // Display floating heart message
+                    const heartMessage = document.createElement('div');
+                    heartMessage.style.position = 'fixed';
+                    heartMessage.style.top = '50%';
+                    heartMessage.style.left = '50%';
+                    heartMessage.style.transform = 'translate(-50%, -50%)';
+                    heartMessage.style.fontSize = '50px';
+                    heartMessage.style.fontWeight = 'bold';
+                    heartMessage.style.color = 'green';
+                    heartMessage.innerText = '❤️ + '+ staminaChange;
+                    heartMessage.style.zIndex = '1000';
+                    document.body.appendChild(heartMessage);
+                    setTimeout(() => {
+                        document.body.removeChild(heartMessage);
+                    }, 2000);
+                }else if (staminaChange=='reset'){
+                    // Display floating heart message
+                    const heartMessage = document.createElement('div');
+                    heartMessage.style.position = 'fixed';
+                    heartMessage.style.top = '50%';
+                    heartMessage.style.left = '50%';
+                    heartMessage.style.transform = 'translate(-50%, -50%)';
+                    heartMessage.style.fontSize = '50px';
+                    heartMessage.style.fontWeight = 'bold';
+                    heartMessage.style.color = 'green';
+                    heartMessage.innerText = 'Toxic!';
+                    heartMessage.style.zIndex = '1000';
+                    document.body.appendChild(heartMessage);
+                    setTimeout(() => {
+                        document.body.removeChild(heartMessage);
+                    }, 2000);
                 }
                 mushrooms.splice(index, 1);  // Remove the mushroom after eating it
             }
         }
     });
 }
+
 
 
 
@@ -359,14 +401,16 @@ function handleBlockCollision_canvas4() {
 
 
 
+let freezeTime = 0; // Variable to track freeze time
 
 function checkHP_canvas4() {
-    if (character.hp <= 0) {
+    if (character.hp <= 0 && freezeTime === 0) {
+        // Start freezing when hp <= 0
+        freezeTime = 1000;  // Freeze for 3 seconds
         currentCanvas = 1;
-        mushrooms = generateMushroom(1)
+        mushrooms = generateMushroom(1);
     }
 }
-
 
 
 

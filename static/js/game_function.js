@@ -242,6 +242,8 @@ function hungry(){
                             character.y = canvas.height * 0.8 - character.height;
                             clearInterval(hungerInterval);
                             hungerInterval = null;
+                            freezeTime=1000;
+                            mushrooms = generateMushroom(1)
                         }
                     }
                 } else {

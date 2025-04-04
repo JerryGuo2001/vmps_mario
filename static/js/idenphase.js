@@ -1,20 +1,24 @@
 // Set up canvas and context for Mushroom Identification Task
-let idenCanvas = document.getElementById("idenCanvas");  // Unique canvas for the identification task
-let idenCtx = idenCanvas.getContext("2d");  // Unique context for the identification task
+let idenCanvas,idenCtx,participantResponses,currentMushroomIndex, questionRepetitionCount,iden_total_repetition,responseTimeout,warningTimeout,responseGiven;
 
-// Set up participant responses and other variables
-let participantResponses = []; // To store participant responses
-let currentMushroomIndex = 0; // Index to track which mushroom is displayed
-let questionRepetitionCount = 0; // Count the number of times each question has been repeated
-let iden_total_repetition = 2;
-let responseTimeout; // Timeout for waiting for a response
-let warningTimeout; // Timeout for showing warning if no response
-let responseGiven = false; // Flag to ensure only one response is allowed per question
+function init_iden(a="idenCanvas"){
+    // Set up canvas and context for Mushroom Identification Task
+    idenCanvas = document.getElementById(a);  // Unique canvas for the identification task
+    idenCtx = idenCanvas.getContext("2d");  // Unique context for the identification task
 
+    // Set up participant responses and other variables
+    participantResponses = []; // To store participant responses
+    currentMushroomIndex = 0; // Index to track which mushroom is displayed
+    questionRepetitionCount = 0; // Count the number of times each question has been repeated
+    iden_total_repetition = 1;
+    responseTimeout; // Timeout for waiting for a response
+    warningTimeout; // Timeout for showing warning if no response
+    responseGiven = false; // Flag to ensure only one response is allowed per question
+}
 
 function shuffleWithNoSamePosition(originalList, idenTotalRepetition = 1) {
     // Repeat the list as needed
-    let shuffledList = [...originalList];
+    let shuffledList = []
     for (let i = 0; i < idenTotalRepetition; i++) {
         shuffledList = shuffledList.concat(originalList);
     }
@@ -121,6 +125,7 @@ function displayAnswerFeedback(feedbackText) {
             if (currentMushroomIndex < iden_shuffled_list.length) {
                 displayNextQuestion();
             } else {
+                stopKeyIntake()
                 displayFinalResults();
             }
         }, 3000); // Wait 3 seconds before moving to the next question
@@ -136,6 +141,7 @@ function displayWarning() {
 // Display the next mushroom question
 function displayNextQuestion() {
     // Clear the canvas
+    enableKeyIntake()
     idenCtx.clearRect(0, 0, idenCanvas.width, idenCanvas.height);
 
     // Display the mushroom
@@ -145,6 +151,7 @@ function displayNextQuestion() {
     responseTimeout = setTimeout(() => {
         if (!responseGiven) {
             // If no response after 5 seconds, display a warning
+            stopKeyIntake();
             displayWarning();
             questionRepetitionCount = 0; // Reset repetition count
             currentMushroomIndex++; // Move to the next mushroom
@@ -172,10 +179,42 @@ function displayFinalResults() {
 
 
 // Start the task
-function startIdenPhase() {
+function startIdenPhase(a) {
+    init_iden(a),
     // Listen for keyboard events
     window.addEventListener('keydown', iden_handleKeyDown);
 
     // Start the first question
     displayNextQuestion();
+}
+
+// Add a flag to control if input should be disabled
+let inputDisabled = false;
+
+// Function to stop all key intake by removing the event listener
+function stopKeyIntake() {
+    if (inputDisabled) return; // If input is already disabled, do nothing
+    
+    // Disable key input
+    window.removeEventListener('keydown', iden_handleKeyDown);
+
+    // Set the flag to indicate that input is disabled
+    inputDisabled = true;
+    
+    // Optionally, display a message indicating that input is disabled
+    console.log("Input has been disabled.");
+}
+
+// Function to re-enable key intake
+function enableKeyIntake() {
+    if (!inputDisabled) return;  // If input is already enabled, do nothing
+    
+    // Enable key input
+    window.addEventListener('keydown', iden_handleKeyDown);
+
+    // Set the flag to indicate that input is enabled
+    inputDisabled = false;
+    
+    // Optionally, display a message indicating that input is enabled again
+    console.log("Input has been enabled.");
 }

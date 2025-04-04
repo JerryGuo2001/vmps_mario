@@ -36,3 +36,17 @@ let mushroom_ident_list = [
         correctAnswer: "e"
     }
 ];
+
+function generateMushroom(number){
+    let mushrooms
+    if (number==1){
+        mushrooms = [
+            { x: groundPlatforms[0].startX + 400, y: groundPlatforms[0].y - 150, type: 0, value: 1, isVisible: false, growthFactor: 0, growthSpeed: 0.05, growthComplete: false }, // Red Mushroom (frame 0)
+            { x: groundPlatforms[1].startX + 100, y: groundPlatforms[1].y - 150, type: 1, value: -1, isVisible: false, growthFactor: 0, growthSpeed: 0.05, growthComplete: false }, // Green Mushroom (frame 1)
+            { x: groundPlatforms[0].startX + 330, y: groundPlatforms[0].y - 150, type: 2, value: 3, isVisible: false, growthFactor: 0, growthSpeed: 0.05, growthComplete: false }, // Orange Mushroom (frame 2)
+            { x: groundPlatforms[1].startX + 150, y: groundPlatforms[1].y - 150, type: 3, value: 'reset', isVisible: false, growthFactor: 0, growthSpeed: 0.05, growthComplete: false }, // Purple Mushroom (frame 3)
+            { x: groundPlatforms[0].startX + 50, y: groundPlatforms[0].y - 150, type: 4, value: 5, isVisible: false, growthFactor: 0, growthSpeed: 0.05, growthComplete: false } // Blue Mushroom (frame 4)
+        ];
+    }
+    return mushrooms
+}
