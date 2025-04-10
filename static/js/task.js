@@ -50,7 +50,9 @@ function completemem() {
     document.getElementById('thankyou').style.display = 'block';
 }
 
-function initGame() {
+let mushrooms=[]
+async function initGame() {
+    mushrooms = await generateMushroom(1);
     canvas = document.getElementById('gameCanvas');
     canvas.width = 600;
     canvas.height = 500;
@@ -125,10 +127,10 @@ function updateGame(currentTime) {
             }
             drawBackground_canvas4();
             handleTextInteraction_canvas4();
-            handleMovement_canvas4();
             handleBlockCollision_canvas4();
             drawCharacter_canvas4();
             drawHP_canvas4();
+            handleMovement_canvas4();
             drawHungerCountdown();
             hungry();
             checkHP_canvas4();

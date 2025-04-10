@@ -42,32 +42,32 @@ function shuffleWithNoSamePosition(originalList, idenTotalRepetition = 1) {
 iden_shuffled_list = shuffleWithNoSamePosition(mushroom_ident_list, iden_total_repetition);
 
 
-// Function to display the current mushroom on the unique canvas
-function displayMushroom(currentMushroomIndex) {
-    // Ensure the mushroom sheet is loaded before displaying
-    if (!mushroomSheet.complete) {
-        return; // Wait until the image is fully loaded
-    }
+// Function to display the mushroom on the canvas based on the targetRGB
+async function displayMushroom(index) {
+    // Find the closest mushroom image based on the targetRGB
+    let mushroomFilename = await findMushroomByRGB(iden_shuffled_list[index].targetRGB);
 
-    // Calculate the position to center the image
-    let centerX = (idenCtx.canvas.width - 100) / 2; // 100 is the desired width of the image
-    let centerY = (idenCtx.canvas.height - 100) / 2; // 100 is the desired height of the image
+    // Load the mushroom image
+    let mushroomImage = new Image();
+    mushroomImage.src = 'TexturePack/mushroom_pack/' + mushroomFilename;
 
-    // Get the current mushroom from the list
-    let mushroom = iden_shuffled_list[currentMushroomIndex];
-    let mushroomX = mushroom.position.x * (mushroomWidth + mushroomSpacing) + 17; // X position in sprite sheet
-    let mushroomY = mushroom.position.y * (mushroomHeight + mushroomSpacing) + 17; // Y position in sprite sheet
+    // Ensure the mushroom image is loaded before drawing it
+    mushroomImage.onload = function() {
+        // Calculate the position to center the image
+        let centerX = (idenCtx.canvas.width - 100) / 2; // 100 is the desired width of the image
+        let centerY = (idenCtx.canvas.height - 100) / 2; // 100 is the desired height of the image
 
-    // Draw the mushroom on the canvas
-    idenCtx.drawImage(mushroomSheet, mushroomX, mushroomY, mushroomWidth, mushroomHeight, centerX, centerY, 100, 100);
+        // Draw the mushroom on the canvas
+        idenCtx.drawImage(mushroomImage, centerX, centerY, 100, 100);
 
-    // Set font
-    idenCtx.font = "20px Arial";
+        // Set font
+        idenCtx.font = "20px Arial";
 
-    // Centered text for "Guess the mushroom name"
-    let text1 = "Guess the mushroom name: (Press 'a' to 'z')";
-    let text1Width = idenCtx.measureText(text1).width;
-    idenCtx.fillText(text1, (idenCtx.canvas.width - text1Width) / 2, 30);
+        // Centered text for "Guess the mushroom name"
+        let text1 = "Guess the mushroom name: (Press 'a' to 'z')";
+        let text1Width = idenCtx.measureText(text1).width;
+        idenCtx.fillText(text1, (idenCtx.canvas.width - text1Width) / 2, 30);
+    };
 }
 
 

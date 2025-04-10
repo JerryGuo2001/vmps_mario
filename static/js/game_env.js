@@ -122,7 +122,6 @@ function handleTextInteraction_canvas4() {
 
 
 
-let mushrooms = generateMushroom(1)
 
 
 const boxImage = new Image();
@@ -241,11 +240,12 @@ function drawMysBox() {
 }
 
 
-
-function handleMushroomCollision_canvas4(atLeftEdge, atRightEdge) {
+async function handleMushroomCollision_canvas4(atLeftEdge, atRightEdge) {
     let offset = cameraOffset;
 
-    mushrooms.forEach((mushroom, index) => {
+    // Iterate through each mushroom
+    mushrooms.forEach(async (mushroom, index) => {
+
         // If the mushroom is not visible, skip drawing
         if (!mushroom.isVisible) {
             return;
@@ -268,18 +268,17 @@ function handleMushroomCollision_canvas4(atLeftEdge, atRightEdge) {
         let mushroomWidth = 30 + 20 * mushroom.growthFactor;  // Grow width from 30px to 50px
         let mushroomHeight = 30 + 20 * mushroom.growthFactor;  // Grow height from 30px to 50px
 
-        // Set fixed sprite sheet positions (no change in sprite position)
-        let spriteX = 17;  // Horizontal position of the frame in the sprite sheet (fixed)
-        let spriteY = 17 + mushroom.type * (45 + mushroomSpacing);  // Vertical position in the sprite sheet (fixed)
+        // **Load the mushroom image dynamically using the matching filename**
+        let mushroomImage = new Image();
+        mushroomImage.src = 'TexturePack/mushroom_pack/' + mushroom.imagefilename;
 
-        // **Draw mushroom from sprite sheet (fixed sprite position, but dynamic size)**
         ctx.drawImage(
-            mushroomSheet,
-            spriteX, spriteY,  // Fixed position in the sprite sheet
-            mushroomWidth, mushroomHeight,  // Draw with dynamic size
+            mushroomImage,
             mushroomX - mushroomWidth / 2, mushroomY - mushroomHeight,  // Position on canvas
             mushroomWidth, mushroomHeight  // Scale to the growing size
         );
+
+
 
         let characterScreenX = atLeftEdge ? character.x : atRightEdge ? character.x : canvas.width / 2;
 
@@ -305,7 +304,7 @@ function handleMushroomCollision_canvas4(atLeftEdge, atRightEdge) {
                     character.hp += mushroom.value;
                     staminaChange = mushroom.value;  // Increase stamina (up arrows)
                 }
-                if (staminaChange>0){
+                if (staminaChange > 0) {
                     // Display floating heart message
                     const heartMessage = document.createElement('div');
                     heartMessage.style.position = 'fixed';
@@ -315,13 +314,13 @@ function handleMushroomCollision_canvas4(atLeftEdge, atRightEdge) {
                     heartMessage.style.fontSize = '50px';
                     heartMessage.style.fontWeight = 'bold';
                     heartMessage.style.color = 'red';
-                    heartMessage.innerText = '❤️ + '+ staminaChange;
+                    heartMessage.innerText = '❤️ + ' + staminaChange;
                     heartMessage.style.zIndex = '1000';
                     document.body.appendChild(heartMessage);
                     setTimeout(() => {
                         document.body.removeChild(heartMessage);
                     }, 2000);
-                }else if (staminaChange<0){
+                } else if (staminaChange < 0) {
                     // Display floating heart message
                     const heartMessage = document.createElement('div');
                     heartMessage.style.position = 'fixed';
@@ -331,13 +330,13 @@ function handleMushroomCollision_canvas4(atLeftEdge, atRightEdge) {
                     heartMessage.style.fontSize = '50px';
                     heartMessage.style.fontWeight = 'bold';
                     heartMessage.style.color = 'green';
-                    heartMessage.innerText = '❤️ + '+ staminaChange;
+                    heartMessage.innerText = '❤️ + ' + staminaChange;
                     heartMessage.style.zIndex = '1000';
                     document.body.appendChild(heartMessage);
                     setTimeout(() => {
                         document.body.removeChild(heartMessage);
                     }, 2000);
-                }else if (staminaChange=='reset'){
+                } else if (staminaChange == 'reset') {
                     // Display floating heart message
                     const heartMessage = document.createElement('div');
                     heartMessage.style.position = 'fixed';
@@ -359,6 +358,7 @@ function handleMushroomCollision_canvas4(atLeftEdge, atRightEdge) {
         }
     });
 }
+
 
 
 
@@ -403,12 +403,12 @@ function handleBlockCollision_canvas4() {
 
 let freezeTime = 0; // Variable to track freeze time
 
-function checkHP_canvas4() {
+async function checkHP_canvas4() {
     if (character.hp <= 0 && freezeTime === 0) {
         // Start freezing when hp <= 0
         freezeTime = 1000;  // Freeze for 3 seconds
         currentCanvas = 1;
-        mushrooms = generateMushroom(1);
+        mushrooms = await generateMushroom(1);
     }
 }
 
