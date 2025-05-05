@@ -68,29 +68,48 @@ let accumulatedTime = 0; // Time accumulated since the last update
 let gameRunning = true; // Flag to control whether the game should continue running
 
 function updateGame(currentTime) {
-    if (freezeTime > 0) {
-        freezeTime -= 16;  // Decrease freeze time (assuming 60 FPS, 16ms per frame)
-        requestAnimationFrame(updateGame);
-        return;  // Don't process any further updates during the freeze time
-    }
-    freezeTime=0
-    // If game is not running, stop the update loop
-    // If the screen is frozen, don't allow movement or keyboard input
     if (!gameRunning) return;
 
-    // Calculate time elapsed since the last frame
-    let deltaTime = (currentTime - lastTime) / 1000; // Convert from ms to seconds
-    lastTime = currentTime;
+    // Handle freeze due to mushroom decision
+    if (freezeState && activeMushroom) {
+        mushroomDecisionTimer += 16;  // Add ~16ms per frame (assuming 60 FPS)
 
-    // Accumulate the time
+        clearCanvas();
+        drawBackground_canvas4();
+        drawCharacter_canvas4();
+        drawHP_canvas4();
+        drawMushroomQuestionBox();
+
+        if (keys['e']) {
+            character.hp += (activeMushroom.value === 'reset' ? -character.hp : activeMushroom.value);
+            removeActiveMushroom();
+        } else if (keys['i'] || mushroomDecisionTimer >= maxDecisionTime) {
+            removeActiveMushroom();  // Auto-ignore after 5s
+        }
+
+        requestAnimationFrame(updateGame);
+        return;
+    }
+
+
+    // Time-based freeze (e.g., after death)
+    if (freezeTime > 0) {
+        freezeTime -= 16;  // Assuming ~60fps
+        requestAnimationFrame(updateGame);
+        return;
+    }
+
+    freezeTime = 0;
+
+    let deltaTime = (currentTime - lastTime) / 1000;
+    lastTime = currentTime;
     accumulatedTime += deltaTime;
 
-    // Run the game logic until we've accumulated enough time for one frame
     while (accumulatedTime >= targetTimeStep) {
         clearCanvas();
 
         if (currentCanvas !== 4) {
-            if (init_position == true) {
+            if (init_position === true) {
                 character.x = 0;
             }
             drawBackground();
@@ -98,10 +117,10 @@ function updateGame(currentTime) {
             drawObstacles();
             drawCharacter();
             drawHP();
-            drawDoor();  // Draw the door
+            drawDoor();
             init_position = false;
         } else {
-            if (init_position == false) {
+            if (init_position === false) {
                 cameraOffset = 0;
             }
             drawBackground_canvas4();
@@ -114,18 +133,17 @@ function updateGame(currentTime) {
             hungry();
             checkHP_canvas4();
             init_position = true;
+
             if (character.y > 450) character.hp = 0;
         }
 
-        accumulatedTime -= targetTimeStep; // Decrease accumulated time by the time step
+        accumulatedTime -= targetTimeStep;
     }
 
-    // Request the next frame if the game is still running
     if (gameRunning) {
         requestAnimationFrame(updateGame);
     }
 
-    // Complete the task when the question count exceeds total questions
     if (currentQuestion > totalQuestions) {
         completeExplore();
     }

@@ -152,77 +152,46 @@ let mushroom_ident_list = [
 ];
 
 
-// Function to generate mushrooms and preload the filenames based on targetRGB
 async function generateMushroom(number) {
-    let mushrooms = [];
+    const mushrooms = [];
 
-    if (number == 1) {
-        mushrooms = [
-            { 
-                x: groundPlatforms[0].startX + 400, 
-                y: groundPlatforms[0].y - 150, 
-                type: 0, 
-                value: 1, 
-                isVisible: false, 
-                growthFactor: 0, 
-                growthSpeed: 0.05, 
-                growthComplete: false,
-                targetRGB: {r: 255, g: 0, b: 0},  // Red Mushroom (targetRGB as an object)
-                imagefilename: await findMushroomByRGB({r: 255, g: 0, b: 0})  // Preload image filename based on targetRGB
-            },
-            { 
-                x: groundPlatforms[1].startX + 100, 
-                y: groundPlatforms[1].y - 150, 
-                type: 1, 
-                value: -1, 
-                isVisible: false, 
-                growthFactor: 0, 
-                growthSpeed: 0.05, 
-                growthComplete: false,
-                targetRGB: {r: 255, g: 255, b: 0},  // Yellow Mushroom
-                imagefilename: await findMushroomByRGB({r: 255, g: 255, b: 0})  // Preload image filename based on targetRGB
-            },
-            { 
-                x: groundPlatforms[0].startX + 330, 
-                y: groundPlatforms[0].y - 150, 
-                type: 2, 
-                value: 3, 
-                isVisible: false, 
-                growthFactor: 0, 
-                growthSpeed: 0.05, 
-                growthComplete: false,
-                targetRGB: {r: 0, g: 255, b: 0},  // Green Mushroom
-                imagefilename: await findMushroomByRGB({r: 0, g: 255, b: 0})  // Preload image filename based on targetRGB
-            },
-            { 
-                x: groundPlatforms[1].startX + 150, 
-                y: groundPlatforms[1].y - 150, 
-                type: 3, 
-                value: 'reset', 
-                isVisible: false, 
-                growthFactor: 0, 
-                growthSpeed: 0.05, 
-                growthComplete: false,
-                targetRGB: {r: 0, g: 255, b: 255},  // Cyan Mushroom
-                imagefilename: await findMushroomByRGB({r: 0, g: 255, b: 255})  // Preload image filename based on targetRGB
-            },
-            { 
-                x: groundPlatforms[0].startX + 50, 
-                y: groundPlatforms[0].y - 150, 
-                type: 4, 
-                value: 5, 
-                isVisible: false, 
-                growthFactor: 0, 
-                growthSpeed: 0.05, 
-                growthComplete: false,
-                targetRGB: {r: 0, g: 0, b: 255},  // Blue Mushroom
-                imagefilename: await findMushroomByRGB({r: 0, g: 0, b: 255})  // Preload image filename based on targetRGB
-            }
+    if (number === 1) {
+        const mushroomData = [
+            { rgb: { r: 255, g: 0, b: 0 }, value: 1, x: groundPlatforms[0].startX + 400, y: groundPlatforms[0].y - 150 },
+            { rgb: { r: 255, g: 255, b: 0 }, value: -1, x: groundPlatforms[1].startX + 100, y: groundPlatforms[1].y - 150 },
+            { rgb: { r: 0, g: 255, b: 0 }, value: 3, x: groundPlatforms[0].startX + 330, y: groundPlatforms[0].y - 150 },
+            { rgb: { r: 0, g: 255, b: 255 }, value: 'reset', x: groundPlatforms[1].startX + 150, y: groundPlatforms[1].y - 150 },
+            { rgb: { r: 0, g: 0, b: 255 }, value: 5, x: groundPlatforms[0].startX + 50, y: groundPlatforms[0].y - 150 }
         ];
+
+        for (const { rgb, value, x, y } of mushroomData) {
+            const filename = await findMushroomByRGB(rgb);
+            const img = new Image();
+            img.src = 'TexturePack/mushroom_pack/' + filename;
+            await new Promise((resolve, reject) => {
+                img.onload = resolve;
+                img.onerror = reject;
+            });
+
+            mushrooms.push({
+                x,
+                y,
+                type: 0,
+                value,
+                isVisible: false,
+                growthFactor: 0,
+                growthSpeed: 0.05,
+                growthComplete: false,
+                targetRGB: rgb,
+                imagefilename: filename,
+                image: img // ✅ loaded image now available
+            });
+        }
     }
 
     return mushrooms;
 }
+
 
 let aMushrooms = [];
 let bMushrooms = [];
@@ -303,11 +272,22 @@ const setE_RGBs = [
 async function generateMushroomSets() {
     // Utility to create full mushroom object with preload
     async function buildMushroom(rgb, name, correctAnswer = null) {
+        const filename = await findMushroomByRGB(rgb);
+        const img = new Image();
+        img.src = 'TexturePack/mushroom_pack/' + filename;
+    
+        // Await the image load
+        await new Promise((resolve, reject) => {
+            img.onload = resolve;
+            img.onerror = reject;
+        });
+    
         return {
             name,
             targetRGB: rgb,
             correctAnswer,
-            imagefilename: await findMushroomByRGB(rgb)
+            imagefilename: filename,
+            image: img
         };
     }
 

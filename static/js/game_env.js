@@ -7,6 +7,10 @@ let worldWidth = 2000; // 🔹 Increase this to extend the map size
 let worldHeight = 600; // Optional: Increase height if needed
 let canvas = document.getElementById('gameCanvas');
 let ctx = canvas.getContext('2d');
+let freezeState = false;
+let activeMushroom = null;
+let mushroomDecisionTimer = 0;
+const maxDecisionTime = 5000; // 5 seconds in ms
 
 // Define object properties
 const OBJECT_TYPES = {
@@ -167,6 +171,10 @@ function drawMysBox() {
                 character.velocityY < 0) {
                 mushroom.isVisible=true
                 character.velocityY = 0;
+                // Trigger freeze phase and question
+                freezeState = true;
+                activeMushroom = mushroom;
+                mushroomDecisionTimer = 0; // Reset decision timer
             }
             if (character.velocityY >= 0 &&
                 character.y + character.height <= boxY + 5 &&
@@ -230,13 +238,25 @@ function drawMysBox() {
                 (canvas.width / 2) < boxX + 25
             ) {
                 console.log('hit head!');
-                mushroom.isVisible=true
+                mushroom.isVisible = true;
                 character.y = boxY + character.height;
                 character.velocityY = 0;
                 isOnBlock = true;
+            
+                // Trigger freeze phase and question
+                freezeState = true;
+                activeMushroom = mushroom;
+                mushroomDecisionTimer = 0; // Reset decision timer
             }
         }
     });return canJump
+}
+
+function removeActiveMushroom() {
+    const index = mushrooms.indexOf(activeMushroom);
+    if (index !== -1) mushrooms.splice(index, 1);
+    activeMushroom = null;
+    freezeState = false;
 }
 
 
@@ -523,6 +543,26 @@ function handleMovement_canvas4() {
 }
 
 
+
+function drawMushroomQuestionBox() {
+    if (!activeMushroom) return;
+
+    // Draw question box
+    ctx.fillStyle = '#fff';
+    ctx.strokeStyle = '#000';
+    ctx.lineWidth = 3;
+    ctx.fillRect(100, 100, canvas.width - 200, 200);
+    ctx.strokeRect(100, 100, canvas.width - 200, 200);
+
+    // ✅ Mushroom is guaranteed to be loaded now
+    ctx.drawImage(activeMushroom.image, canvas.width / 2 - 25, 140, 50, 50);
+
+    // Display question text
+    ctx.fillStyle = '#000';
+    ctx.font = '18px Arial';
+    ctx.fillText("Do you want to eat this mushroom?", canvas.width / 2 - 120, 120);
+    ctx.fillText("Press E to eat or I to ignore.", canvas.width / 2 - 100, 250);
+}
 
 
 
