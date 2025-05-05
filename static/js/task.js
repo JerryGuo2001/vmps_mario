@@ -1,30 +1,21 @@
-
-
 window.onload = () => {
     document.getElementById('welcome').style.display = 'block';
 };
 
-// Start Task
-function startiden() {
-    document.getElementById('welcome').style.display = 'none';
-    document.getElementById('identificationphase').style.display = 'block';
-    document.getElementById('next_iden').style.display = 'none';
-    startIdenPhase(a="idenCanvas");
-}
-
 
 function startExplore() {
-    document.getElementById('next_iden').style.display = 'none';
-    document.getElementById('identificationphase').style.display = 'none';
     document.getElementById('explorephase').style.display = 'block';
-    document.getElementById('next').style.display = 'none';
     initGame();
+}
+
+function startMemorry() {
+    document.getElementById('explorephase').style.display = 'none';
+    document.getElementById('memoryphase').style.display = 'block';
+    Memory_initGame();
 }
 
 // Complete Task
 function completeExplore() {
-    console.log("Complete Explore triggered");
-
     // Stop the game loop
     gameRunning = false;  // Set gameRunning flag to false to stop the loop
 
@@ -34,21 +25,9 @@ function completeExplore() {
         phase.style.display = 'none';
     });
 
-    // Show the identificationphasetwo phase
-    document.getElementById('identificationphasetwo').style.display = 'block';
-    startIdenPhase(a="two_idenCanvas");
+    startMemorry()
 }
 
-
-function startmem() {
-    document.getElementById('identificationphasetwo').style.display = 'none';
-    document.getElementById('memoryphase').style.display = 'block';
-}
-
-function completemem() {
-    document.getElementById('memoryphase').style.display = 'none';
-    document.getElementById('thankyou').style.display = 'block';
-}
 
 let mushrooms=[]
 async function initGame() {

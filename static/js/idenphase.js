@@ -1,7 +1,8 @@
 // Set up canvas and context for Mushroom Identification Task
 let idenCanvas,idenCtx,participantResponses,currentMushroomIndex, questionRepetitionCount,iden_total_repetition,responseTimeout,warningTimeout,responseGiven;
-
+let check_type
 function init_iden(a="idenCanvas"){
+    check_type=a
     // Set up canvas and context for Mushroom Identification Task
     idenCanvas = document.getElementById(a);  // Unique canvas for the identification task
     idenCtx = idenCanvas.getContext("2d");  // Unique context for the identification task
@@ -88,10 +89,16 @@ function iden_handleKeyDown(event) {
         clearTimeout(warningTimeout);
 
         // Check if the answer is correct
-        if (key === iden_shuffled_list[currentMushroomIndex].correctAnswer) {
-            displayAnswerFeedback("Correct!");
-        } else {
-            displayAnswerFeedback("Incorrect. The correct answer was: " + iden_shuffled_list[currentMushroomIndex].correctAnswer);
+        if (check_type=='idenCanvas'){
+            if (key === iden_shuffled_list[currentMushroomIndex].correctAnswer) {
+                displayAnswerFeedback("Correct!");
+            } else {
+                displayAnswerFeedback("Incorrect. The correct answer was: " + iden_shuffled_list[currentMushroomIndex].correctAnswer);
+            }
+        }else if (check_type=='two_idenCanvas'){
+            if (key) {
+                displayAnswerFeedback("Proceeding To Next Question...");
+            }
         }
     }
 }
@@ -174,7 +181,11 @@ function displayFinalResults() {
     idenCtx.fillText("Congratulations! Click the button below to proceed", 20, 100);
 
     // Show the 'Next Task' button
-    document.getElementById('next_iden').style.display = 'block';
+    if (check_type=='idenCanvas'){
+        document.getElementById('next_iden').style.display = 'block';
+    }else if (check_type=='two_idenCanvas'){
+        document.getElementById('next_mem').style.display = 'block';
+    }
 }
 
 

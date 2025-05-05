@@ -372,7 +372,7 @@ function handleBlockCollision_canvas4() {
         { x: worldWidth - 300, y: canvas.height * 0.3 + 20, type: OBJECT_TYPES.OBSTACLE }
     ];
 
-    ctx.fillStyle = '#A9A9A9';
+    // ctx.fillStyle = '#A9A9A9';
 
     // floatingBlocks.forEach(block => {
     //     let blockX = block.x - cameraOffset;

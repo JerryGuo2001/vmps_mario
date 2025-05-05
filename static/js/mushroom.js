@@ -145,7 +145,7 @@ let mushroom_ident_list = [
     },
     {
         name: "Mushroom5",
-        RGB:{r: 0, g: 0, b: 255},
+        targetRGB:{r: 0, g: 0, b: 255},
         position: { x: 4, y: 0 },
         correctAnswer: "e"
     }
@@ -223,3 +223,129 @@ async function generateMushroom(number) {
 
     return mushrooms;
 }
+
+let aMushrooms = [];
+let bMushrooms = [];
+
+async function preloadMushroomPairs() {
+    const allMushrooms = await generateMushroom(1);  // Get the full set, e.g., 5 mushrooms
+
+    const allPairs = [];
+
+    for (let i = 0; i < allMushrooms.length; i++) {
+        for (let j = 0; j < allMushrooms.length; j++) {
+            if (i !== j) {
+                // Add both (i, j) — mirror pairs included
+                allPairs.push([allMushrooms[i], allMushrooms[j]]);
+            }
+        }
+    }
+
+    // Shuffle the list of pairs
+    for (let i = allPairs.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [allPairs[i], allPairs[j]] = [allPairs[j], allPairs[i]];
+    }
+
+    // Split shuffled pairs into aMushrooms and bMushrooms
+    aMushrooms = allPairs.map(pair => pair[0]);
+    bMushrooms = allPairs.map(pair => pair[1]);
+
+    console.log(`Randomized ${aMushrooms.length} mushroom pairs.`);
+}
+
+
+
+// Utility to create a mushroom object
+function createMushroom(rgb, name, correctAnswer = null) {
+    return {
+        name,
+        targetRGB: rgb,
+        correctAnswer,  // Optional
+        imagefilename: null,  // To be filled by findMushroomByRGB later
+    };
+}
+
+// Define RGBs for each set
+const setA_RGBs = [
+    {r: 255, g: 0, b: 0},       // Red
+    {r: 0, g: 255, b: 0},
+    {r: 0, g: 20, b:250},
+    {r: 105, g: 105, b: 5}
+];
+
+const planetRGBs = {
+    planet1: [{r: 255, g: 255, b: 0}, {r: 250, g: 230, b: 20}, {r: 245, g: 240, b: 10}],
+    planet2: [{r: 0, g: 255, b: 0}, {r: 10, g: 240, b: 10}, {r: 5, g: 250, b: 15}],
+    planet3: [{r: 0, g: 0, b: 255}, {r: 10, g: 10, b: 240}, {r: 20, g: 5, b: 245}],
+    planet4: [{r: 255, g: 0, b: 255}, {r: 240, g: 10, b: 230}, {r: 250, g: 20, b: 245}],
+    planet5: [{r: 0, g: 255, b: 255}, {r: 10, g: 240, b: 240}, {r: 5, g: 250, b: 230}]
+};
+
+const setC_RGBs = [
+    {r: 255, g: 245, b: 30},
+    {r: 5, g: 230, b: 5},
+    {r: 15, g: 0, b: 230}
+];
+
+const setD_RGBs = [
+    {r: 180, g: 0, b: 0},
+    {r: 180, g: 180, b: 0},
+    {r: 0, g: 180, b: 0}
+];
+
+const setE_RGBs = [
+    {r: 200, g: 100, b: 0},
+    {r: 100, g: 200, b: 200},
+    {r: 80, g: 80, b: 250}
+];
+
+async function generateMushroomSets() {
+    // Utility to create full mushroom object with preload
+    async function buildMushroom(rgb, name, correctAnswer = null) {
+        return {
+            name,
+            targetRGB: rgb,
+            correctAnswer,
+            imagefilename: await findMushroomByRGB(rgb)
+        };
+    }
+
+    // Set A
+    const setA = await Promise.all(setA_RGBs.map((rgb, idx) =>
+        buildMushroom(rgb, `SetA_${idx + 1}`)
+    ));
+
+    // Set B (planet-based)
+    const setB = {};
+    for (const [planet, rgbList] of Object.entries(planetRGBs)) {
+        setB[planet] = await Promise.all(rgbList.map((rgb, idx) =>
+            buildMushroom(rgb, `SetB_${planet}_${idx + 1}`)
+        ));
+    }
+
+    // Set C
+    const setC = await Promise.all(setC_RGBs.map((rgb, idx) =>
+        buildMushroom(rgb, `SetC_${idx + 1}`)
+    ));
+
+    // Set D
+    const setD = await Promise.all(setD_RGBs.map((rgb, idx) =>
+        buildMushroom(rgb, `SetD_${idx + 1}`)
+    ));
+
+    // Set E
+    const setE = await Promise.all(setE_RGBs.map((rgb, idx) =>
+        buildMushroom(rgb, `SetE_${idx + 1}`)
+    ));
+
+    return { A: setA, B: setB, C: setC, D: setD, E: setE };
+}
+
+let mushroomSets = {};
+
+(async () => {
+    mushroomSets = await generateMushroomSets();
+    console.log(mushroomSets);
+})();
+

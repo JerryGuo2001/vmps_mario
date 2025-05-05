@@ -8,36 +8,28 @@
     <link rel="stylesheet" href="static/css/style.css">
 </head>
 <body>
-    <div class="container">
+    <div id="main" class="container">
         <div id="welcome" class="phase">
             <h1>Welcome to the Task</h1>
             <p>Click the button to start the task.</p>
-            <button onclick="startiden()">Start Task</button>
-            <button onclick="startExplore()">Debug Key</button>
-        </div>
-
-        <div id="identificationphase" class="phase" style="display:none;">
-          <h1>Identification Phase</h1>
-          <canvas id="idenCanvas" width="500" height="500"></canvas>
-          <button id='next_iden' onclick="startExplore()">Next Task</button>
+            <button onclick="initTaskOOO()">Start Task</button>
         </div>
 
         <div id="explorephase" class="phase" style="display:none;">
             <h1>Task Phase</h1>
             <canvas id="gameCanvas" width="500" height="500"></canvas>
             <p>Use arrow keys to move the character.</p>
-            <button id='next' onclick="completeExplore()">Next Task</button>
         </div>
 
-        <div id="identificationphasetwo" class="phase" style="display:none;">
+        <!-- <div id="identificationphasetwo" class="phase" style="display:none;">
           <h1>Identification Phase Two</h1>
           <canvas id="two_idenCanvas" width="500" height="500"></canvas>
-          <button onclick="startmem()">Next Task</button>
-        </div>
+          <button id='next_mem' onclick="startMemorry()">Next Task</button>
+        </div> -->
 
         <div id="memoryphase" class="phase" style="display:none;">
           <h1>Memory Phase</h1>
-          <button onclick="completemem()">Complete Task</button>
+          <canvas id="gamememory" width="500" height="500"></canvas>
         </div>
 
 
@@ -50,9 +42,10 @@
     <script src="static/js/mushroom_filename.js"></script>
     <script src="static/js/mushroom.js"></script>
     <script src="static/js/idenphase.js"></script>
-    <script src="static/js/memory.js"></script>
+    <script src="static/js/memory_phase.js"></script>
     <script src="static/js/game_env.js"></script>
     <script src="static/js/game_function.js"></script>
     <script src="static/js/task.js"></script>
+    <script src="static/js/Odd_One_Out_Phase.js"></script>
 </body>
 </html>
