@@ -1,5 +1,3 @@
-
-
 // Draw Obstacles for Rooms 1-3
 function drawObstacles() {
     ctx.fillStyle = '#A9A9A9'; // Gray for obstacles
@@ -79,7 +77,7 @@ function drawObstacles() {
             character.hp = Math.max(0, character.hp - 1);
 
             if (character.hp <= 0) {
-                currentCanvas = 1; // Move to Room 1
+                currentCanvas = 4; // Move to Room 1
                 character.hp = 0;  // Prevent negative HP
                 heartCollected = false; // Trigger heart reappearance
             }
@@ -222,33 +220,32 @@ function handleKeyUp(e) {
 let hungerInterval;
 let hungerCountdown = 10;
 
-function hungry(){
+async function hungry() {
     if (currentCanvas === 4 && character.hp > 0) {
         if (!hungerInterval) {
             hungerCountdown = 10;
-            hungerInterval = setInterval(() => {
-                if (currentCanvas === 4) {
-                    if (hungerCountdown > 0) {
-                        hungerCountdown--;
-                    }
-                    if (hungerCountdown === 0) {
-                        character.hp = Math.max(0, character.hp - 1);
-                        hungerCountdown = 10;
-                        if (character.hp <= 0) {
-                            currentCanvas = 1;
-                            character.hp = 0;
-                            heartCollected = false;
-                            character.x = 10;
-                            character.y = canvas.height * 0.8 - character.height;
-                            clearInterval(hungerInterval);
-                            hungerInterval = null;
-                            freezeTime=1000;
-                            mushrooms = generateMushroom(1)
-                        }
-                    }
-                } else {
+            hungerInterval = setInterval(async () => {
+                if (currentCanvas !== 4) {
                     clearInterval(hungerInterval);
                     hungerInterval = null;
+                    return;
+                }
+
+                if (hungerCountdown > 0) {
+                    hungerCountdown--;
+                } else {
+                    character.hp = Math.max(0, character.hp - 1);
+                    hungerCountdown = 10;
+
+                    if (character.hp <= 0) {
+                        clearInterval(hungerInterval);
+                        hungerInterval = null;
+                        mushrooms = await generateMushroom(1);
+                        currentCanvas = 4;
+                        character.hp = 1;
+                        freezeTime = 1000;
+                        cameraOffset = 0;
+                    }
                 }
             }, 1000);
         }

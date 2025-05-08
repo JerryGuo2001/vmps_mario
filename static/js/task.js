@@ -2,7 +2,6 @@ window.onload = () => {
     document.getElementById('welcome').style.display = 'block';
 };
 
-
 function startExplore() {
     document.getElementById('explorephase').style.display = 'block';
     initGame();
@@ -41,7 +40,7 @@ async function initGame() {
     gravity = 0.5;
     keys = {};
     currentQuestion = 1; // Initialize here
-    currentCanvas = (currentQuestion > 1 && character.hp > 0) ? 4 : 1;
+    currentCanvas = 4
 
     showPrompt = false;
 
@@ -66,25 +65,53 @@ let accumulatedTime = 0; // Time accumulated since the last update
 
 
 let gameRunning = true; // Flag to control whether the game should continue running
+let handleEatingChecker;
 
 function updateGame(currentTime) {
     if (!gameRunning) return;
 
     // Handle freeze due to mushroom decision
     if (freezeState && activeMushroom) {
-        mushroomDecisionTimer += 16;  // Add ~16ms per frame (assuming 60 FPS)
+
+        // ✅ Allow only 'e' and 'i' keys during freeze
+        const allowedKeys = ['e', 'i'];
+        for (let key in keys) {
+            if (!allowedKeys.includes(key)) {
+                keys[key] = false; // Disable any other key
+            }
+        }
+
+        if (freezeTime > 0) {
+            handleEatingChecker = true;
+            freezeTime -= 16;
+            requestAnimationFrame(updateGame);
+            return;
+        }
+
+        freezeTime = 0;
+        if (handleEatingChecker == true) {
+            handleEatingChecker = false;
+            revealOnlyValue = false;
+            removeActiveMushroom();
+            requestAnimationFrame(updateGame);
+            return;
+        }
+
+        mushroomDecisionTimer += 16;
 
         clearCanvas();
         drawBackground_canvas4();
-        drawCharacter_canvas4();
         drawHP_canvas4();
+        drawCharacter_canvas4();
         drawMushroomQuestionBox();
 
         if (keys['e']) {
+            freezeTime = 2000;
+            revealOnlyValue = true;
+            drawMushroomQuestionBox();
             character.hp += (activeMushroom.value === 'reset' ? -character.hp : activeMushroom.value);
-            removeActiveMushroom();
         } else if (keys['i'] || mushroomDecisionTimer >= maxDecisionTime) {
-            removeActiveMushroom();  // Auto-ignore after 5s
+            removeActiveMushroom();
         }
 
         requestAnimationFrame(updateGame);
@@ -98,8 +125,8 @@ function updateGame(currentTime) {
         requestAnimationFrame(updateGame);
         return;
     }
-
     freezeTime = 0;
+
 
     let deltaTime = (currentTime - lastTime) / 1000;
     lastTime = currentTime;
