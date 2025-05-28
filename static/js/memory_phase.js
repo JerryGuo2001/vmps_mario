@@ -99,15 +99,19 @@ function Memory_drawObstacles() {
         ctx.fillStyle = '#000';
         ctx.font = '16px Arial';
         ctx.fillText('Press E to eat', (onLeftMushroom ? leftX : rightX) - 10, floatY - 50);
-
+    
         if (keys['e'] && !memory_awaitingAnswer) {
-            memory_chosenMushroom = onLeftMushroom ? a : b;
+            // Randomly select either a or b regardless of which one is touched
+            const randomPick = Math.random() < 0.5 ? a : b;
+            memory_chosenMushroom = randomPick;
             memory_awaitingAnswer = true;
             Memory_gameRunning = false;
             keys['e'] = false;
             showMemoryChoicePrompt(memory_chosenMushroom);
         }
     }
+
+
 }
 
 function showMemoryChoicePrompt(mushroom) {

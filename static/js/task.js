@@ -48,7 +48,7 @@ async function initGame() {
     collectedMushrooms = [];
 
 
-    character.x = currentCanvas === 1 ? 10 : canvas.width / 2;
+    character.x = 30
     character.y = canvas.height * 0.8 - character.height;
 
     window.addEventListener('keydown', handleKeyDown);
@@ -106,7 +106,7 @@ function updateGame(currentTime) {
         drawMushroomQuestionBox();
 
         if (keys['e']) {
-            freezeTime = 2000;
+            freezeTime = 1000;
             revealOnlyValue = true;
             drawMushroomQuestionBox();
             character.hp += (activeMushroom.value === 'reset' ? -character.hp : activeMushroom.value);
@@ -135,20 +135,20 @@ function updateGame(currentTime) {
     while (accumulatedTime >= targetTimeStep) {
         clearCanvas();
 
-        if (currentCanvas !== 4) {
+        if (currentCanvas == 1) {
             if (init_position === true) {
-                character.x = 0;
+                character.x = canvas.width/2
             }
             drawBackground();
             handleMovement();
             drawObstacles();
             drawCharacter();
             drawHP();
-            drawDoor();
             init_position = false;
         } else {
             if (init_position === false) {
                 cameraOffset = 0;
+                character.x =30
             }
             drawBackground_canvas4();
             handleTextInteraction_canvas4();

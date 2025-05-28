@@ -1,6 +1,7 @@
 // Global Variables
-let character, gravity, keys, currentCanvas, showPrompt, currentQuestion, totalMushrooms, collectedMushrooms,atRightEdge,atLeftEdge,change_detect_right,change_detect_left;
-let totalQuestions = 1;
+let character, gravity, keys, currentCanvas, showPrompt, currentQuestion, totalMushrooms, collectedMushrooms,atRightEdge,change_detect_right,change_detect_left;
+let totalQuestions = 3;
+let atLeftEdge
 currentQuestion = 0;
 let cameraOffset = 0; // Tracks world movement in Canvas 4
 let worldWidth = 2000; // 🔹 Increase this to extend the map size
@@ -26,7 +27,17 @@ let marioSprite = new Image();
 marioSprite.src = "TexturePack/mario.png"; // Your uploaded sprite
 // Load the sky background image
 let skyImage = new Image();
-skyImage.src = 'TexturePack/sky.png'; // Replace with your actual image path
+skyImage.src = 'TexturePack/sky.png'; 
+let oceanImage = new Image();
+oceanImage.src = 'TexturePack/ocean.png';
+let desertImage = new Image();
+desertImage.src = 'TexturePack/desert.png';
+let forestImage = new Image();
+forestImage.src = 'TexturePack/forest.png';
+let caveImage = new Image();
+caveImage.src = 'TexturePack/cave.png';
+let lavaImage = new Image();
+lavaImage.src = 'TexturePack/lava.png';
 
 // Convert ground into an obstacle object
 let groundPlatforms = [
@@ -46,18 +57,33 @@ function getGroundY(xPosition) {
 
 
 function drawBackground_canvas4() {
+    var Imagetouse
+    if (env_deter=='sky'){
+        Imagetouse=skyImage
+    }else if(env_deter=='desert'){
+        Imagetouse=desertImage
+    }else if(env_deter=='ocean'){
+        Imagetouse=oceanImage
+    }else if(env_deter=='forest'){
+        Imagetouse=forestImage
+    }else if(env_deter=='cave'){
+        Imagetouse=caveImage
+    }else if(env_deter=='lava'){
+        Imagetouse=lavaImage
+    }
+
     // Draw the sky background
-    if (skyImage.complete) {
-        ctx.drawImage(skyImage, 0, 0, canvas.width, canvas.height);
+    if (Imagetouse.complete) {
+        ctx.drawImage(Imagetouse, 0, 0, canvas.width, canvas.height);
     } else {
-        skyImage.onload = () => {
-            drawBackground(); // Redraw once loaded
+        Imagetouse.onload = () => {
+            drawBackground_canvas4(); // Redraw once loaded
         };
     }
 
     groundPlatforms.forEach(platform => {
-        let screenStartX = platform.startX - cameraOffset + 20;
-        let screenEndX = platform.endX - cameraOffset - 50;
+        let screenStartX = platform.startX - cameraOffset;
+        let screenEndX = platform.endX - cameraOffset;
         let platformWidth = screenEndX - screenStartX;
         let platformHeight = 10; // Height of one layer of ground
 
@@ -80,12 +106,25 @@ function drawBackground_canvas4() {
 // Updated collision detection
 function handleCollisions_canvas4() {
     groundPlatforms.forEach(platform => {
+        const stuckLeft = character.x + character.width === platform.startX;
+        const stuckRight = character.x === platform.endX;
+
         if (character.y + character.height > platform.y) {
             if (character.x < platform.startX && character.x + character.width > platform.startX) {
                 character.x = platform.startX - character.width;
             }
             if (character.x < platform.endX && character.x + character.width > platform.endX) {
                 character.x = platform.endX;
+            }
+
+            // If exactly stuck on startX, push a bit left
+            if (stuckLeft) {
+                character.x -= 1;
+            }
+
+            // If exactly stuck on endX, push a bit right
+            if (stuckRight) {
+                character.x += 1;
             }
         }
     });
@@ -95,8 +134,9 @@ function handleCollisions_canvas4() {
 
 
 
+
 // **Handle text interaction logic:**
-function handleTextInteraction_canvas4() {
+async function handleTextInteraction_canvas4() {
     // Check if the character's HP is less than 5
     if (character.hp < 5) {
         // Display the message to collect half of stamina to proceed
@@ -119,8 +159,12 @@ function handleTextInteraction_canvas4() {
 
         // Check for player pressing 'E' and if their HP is greater than 5 to proceed to the next question
         if (keys['p'] && character.hp > 5) {
+            currentCanvas=1
+            character.hp=2
             currentQuestion += 1;  // Increment the question number when the player presses 'E' and HP > 5
+            mushrooms = await generateMushroom(1);
             console.log("Proceeding to next question: " + currentQuestion);
+
         }
     }
 }
@@ -424,7 +468,7 @@ async function checkHP_canvas4() {
         // Start freezing when hp <= 0
         freezeTime = 1000;  // Freeze for 3 seconds
         currentCanvas = 4;
-        character.hp=1;
+        character.hp=2;
         cameraOffset = 0;
         mushrooms = await generateMushroom(1);
     }
@@ -536,7 +580,7 @@ function handleMovement_canvas4() {
         character.y = newY;
     }
 
-    handleCollisions_canvas4();
+    // handleCollisions_canvas4();
     handleMushroomCollision_canvas4(atLeftEdge, atRightEdge);
 }
 
@@ -558,8 +602,8 @@ function drawMushroomQuestionBox() {
         ctx.fillStyle = '#000';
         ctx.font = '20px Arial';
         let valueText = activeMushroom.value === 'reset'
-            ? 'Effect: Toxic!'
-            : `Effect: ${activeMushroom.value > 0 ? '+' : ''}${activeMushroom.value}`;
+            ? 'Toxic!'
+            : `${activeMushroom.value > 0 ? '+' : ''}${activeMushroom.value}`;
         ctx.fillText(valueText, canvas.width / 2 - ctx.measureText(valueText).width / 2, 180);
     } else {
         // Show mushroom image

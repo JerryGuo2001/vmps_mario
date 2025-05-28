@@ -1,94 +1,92 @@
-// Draw Obstacles for Rooms 1-3
+let env_deter ='sky'
+//load the door image
+let leftDoorType = null;
+let rightDoorType = null;
+let doorsAssigned = false;
+const doorTypes = ['lava', 'forest', 'ocean', 'desert', 'cave'];
+
+const doorImages = {
+    lava: new Image(),
+    forest: new Image(),
+    ocean: new Image(),
+    desert: new Image(),
+    cave: new Image()
+};
+
+// Set image sources
+doorImages.lava.src = 'TexturePack/lavaDoor.png';
+doorImages.forest.src = 'TexturePack/forestDoor.png';
+doorImages.ocean.src = 'TexturePack/oceanDoor.png';
+doorImages.desert.src = 'TexturePack/desertDoor.png';
+doorImages.cave.src = 'TexturePack/caveDoor.png';
+
 function drawObstacles() {
-    ctx.fillStyle = '#A9A9A9'; // Gray for obstacles
-
     if (currentCanvas === 1) {
-        // Room 1: Single block forces jump
-        ctx.fillRect(200, canvas.height * 0.8 - 40, 50, 40); // Blocking block
-        checkObstacleCollision(200, canvas.height * 0.8 - 40, 50, 40);
-
-        // Initialize heartCollected if undefined
-        if (typeof heartCollected === 'undefined') {
-            heartCollected = false;
+        if (!doorsAssigned) {
+            // Randomly select two different door types
+            const shuffled = [...doorTypes].sort(() => Math.random() - 0.5);
+            leftDoorType = shuffled[0];
+            rightDoorType = shuffled[1];
+            doorsAssigned = true;
         }
 
-        // Re-spawn heart if HP is 0
-        if (character.hp <= 0 && heartCollected) {
-            heartCollected = false;
-        }
+        const doorWidth = 70;
+        const doorHeight = 75;
+        const doorY = canvas.height * 0.8 - doorHeight + 5;
 
-        let heartX = 300;
-        let heartY = 370;
-        let heartSize = 10;
+        const leftX = canvas.width * 0.25 - doorWidth / 2;
+        const rightX = canvas.width * 0.75 - doorWidth / 2;
 
-        // Draw Heart if not collected
-        if (!heartCollected) {
-            ctx.fillStyle = '#FF0000';
-            ctx.beginPath();
-            ctx.moveTo(heartX, heartY);
-            ctx.bezierCurveTo(heartX - heartSize, heartY - heartSize, heartX - heartSize * 2, heartY + heartSize / 2, heartX, heartY + heartSize * 1.5);
-            ctx.bezierCurveTo(heartX + heartSize * 2, heartY + heartSize / 2, heartX + heartSize, heartY - heartSize, heartX, heartY);
-            ctx.closePath();
-            ctx.fill();
+        // Draw doors using selected images
+        ctx.drawImage(doorImages[leftDoorType], leftX, doorY, doorWidth, doorHeight);
+        ctx.drawImage(doorImages[rightDoorType], rightX, doorY, doorWidth, doorHeight);
 
-            // Heart Collection Logic
-            if (Math.abs((character.x + character.width / 2) - heartX) <= 30 &&
-                Math.abs((character.y + character.height) - heartY) <= 30) {
+        // Interaction with left door
+        if (
+            character.x + character.width > leftX &&
+            character.x < leftX + doorWidth &&
+            character.y + character.height > doorY
+        ) {
+            showPrompt = true;
+            ctx.fillStyle = '#000';
+            ctx.fillText('Press E to enter', leftX - 20, doorY - 30);
 
-                character.hp = Math.max(character.hp, 1); // Ensure at least 1 HP
-                heartCollected = true; // Mark as collected
-
-                // Display floating heart message
-                const heartMessage = document.createElement('div');
-                heartMessage.style.position = 'fixed';
-                heartMessage.style.top = '50%';
-                heartMessage.style.left = '50%';
-                heartMessage.style.transform = 'translate(-50%, -50%)';
-                heartMessage.style.fontSize = '50px';
-                heartMessage.style.fontWeight = 'bold';
-                heartMessage.style.color = 'red';
-                heartMessage.innerText = '❤️ +1';
-                heartMessage.style.zIndex = '1000';
-                document.body.appendChild(heartMessage);
-
-                setTimeout(() => {
-                    document.body.removeChild(heartMessage);
-                }, 2000);
+            if (keys['e']) {
+                env_deter = leftDoorType;
+                character.x = 10;
+                character.y = canvas.height * 0.8 - character.height;
+                console.log("Environment selected:", env_deter);
+                currentCanvas = 4;
             }
         }
-    }
-    else if (currentCanvas === 2) {
-        // Room 2: Two obstacles to jump over
-        ctx.fillRect(150, canvas.height * 0.8 - 60, 50, 60);
-        checkObstacleCollision(150, canvas.height * 0.8 - 60, 50, 60);
-    } else if (currentCanvas === 3) {
-        // Room 3: Tall obstacle and a pit
-        ctx.fillRect(250, canvas.height * 0.8 - 100, 50, 100);
-        checkObstacleCollision(250, canvas.height * 0.8 - 100, 50, 100);
 
-        // Draw the Pit
-        ctx.fillStyle = '#000';
-        ctx.fillRect(400, canvas.height * 0.8, 100, 20);
+        // Interaction with right door
+        else if (
+            character.x + character.width > rightX &&
+            character.x < rightX + doorWidth &&
+            character.y + character.height > doorY
+        ) {
+            showPrompt = true;
+            ctx.fillStyle = '#000';
+            ctx.fillText('Press E to enter', rightX - 20, doorY - 30);
 
-        // Pit penalty: Check if player falls into it
-        if (character.x > 400 && character.x < 500 &&
-            character.y + character.height >= canvas.height * 0.8) {
-
-            character.hp = Math.max(0, character.hp - 1);
-
-            if (character.hp <= 0) {
-                currentCanvas = 4; // Move to Room 1
-                character.hp = 0;  // Prevent negative HP
-                heartCollected = false; // Trigger heart reappearance
+            if (keys['e']) {
+                env_deter = rightDoorType;
+                character.x = 10;
+                character.y = canvas.height * 0.8 - character.height;
+                console.log("Environment selected:", env_deter);
+                currentCanvas = 4;
             }
-
-            character.x = 10;
-            character.y = canvas.height * 0.8 - character.height;
+        } else {
+            showPrompt = false;
         }
-
-        ctx.fillStyle = '#A9A9A9';
+    } else {
+        doorsAssigned = false; // reset for next time we enter canvas 1
     }
 }
+2
+
+
 
 
 
@@ -142,38 +140,6 @@ function checkObstacleCollision(obstacleX, obstacleY, obstacleWidth, obstacleHei
 
 
 
-// Draw Door (Placed After Obstacles)
-function drawDoor() {
-    if (currentCanvas < 4) {
-        let doorWidth = 30;
-        let doorHeight = 50;
-        let doorX = canvas.width - doorWidth - 50;
-        let doorY = canvas.height * 0.8 - doorHeight;
-
-        ctx.fillStyle = '#8B4513';
-        ctx.fillRect(doorX, doorY, doorWidth, doorHeight);
-
-        ctx.fillStyle = '#FFD700';
-        let handleRadius = 4;
-        let handleX = doorX + doorWidth - 8;
-        let handleY = doorY + doorHeight / 2;
-
-        ctx.beginPath();
-        ctx.arc(handleX, handleY, handleRadius, 0, Math.PI * 2);
-        ctx.fill();
-
-        if (character.x + character.width > doorX && character.x < doorX + doorWidth &&
-            character.y + character.height > doorY) {
-            showPrompt = true;
-            ctx.fillStyle = '#000';
-            ctx.font = '16px Arial';
-            ctx.fillText('Press E to enter', doorX - 40, doorY - 10);
-        } else {
-            showPrompt = false;
-        }
-    }
-}
-
 // Create Character
 function createCharacter() {
     return {
@@ -202,12 +168,6 @@ function getRandomColor() {
 
 function handleKeyDown(e) {
     keys[e.key] = true;
-
-    if (showPrompt && e.key === 'e') {
-        if (currentCanvas < 4) {
-            nextCanvas();
-        }
-    }
 }
 
 
