@@ -39,11 +39,43 @@ caveImage.src = 'TexturePack/cave.png';
 let lavaImage = new Image();
 lavaImage.src = 'TexturePack/lava.png';
 
-// Convert ground into an obstacle object
-let groundPlatforms = [
-    { startX: worldWidth*0, endX: worldWidth*0.5, y: worldHeight*0.7, type: OBJECT_TYPES.OBSTACLE, display: true },
-    { startX: worldWidth*0.5, endX: worldWidth, y: 300, type: OBJECT_TYPES.OBSTACLE, display: true }
-];
+function generateGroundPlatforms(worldWidth, minHeight, maxHeight, numSections = null) {
+    if (numSections === null) {
+        numSections = Math.floor(Math.random() * 4) + 2; // 2–5 sections
+    }
+
+    const platforms = [];
+    const sectionWidth = Math.floor(worldWidth / numSections);
+    let lastY = Math.floor(Math.random() * (maxHeight - minHeight + 1)) + minHeight;
+
+    for (let i = 0; i < numSections; i++) {
+        const startX = i * sectionWidth;
+        const endX = (i === numSections - 1) ? worldWidth : startX + sectionWidth;
+
+        // Smooth vertical transition
+        const maxStep = 60;
+        const deltaY = Math.floor(Math.random() * (2 * maxStep + 1)) - maxStep;
+        const y = Math.min(Math.max(lastY + deltaY, minHeight), maxHeight);
+
+        platforms.push({
+            startX,
+            endX,
+            y,
+            type: OBJECT_TYPES.OBSTACLE,
+            display: true
+        });
+
+        lastY = y;
+    }
+
+    return platforms;
+}
+
+
+
+// Generate new platforms each time with varied height
+let groundPlatforms = generateGroundPlatforms(worldWidth, 200, 400);
+
 
 // Get ground Y at character position
 function getGroundY(xPosition) {
@@ -106,23 +138,23 @@ function drawBackground_canvas4() {
 // Updated collision detection
 function handleCollisions_canvas4() {
     groundPlatforms.forEach(platform => {
-        const stuckLeft = character.x + character.width === platform.startX;
-        const stuckRight = character.x === platform.endX;
+        const epsilon = 0.5;
+        const stuckLeft = Math.abs(character.x + character.width - platform.startX) < epsilon;
+        const stuckRight = Math.abs(character.x - platform.endX) < epsilon;
+
 
         if (character.y + character.height > platform.y) {
-            if (character.x < platform.startX && character.x + character.width > platform.startX) {
+            if (character.y + character.height > platform.y &&
+                character.y < platform.y + 10 ){
                 character.x = platform.startX - character.width;
             }
             if (character.x < platform.endX && character.x + character.width > platform.endX) {
                 character.x = platform.endX;
             }
 
-            // If exactly stuck on startX, push a bit left
             if (stuckLeft) {
                 character.x -= 1;
             }
-
-            // If exactly stuck on endX, push a bit right
             if (stuckRight) {
                 character.x += 1;
             }
@@ -138,7 +170,7 @@ function handleCollisions_canvas4() {
 // **Handle text interaction logic:**
 async function handleTextInteraction_canvas4() {
     // Check if the character's HP is less than 5
-    if (character.hp < 5) {
+    if (character.hp <= 5) {
         // Display the message to collect half of stamina to proceed
         ctx.fillStyle = '#000';
         ctx.font = '16px Arial';
@@ -158,13 +190,13 @@ async function handleTextInteraction_canvas4() {
         ctx.fillText(text, xPos, yPos);
 
         // Check for player pressing 'E' and if their HP is greater than 5 to proceed to the next question
-        if (keys['p'] && character.hp > 5) {
+        if (keys['p'] && character.hp >= 5) {
             currentCanvas=1
             character.hp=2
             currentQuestion += 1;  // Increment the question number when the player presses 'E' and HP > 5
             mushrooms = await generateMushroom(1);
             console.log("Proceeding to next question: " + currentQuestion);
-
+            doorsAssigned = false;
         }
     }
 }
@@ -460,6 +492,17 @@ function handleBlockCollision_canvas4() {
 }
 
 
+function getRespawnSpot() {
+    const platform = groundPlatforms[0];
+
+    // Use the left corner of the first platform
+    const x = platform.startX + 5;  // small buffer to avoid clipping the edge
+    const y = platform.y - character.height - 5;  // slightly above the platform
+
+    return { x, y };
+}
+
+
 
 let freezeTime = 0; // Variable to track freeze time
 
@@ -469,6 +512,9 @@ async function checkHP_canvas4() {
         freezeTime = 1000;  // Freeze for 3 seconds
         currentCanvas = 4;
         character.hp=2;
+        const respawn = getRespawnSpot();
+        character.x = respawn.x;
+        character.y = respawn.y;
         cameraOffset = 0;
         mushrooms = await generateMushroom(1);
     }
@@ -571,14 +617,23 @@ function handleMovement_canvas4() {
     character.velocityY += gravity;
     let newY = character.y + character.velocityY;
 
-    // **Check if the new Y position collides with ground**
-    if (character.y + character.height > characterGroundY) {
-        character.y = characterGroundY - character.height;
+    // Try fuzzy ground detection
+    let leftFootX = characterWorldX + 2;
+    let rightFootX = characterWorldX + character.width - 2;
+    let fuzzyGroundY = Math.min(getGroundY(leftFootX), getGroundY(rightFootX));
+
+    // Only land if character is above the ground
+    if (
+        character.y + character.height <= fuzzyGroundY &&
+        character.y + character.height + character.velocityY >= fuzzyGroundY
+    ) {
+        character.y = fuzzyGroundY - character.height;
         character.velocityY = 0;
-        canJump = true; // Reset jump when character lands
+        canJump = true;
     } else {
         character.y = newY;
     }
+
 
     // handleCollisions_canvas4();
     handleMushroomCollision_canvas4(atLeftEdge, atRightEdge);

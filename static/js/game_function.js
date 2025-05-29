@@ -57,6 +57,8 @@ function drawObstacles() {
                 character.y = canvas.height * 0.8 - character.height;
                 console.log("Environment selected:", env_deter);
                 currentCanvas = 4;
+                // Generate new platforms each time with varied height
+                groundPlatforms = generateGroundPlatforms(worldWidth, 200, 400);
             }
         }
 

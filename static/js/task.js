@@ -49,7 +49,7 @@ async function initGame() {
 
 
     character.x = 30
-    character.y = canvas.height * 0.8 - character.height;
+    character.y = 10;
 
     window.addEventListener('keydown', handleKeyDown);
     window.addEventListener('keyup', handleKeyUp);
@@ -148,7 +148,9 @@ function updateGame(currentTime) {
         } else {
             if (init_position === false) {
                 cameraOffset = 0;
-                character.x =30
+                const respawn = getRespawnSpot();
+                character.x = respawn.x;
+                character.y = respawn.y;
             }
             drawBackground_canvas4();
             handleTextInteraction_canvas4();
