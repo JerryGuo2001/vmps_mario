@@ -1,8 +1,8 @@
 // Global Variables
 let character, gravity, keys, currentCanvas, showPrompt, currentQuestion, totalMushrooms, collectedMushrooms,atRightEdge,change_detect_right,change_detect_left;
-let totalQuestions = 3;
+let totalQuestions = 4;
 let atLeftEdge
-currentQuestion = 0;
+currentQuestion = 1;
 let cameraOffset = 0; // Tracks world movement in Canvas 4
 let worldWidth = 2000; // 🔹 Increase this to extend the map size
 let worldHeight = 600; // Optional: Increase height if needed
@@ -199,7 +199,7 @@ async function handleTextInteraction_canvas4() {
             character.hp=2
             currentQuestion += 1;  // Increment the question number when the player presses 'E' and HP > 5
             groundPlatforms = generateGroundPlatforms(worldWidth, 200, 400);
-            mushrooms = await generateMushroom(1);
+            mushrooms = await generateMushroom(currentQuestion);
             console.log("Proceeding to next question: " + currentQuestion);
             roomChoiceStartTime = performance.now()
             doorsAssigned = false;
@@ -528,7 +528,7 @@ async function checkHP_canvas4() {
         character.x = respawn.x;
         character.y = respawn.y;
         cameraOffset = 0;
-        mushrooms = await generateMushroom(1);
+        mushrooms = await generateMushroom(currentQuestion);
     }
 }
 

@@ -152,45 +152,100 @@ let mushroom_ident_list = [
 ];
 
 
-async function generateMushroom(number) {
+async function generateMushroom(setNumber) {
     const mushrooms = [];
 
-    if (number === 1) {
-        const mushroomData = [
-            { rgb: { r: 255, g: 0, b: 0 }, value: 1, x: groundPlatforms[0].startX + 400, y: groundPlatforms[0].y - 150 },
-            { rgb: { r: 255, g: 255, b: 0 }, value: -1, x: groundPlatforms[1].startX + 100, y: groundPlatforms[1].y - 150 },
-            { rgb: { r: 0, g: 255, b: 0 }, value: 3, x: groundPlatforms[0].startX + 330, y: groundPlatforms[0].y - 150 },
-            { rgb: { r: 0, g: 255, b: 255 }, value: 'reset', x: groundPlatforms[1].startX + 150, y: groundPlatforms[1].y - 150 },
-            { rgb: { r: 0, g: 0, b: 255 }, value: 5, x: groundPlatforms[0].startX + 50, y: groundPlatforms[0].y - 150 }
-        ];
+    // Define 5 different mushroom sets
+    const mushroomSets = [
+        [
+            { rgb: { r: 255, g: 0, b: 0 }, value: 1 },
+            { rgb: { r: 255, g: 255, b: 0 }, value: -1 },
+            { rgb: { r: 0, g: 255, b: 0 }, value: 3 },
+            { rgb: { r: 0, g: 255, b: 255 }, value: 'reset' },
+            { rgb: { r: 0, g: 0, b: 255 }, value: 5 }
+        ],
+        [
+            { rgb: { r: 128, g: 0, b: 0 }, value: 2 },
+            { rgb: { r: 128, g: 128, b: 0 }, value: -2 },
+            { rgb: { r: 0, g: 128, b: 0 }, value: 4 },
+            { rgb: { r: 0, g: 128, b: 128 }, value: 'reset' },
+            { rgb: { r: 0, g: 0, b: 128 }, value: 6 }
+        ],
+        [
+            { rgb: { r: 255, g: 102, b: 102 }, value: 1 },
+            { rgb: { r: 255, g: 204, b: 0 }, value: -1 },
+            { rgb: { r: 102, g: 255, b: 102 }, value: 3 },
+            { rgb: { r: 102, g: 255, b: 255 }, value: 'reset' },
+            { rgb: { r: 102, g: 102, b: 255 }, value: 5 }
+        ],
+        [
+            { rgb: { r: 200, g: 0, b: 0 }, value: 0 },
+            { rgb: { r: 200, g: 200, b: 0 }, value: -3 },
+            { rgb: { r: 0, g: 200, b: 0 }, value: 6 },
+            { rgb: { r: 0, g: 200, b: 200 }, value: 'reset' },
+            { rgb: { r: 0, g: 0, b: 200 }, value: 7 }
+        ],
+        [
+            { rgb: { r: 150, g: 50, b: 50 }, value: 2 },
+            { rgb: { r: 150, g: 150, b: 0 }, value: -2 },
+            { rgb: { r: 50, g: 150, b: 50 }, value: 4 },
+            { rgb: { r: 50, g: 150, b: 150 }, value: 'reset' },
+            { rgb: { r: 50, g: 50, b: 150 }, value: 6 }
+        ]
+    ];
 
-        for (const { rgb, value, x, y } of mushroomData) {
-            const filename = await findMushroomByRGB(rgb);
-            const img = new Image();
-            img.src = 'TexturePack/mushroom_pack/' + filename;
-            await new Promise((resolve, reject) => {
-                img.onload = resolve;
-                img.onerror = reject;
-            });
+    // Safety check
+    if (setNumber < 1 || setNumber > 5) {
+        console.warn("Invalid set number");
+        return [];
+    }
 
-            mushrooms.push({
-                x,
-                y,
-                type: 0,
-                value,
-                isVisible: false,
-                growthFactor: 0,
-                growthSpeed: 0.05,
-                growthComplete: false,
-                targetRGB: rgb,
-                imagefilename: filename,
-                image: img // ✅ loaded image now available
-            });
-        }
+    const selectedSet = mushroomSets[setNumber - 1];
+    const platformCount = groundPlatforms.length;
+    const shuffled = [...selectedSet].sort(() => Math.random() - 0.5);
+
+    // Assign mushrooms to platforms, possibly doubling up
+    const platformAssignments = [];
+    for (let i = 0; i < 5; i++) {
+        const platformIndex = i < platformCount ? i : Math.floor(Math.random() * platformCount);
+        platformAssignments.push(platformIndex);
+    }
+
+    for (let i = 0; i < 5; i++) {
+        const { rgb, value } = shuffled[i];
+        const platform = groundPlatforms[platformAssignments[i]];
+
+        const buffer = 50;
+        const x = platform.startX + buffer + Math.random() * (platform.endX - platform.startX - 2 * buffer);
+        const y = platform.y - 150;
+
+        const filename = await findMushroomByRGB(rgb);
+        const img = new Image();
+        img.src = 'TexturePack/mushroom_pack/' + filename;
+
+        await new Promise((resolve, reject) => {
+            img.onload = resolve;
+            img.onerror = reject;
+        });
+
+        mushrooms.push({
+            x,
+            y,
+            type: 0,
+            value,
+            isVisible: false,
+            growthFactor: 0,
+            growthSpeed: 0.05,
+            growthComplete: false,
+            targetRGB: rgb,
+            imagefilename: filename,
+            image: img
+        });
     }
 
     return mushrooms;
 }
+
 
 
 let aMushrooms = [];
