@@ -3,6 +3,11 @@ let env_deter ='sky'
 let leftDoorType = null;
 let rightDoorType = null;
 let doorsAssigned = false;
+let currentRoom = null;
+let roomRepetitionMap = {};  // e.g., { "lava": 0, "forest": 2 }
+let roomChoiceStartTime = null;
+
+
 const doorTypes = ['lava', 'forest', 'ocean', 'desert', 'cave'];
 
 const doorImages = {
@@ -23,11 +28,11 @@ doorImages.cave.src = 'TexturePack/caveDoor.png';
 function drawObstacles() {
     if (currentCanvas === 1) {
         if (!doorsAssigned) {
-            // Randomly select two different door types
             const shuffled = [...doorTypes].sort(() => Math.random() - 0.5);
             leftDoorType = shuffled[0];
             rightDoorType = shuffled[1];
             doorsAssigned = true;
+            roomChoiceStartTime = performance.now(); // Start timer now
         }
 
         const doorWidth = 70;
@@ -53,13 +58,33 @@ function drawObstacles() {
 
             if (keys['e']) {
                 env_deter = leftDoorType;
+                currentRoom = env_deter;
+            
+                // Log room choice
+                const rt = performance.now() - roomChoiceStartTime;
+                const timeElapsed = performance.now() - participantData.startTime;
+            
+                participantData.trials.push({
+                    id: participantData.id,
+                    trial_type: 'room_choice',
+                    choice: 'left',
+                    room: leftDoorType,
+                    rt: rt,
+                    time_elapsed: timeElapsed
+                });
+            
+                roomChoiceStartTime = null; // ✅ Reset timer
+            
+                // Set up room entry
+                if (!roomRepetitionMap[currentRoom]) {
+                    roomRepetitionMap[currentRoom] = 1;
+                }
                 character.x = 10;
                 character.y = canvas.height * 0.8 - character.height;
-                console.log("Environment selected:", env_deter);
                 currentCanvas = 4;
-                // Generate new platforms each time with varied height
-                groundPlatforms = generateGroundPlatforms(worldWidth, 200, 400);
             }
+            
+
         }
 
         // Interaction with right door
@@ -74,11 +99,33 @@ function drawObstacles() {
 
             if (keys['e']) {
                 env_deter = rightDoorType;
+                currentRoom = env_deter;
+            
+                // Log room choice
+                const rt = performance.now() - roomChoiceStartTime;
+                const timeElapsed = performance.now() - participantData.startTime;
+            
+                participantData.trials.push({
+                    id: participantData.id,
+                    trial_type: 'room_choice',
+                    choice: 'right',
+                    room: rightDoorType,
+                    rt: rt,
+                    time_elapsed: timeElapsed
+                });
+            
+                roomChoiceStartTime = null; // ✅ Reset timer
+            
+                // Set up room entry
+                if (!roomRepetitionMap[currentRoom]) {
+                    roomRepetitionMap[currentRoom] = 1;
+                }
                 character.x = 10;
                 character.y = canvas.height * 0.8 - character.height;
-                console.log("Environment selected:", env_deter);
                 currentCanvas = 4;
             }
+            
+
         } else {
             showPrompt = false;
         }
@@ -202,12 +249,18 @@ async function hungry() {
                     if (character.hp <= 0) {
                         clearInterval(hungerInterval);
                         hungerInterval = null;
+                    
+                        // Increment repetition for this room
+                        if (currentRoom) {
+                            roomRepetitionMap[currentRoom] = (roomRepetitionMap[currentRoom] || 1) + 1;
+                        }
+                    
                         mushrooms = await generateMushroom(1);
                         currentCanvas = 4;
                         character.hp = 1;
                         freezeTime = 1000;
                         cameraOffset = 0;
-                    }
+                    }                    
                 }
             }, 1000);
         }

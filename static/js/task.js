@@ -2,6 +2,19 @@ window.onload = () => {
     document.getElementById('welcome').style.display = 'block';
 };
 
+
+function startWithID() {
+    const idInput = document.getElementById('participantIdInput').value.trim();
+    if (!idInput) {
+        alert("Please enter your participant ID.");
+        return;
+    }
+    participantData.id = idInput;
+    participantData.startTime = performance.now(); // ✅ set here
+    initTaskOOO(); // or your starting function
+}
+
+
 function startExplore() {
     document.getElementById('explorephase').style.display = 'block';
     initGame();
@@ -106,11 +119,54 @@ function updateGame(currentTime) {
         drawMushroomQuestionBox();
 
         if (keys['e']) {
+            if (activeMushroom?.decisionMade) return;
+            activeMushroom.decisionMade = true;
+        
+            const rt = performance.now() - mushroomDecisionStartTime;
+            const timeElapsed = performance.now() - participantData.startTime;
+        
+            participantData.trials.push({
+                id: participantData.id,
+                trial_index: mushroomTrialIndex++,
+                trial_type: 'explore_decision',
+                stimulus: activeMushroom?.imagefilename || 'unknown',
+                value: activeMushroom?.value ?? null,
+                decision: 'eat',
+                rt: rt,
+                time_elapsed: timeElapsed,
+                room: currentRoom,
+                room_repetition: roomRepetitionMap[currentRoom] || 1,
+                hp: character.hp
+            });
+        
             freezeTime = 1000;
             revealOnlyValue = true;
             drawMushroomQuestionBox();
             character.hp += (activeMushroom.value === 'reset' ? -character.hp : activeMushroom.value);
+            mushroomDecisionStartTime = null;
+        
         } else if (keys['i'] || mushroomDecisionTimer >= maxDecisionTime) {
+            if (activeMushroom?.decisionMade) return;
+            activeMushroom.decisionMade = true;
+        
+            const rt = performance.now() - mushroomDecisionStartTime;
+            const timeElapsed = performance.now() - participantData.startTime;
+        
+            participantData.trials.push({
+                id: participantData.id,
+                trial_index: mushroomTrialIndex++,
+                trial_type: 'explore_decision',
+                stimulus: activeMushroom?.imagefilename || 'unknown',
+                value: activeMushroom?.value ?? null,
+                decision: (keys['i'] ? 'ignore' : 'timeout'),
+                rt: rt,
+                time_elapsed: timeElapsed,
+                room: currentRoom,
+                room_repetition: roomRepetitionMap[currentRoom] || 1,
+                hp: character.hp
+            });
+        
+            mushroomDecisionStartTime = null;
             removeActiveMushroom();
         }
 

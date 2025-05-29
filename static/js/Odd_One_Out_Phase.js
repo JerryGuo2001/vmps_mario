@@ -1,5 +1,6 @@
 let currentTrialOOO,trialsOOO;
 let typeOOO=0
+let trialStartTimeOOO = null;
 
 async function initTaskOOO() {
     currentTrialOOO = 0;
@@ -69,21 +70,43 @@ async function initTaskOOO() {
 function showTrialOOO() {
     const trialSetOOO = trialsOOO[currentTrialOOO];
     const imgContainerOOO = document.getElementById('imageContainerOOO');
-    imgContainerOOO.innerHTML = ''; // Clear previous images
+    imgContainerOOO.innerHTML = '';
 
-    trialSetOOO.forEach((mushroomOOO, index) => {
-        const imgOOO = document.createElement('img');
-        imgOOO.src ='TexturePack/mushroom_pack/'+ mushroomOOO.imagefilename;
-        imgOOO.style.width = '150px';
-        imgOOO.alt = mushroomOOO.name;
-        imgContainerOOO.appendChild(imgOOO);
+    trialSetOOO.forEach((mushroomOOO) => {
+        const img = document.createElement('img');
+        img.src = 'TexturePack/mushroom_pack/' + mushroomOOO.imagefilename;
+        img.style.width = '150px';
+        img.alt = mushroomOOO.name;
+        imgContainerOOO.appendChild(img);
     });
+
+    // ✅ set trialStartTime at the end
+    trialStartTimeOOO = performance.now();
 }
+
 
 function handleKeyPressOOO(event) {
     if (!['1', '2', '3'].includes(event.key)) return;
 
-    console.log(`OOO Trial ${currentTrialOOO + 1}, chosen: ${event.key}`);
+    const rt = performance.now() - trialStartTimeOOO;
+    const timeElapsed = performance.now() - participantData.startTime;
+
+    const trialSetOOO = trialsOOO[currentTrialOOO];  // 3 mushroom objects
+    const choiceIndex = parseInt(event.key) - 1;
+
+    const stimulusImages = trialSetOOO.map(m => m.imagefilename);
+    const chosenImage = stimulusImages[choiceIndex];
+
+    participantData.trials.push({
+        id: participantData.id,
+        trial_index: currentTrialOOO + 1,
+        trial_type: 'odd_one_out',
+        stimulus: stimulusImages,
+        chosen_image: chosenImage,
+        response: event.key,
+        rt: rt,
+        time_elapsed: timeElapsed
+    });
 
     currentTrialOOO++;
     if (currentTrialOOO < trialsOOO.length) {
@@ -93,14 +116,28 @@ function handleKeyPressOOO(event) {
     }
 }
 
+
+
 function finishTaskOOO() {
     const taskDivOOO = document.getElementById('oddOneOutTaskDiv');
     if (taskDivOOO) taskDivOOO.style.display = 'none';
     document.removeEventListener('keydown', handleKeyPressOOO);
-    if (typeOOO==0){
-        startExplore()
-        typeOOO++
-    }else if(typeOOO==1){
+
+    if (typeOOO == 0) {
+        startExplore();
+        typeOOO++;
+    } else if (typeOOO == 1) {
         document.getElementById('thankyou').style.display = 'block';
+
+        const id = participantData.id || "unknown";
+
+        // ⬇️ Download main trial data
+        const trialFilename = `data_${id}.csv`;
+        downloadCSV(participantData.trials, trialFilename);
+
+        // ⬇️ Download mushroomSets (if exists)
+        if (typeof mushroomSets !== 'undefined' && mushroomSets !== null) {
+            downloadMushroomSetCSV(mushroomSets, id, `mushroomSets_${id}.csv`);
+        }
     }
 }

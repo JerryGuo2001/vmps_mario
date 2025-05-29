@@ -13,6 +13,9 @@ let activeMushroom = null;
 let mushroomDecisionTimer = 0;
 const maxDecisionTime = 5000; // 5 seconds in ms
 let revealOnlyValue;
+let mushroomTrialIndex = 0;
+let mushroomDecisionStartTime = null;
+
 
 // Define object properties
 const OBJECT_TYPES = {
@@ -38,6 +41,7 @@ let caveImage = new Image();
 caveImage.src = 'TexturePack/cave.png';
 let lavaImage = new Image();
 lavaImage.src = 'TexturePack/lava.png';
+
 
 function generateGroundPlatforms(worldWidth, minHeight, maxHeight, numSections = null) {
     if (numSections === null) {
@@ -190,12 +194,14 @@ async function handleTextInteraction_canvas4() {
         ctx.fillText(text, xPos, yPos);
 
         // Check for player pressing 'E' and if their HP is greater than 5 to proceed to the next question
-        if (keys['p'] && character.hp >= 5) {
+        if (keys['p'] && character.hp > 5) {
             currentCanvas=1
             character.hp=2
             currentQuestion += 1;  // Increment the question number when the player presses 'E' and HP > 5
+            groundPlatforms = generateGroundPlatforms(worldWidth, 200, 400);
             mushrooms = await generateMushroom(1);
             console.log("Proceeding to next question: " + currentQuestion);
+            roomChoiceStartTime = performance.now()
             doorsAssigned = false;
         }
     }
@@ -249,6 +255,9 @@ function drawMysBox() {
                 character.x < boxX + 25 &&
                 character.velocityY < 0) {
                 mushroom.isVisible=true
+                if (mushroomDecisionStartTime === null) {
+                    mushroomDecisionStartTime = performance.now();
+                }
                 character.velocityY = 0;
             }
             if (character.velocityY >= 0 &&
@@ -317,6 +326,9 @@ function drawMysBox() {
                 character.y = boxY + character.height;
                 character.velocityY = 0;
                 isOnBlock = true;
+                if (mushroomDecisionStartTime === null) {
+                    mushroomDecisionStartTime = performance.now();
+                }
             }
         }
     });return canJump

@@ -9,6 +9,8 @@ var memory_init_position=true
 let memory_lastTime = 0; // To store the time of the last frame
 let memory_accumulatedTime = 0; // Time accumulated since the last update
 
+let memory_trialStartTime = null;
+
 function Memory_createCharacter() {
     return {
         lastDirection: 'right',
@@ -86,6 +88,10 @@ function Memory_drawObstacles() {
     bImg.src = `TexturePack/mushroom_pack/${b.imagefilename}`;
     ctx.drawImage(bImg, rightX + 5, floatY - 40, 40, 40);
 
+    if (memory_trialStartTime === null) {
+        memory_trialStartTime = performance.now();
+    }
+
     // Eating interaction
     const onLeftMushroom = character.x + character.width > leftX &&
                            character.x < leftX + lineWidth &&
@@ -101,17 +107,42 @@ function Memory_drawObstacles() {
         ctx.fillText('Press E to eat', (onLeftMushroom ? leftX : rightX) - 10, floatY - 50);
     
         if (keys['e'] && !memory_awaitingAnswer) {
-            // Randomly select either a or b regardless of which one is touched
             const randomPick = Math.random() < 0.5 ? a : b;
             memory_chosenMushroom = randomPick;
+        
+            const rt = memory_trialStartTime ? performance.now() - memory_trialStartTime : null;
+
+            participantData.trials.push({
+                id: participantData.id,
+                trial_type: "memory_choice",
+                trial_index: memory_currentQuestion,
+                left_mushroom: {
+                    name: a.name,
+                    image: a.imagefilename,
+                    value: a.value
+                },
+                right_mushroom: {
+                    name: b.name,
+                    image: b.imagefilename,
+                    value: b.value
+                },
+                selected_mushroom: {
+                    name: memory_chosenMushroom.name,
+                    image: memory_chosenMushroom.imagefilename,
+                    value: memory_chosenMushroom.value
+                },
+                rt: rt,
+                time_elapsed: performance.now() - participantData.startTime
+            });
+            
+            memory_trialStartTime = null;
+        
             memory_awaitingAnswer = true;
             Memory_gameRunning = false;
             keys['e'] = false;
             showMemoryChoicePrompt(memory_chosenMushroom);
         }
     }
-
-
 }
 
 function showMemoryChoicePrompt(mushroom) {
@@ -135,23 +166,42 @@ function showMemoryChoicePrompt(mushroom) {
     const text = document.createElement('p');
     text.textContent = 'Is this mushroom: 1 = new, 2 = similar, 3 = old?';
     promptDiv.appendChild(text);
-
+    if (memory_trialStartTime === null) {
+        memory_trialStartTime = performance.now();
+    }
     document.body.appendChild(promptDiv);
 
     window.addEventListener('keydown', handleMemoryResponse);
 }
 
+
+
 function handleMemoryResponse(e) {
     if (!memory_awaitingAnswer || !['1', '2', '3'].includes(e.key)) return;
 
-    console.log(`Memory answer for mushroom "${memory_chosenMushroom.name}": ${e.key}`);
+    const rt = memory_trialStartTime ? performance.now() - memory_trialStartTime : null;
 
-    // Clean up
+    participantData.trials.push({
+        id: participantData.id,
+        trial_type: "oldnew_response",
+        trial_index: memory_currentQuestion,
+        tested_mushroom: {
+            name: memory_chosenMushroom.name,
+            image: memory_chosenMushroom.imagefilename,
+            value: memory_chosenMushroom.value
+        },
+        response: e.key,  // '1' = new, '2' = similar, '3' = old
+        rt: rt,
+        time_elapsed: performance.now() - participantData.startTime
+    });
+
+    memory_trialStartTime = null;
+
+    // Cleanup and advance
     const prompt = document.getElementById('memoryPrompt');
     if (prompt) prompt.remove();
     window.removeEventListener('keydown', handleMemoryResponse);
 
-    // Continue to next trial
     memory_currentQuestion++;
     character.x = canvas.width / 2;
     character.y = canvas.height * 0.8 - character.height;
@@ -164,6 +214,8 @@ function handleMemoryResponse(e) {
 
     requestAnimationFrame(Memory_updateGame);
 }
+
+
 
 
 function Memory_checkObstacleCollision(obstacleX, obstacleY, obstacleWidth, obstacleHeight) {

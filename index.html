@@ -11,8 +11,10 @@
     <div id="main" class="container">
         <div id="welcome" class="phase">
             <h1>Welcome to the Task</h1>
-            <p>Click the button to start the task.</p>
-            <button onclick="initTaskOOO()">Start Task</button>
+            <p style="margin-bottom: 10px;">Please enter your participant ID:</p>
+            <input type="text" id="participantIdInput" placeholder="e.g., P001" style="padding: 8px; font-size: 16px; width: 200px; margin-bottom: 15px;">
+            <br>
+            <button onclick="startWithID()" style="padding: 10px 20px; font-size: 16px;">Start Task</button>
         </div>
 
         <div id="explorephase" class="phase" style="display:none;">
@@ -38,7 +40,7 @@
             <p>Thank you for completing the task.</p>
         </div>
     </div>
-
+    <script src="static/js/data_save.js"></script>
     <script src="static/js/mushroom_filename.js"></script>
     <script src="static/js/mushroom.js"></script>
     <script src="static/js/idenphase.js"></script>
