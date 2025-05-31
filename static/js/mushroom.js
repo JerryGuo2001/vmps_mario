@@ -204,6 +204,7 @@ async function generateMushroom(setNumber) {
     const platformCount = groundPlatforms.length;
     const shuffled = [...selectedSet].sort(() => Math.random() - 0.5);
 
+    
     // Assign mushrooms to platforms, possibly doubling up
     const platformAssignments = [];
     for (let i = 0; i < 5; i++) {
@@ -211,12 +212,33 @@ async function generateMushroom(setNumber) {
         platformAssignments.push(platformIndex);
     }
 
+    const placedX = {};
+    const minSpacing = 80;
+    const buffer = 50;
+
     for (let i = 0; i < 5; i++) {
         const { rgb, value } = shuffled[i];
-        const platform = groundPlatforms[platformAssignments[i]];
+        const platformIndex = platformAssignments[i];
+        const platform = groundPlatforms[platformIndex];
 
-        const buffer = 50;
-        const x = platform.startX + buffer + Math.random() * (platform.endX - platform.startX - 2 * buffer);
+        const minX = platform.startX + buffer;
+        const maxX = platform.endX - buffer;
+
+        if (!placedX[platformIndex]) placedX[platformIndex] = [];
+
+        let x;
+        let attempts = 0;
+        const maxAttempts = 100;
+
+        do {
+            x = minX + Math.random() * (maxX - minX);
+            attempts++;
+        } while (
+            placedX[platformIndex].some(prevX => Math.abs(prevX - x) < minSpacing) &&
+            attempts < maxAttempts
+        );
+
+        placedX[platformIndex].push(x);
         const y = platform.y - 150;
 
         const filename = await findMushroomByRGB(rgb);
@@ -245,7 +267,6 @@ async function generateMushroom(setNumber) {
 
     return mushrooms;
 }
-
 
 
 let aMushrooms = [];
