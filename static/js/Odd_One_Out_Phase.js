@@ -110,8 +110,10 @@ function handleKeyPressOOO(event) {
 
     currentTrialOOO++;
     if (currentTrialOOO < trialsOOO.length) {
+        trialStartTimeOOO = null;
         showTrialOOO();
     } else {
+        trialStartTimeOOO = null;
         finishTaskOOO();
     }
 }

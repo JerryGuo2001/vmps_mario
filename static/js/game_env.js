@@ -1,6 +1,6 @@
 // Global Variables
 let character, gravity, keys, currentCanvas, showPrompt, currentQuestion, totalMushrooms, collectedMushrooms,atRightEdge,change_detect_right,change_detect_left;
-let totalQuestions = 4;
+let totalQuestions = 2;
 let atLeftEdge
 currentQuestion = 1;
 let cameraOffset = 0; // Tracks world movement in Canvas 4
@@ -22,6 +22,7 @@ const OBJECT_TYPES = {
     OBSTACLE: 'obstacle',
     MUSHROOM: 'mushroom'
 };
+
 
 // Load the brick texture
 let groundImage = new Image();

@@ -29,11 +29,28 @@
           <button id='next_mem' onclick="startMemorry()">Next Task</button>
         </div> -->
 
-        <div id="memoryphase" class="phase" style="display:none;">
-          <h1>Memory Phase</h1>
-          <canvas id="gamememory" width="500" height="500"></canvas>
+        <div id="memoryphase" class="phase" style="display: none;">
+            <h1>Memory Phase</h1>
+            <div id="memorySelectorPhase" style="position: relative; display: flex; justify-content: center; align-items: center; height: 500px; gap: 100px;">
+                <!-- Central floating selector -->
+                <div id="selectorBox" style="
+                    position: absolute;
+                    top: 0;
+                    bottom: 0;
+                    width: 120px;
+                    border: 4px solid black;
+                    transition: left 0.2s ease;
+                    pointer-events: none;
+                "></div>
+        
+                <div id="leftMushroomBox" style="position: relative;">
+                    <img id="leftMushroomImg" src="" style="width: 100px;">
+                </div>
+                <div id="rightMushroomBox" style="position: relative;">
+                    <img id="rightMushroomImg" src="" style="width: 100px;">
+                </div>
+            </div>
         </div>
-
 
         <div id="thankyou" class="phase" style="display:none;">
             <h1>Thank You!</h1>
