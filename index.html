@@ -32,21 +32,30 @@
         <div id="memoryphase" class="phase" style="display: none;">
             <h1>Memory Phase</h1>
             <div id="memorySelectorPhase" style="position: relative; display: flex; justify-content: center; align-items: center; height: 500px; gap: 100px;">
-                <!-- Central floating selector -->
+                <!-- Selector highlight circle -->
                 <div id="selectorBox" style="
                     position: absolute;
-                    top: 0;
-                    bottom: 0;
-                    width: 120px;
+                    top: 50%;
+                    transform: translateY(-50%);
+                    width: 110px;
+                    height: 110px;
                     border: 4px solid black;
+                    border-radius: 50%;
                     transition: left 0.2s ease;
                     pointer-events: none;
+                    z-index: 1;
                 "></div>
         
-                <div id="leftMushroomBox" style="position: relative;">
+                <!-- Left mushroom -->
+                <div id="leftMushroomBox" style="position: relative; width: 120px; text-align: center;">
                     <img id="leftMushroomImg" src="" style="width: 100px;">
                 </div>
-                <div id="rightMushroomBox" style="position: relative;">
+        
+                <!-- Middle empty space -->
+                <div id="middleSpacer" style="width: 120px; height: 100px;"></div>
+        
+                <!-- Right mushroom -->
+                <div id="rightMushroomBox" style="position: relative; width: 120px; text-align: center;">
                     <img id="rightMushroomImg" src="" style="width: 100px;">
                 </div>
             </div>

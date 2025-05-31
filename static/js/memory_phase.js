@@ -30,6 +30,9 @@ async function Memory_initGame() {
 
 
 function Memory_startSelectorPhase() {
+    window.removeEventListener('keydown', Memory_selectorKeyHandler);
+    window.addEventListener('keydown', Memory_selectorKeyHandler);
+
     memory_trialStartTime = null;
     memory_chosenMushroom = null;
     document.getElementById('memorySelectorPhase').style.display = 'flex';
@@ -50,16 +53,26 @@ function showMushrooms() {
 
 function updateSelector() {
     const selector = document.getElementById('selectorBox');
-    const leftBox = document.getElementById('leftMushroomBox');
-    const rightBox = document.getElementById('rightMushroomBox');
+    const phase = document.getElementById('memorySelectorPhase');
 
-    const target = (memory_selectedSide === 'left') ? leftBox : rightBox;
-    const targetRect = target.getBoundingClientRect();
-    const parentRect = document.getElementById('memorySelectorPhase').getBoundingClientRect();
+    let targetBox;
 
-    // Set selectorBox to same size & position as target box
-    selector.style.left = `${target.offsetLeft - 10}px`;
+    if (memory_selectedSide === 'left') {
+        targetBox = document.getElementById('leftMushroomBox');
+    } else if (memory_selectedSide === 'right') {
+        targetBox = document.getElementById('rightMushroomBox');
+    } else {
+        targetBox = document.getElementById('middleSpacer');
+    }
+
+    const containerRect = phase.getBoundingClientRect();
+    const targetRect = targetBox.getBoundingClientRect();
+
+    // Align selector's left to target box (relative to container)
+    const leftPos = targetRect.left - containerRect.left + (targetRect.width - selector.offsetWidth) / 2;
+    selector.style.left = `${leftPos}px`;
 }
+
 
 
 function Memory_selectorKeyHandler(e) {
@@ -135,7 +148,6 @@ function handleMemoryResponse(e) {
 
     memory_awaitingAnswer = false;
     memory_chosenMushroom = null;
-    mushroomtoask = null;
     memory_currentQuestion++;
 
     const prompt = document.getElementById('memoryPrompt');
@@ -145,9 +157,11 @@ function handleMemoryResponse(e) {
         completeMemory();
     } else {
         showMushrooms();
+        memory_selectedSide = 'middle';
         updateSelector();
         memory_trialStartTime = performance.now();
     }
+    
 }
 
 
