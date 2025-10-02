@@ -375,15 +375,16 @@ async function handleMushroomCollision_canvas4(atLeftEdge, atRightEdge) {
         let mushroomWidth = 30 + 20 * mushroom.growthFactor;  // Grow width from 30px to 50px
         let mushroomHeight = 30 + 20 * mushroom.growthFactor;  // Grow height from 30px to 50px
 
-        // **Load the mushroom image dynamically using the matching filename**
-        let mushroomImage = new Image();
-        mushroomImage.src = 'TexturePack/mushroom_pack/' + mushroom.imagefilename;
+        // Use the preloaded image placed on the object by the adapter
+        const mushroomImage = mushroom._img || mushroom.image;
+        if (mushroomImage) {
+            ctx.drawImage(
+                mushroomImage,
+                mushroomX - mushroomWidth / 2, mushroomY - mushroomHeight,
+                mushroomWidth, mushroomHeight
+            );
+        }
 
-        ctx.drawImage(
-            mushroomImage,
-            mushroomX - mushroomWidth / 2, mushroomY - mushroomHeight,  // Position on canvas
-            mushroomWidth, mushroomHeight  // Scale to the growing size
-        );
 
         let characterScreenX = atLeftEdge ? character.x : atRightEdge ? character.x : canvas.width / 2;
 
@@ -399,16 +400,8 @@ async function handleMushroomCollision_canvas4(atLeftEdge, atRightEdge) {
 
             if (keys['e']) {
                 let staminaChange = 0;
-                if (mushroom.value === 'reset') {
-                    staminaChange = 'reset'
-                    character.hp = 0;
-                    // Display "Toxic!" text
-                    ctx.font = '20px Arial';
-                    ctx.fillStyle = 'red';
-                } else {
-                    character.hp += mushroom.value;
-                    staminaChange = mushroom.value;  // Increase stamina (up arrows)
-                }
+                character.hp += mushroom.value;
+                staminaChange = mushroom.value;  // Increase stamina (up arrows)
                 if (staminaChange > 0) {
                     // Display floating heart message
                     const heartMessage = document.createElement('div');
@@ -436,22 +429,6 @@ async function handleMushroomCollision_canvas4(atLeftEdge, atRightEdge) {
                     heartMessage.style.fontWeight = 'bold';
                     heartMessage.style.color = 'green';
                     heartMessage.innerText = '❤️ + ' + staminaChange;
-                    heartMessage.style.zIndex = '1000';
-                    document.body.appendChild(heartMessage);
-                    setTimeout(() => {
-                        document.body.removeChild(heartMessage);
-                    }, 2000);
-                } else if (staminaChange == 'reset') {
-                    // Display floating heart message
-                    const heartMessage = document.createElement('div');
-                    heartMessage.style.position = 'fixed';
-                    heartMessage.style.top = '50%';
-                    heartMessage.style.left = '50%';
-                    heartMessage.style.transform = 'translate(-50%, -50%)';
-                    heartMessage.style.fontSize = '50px';
-                    heartMessage.style.fontWeight = 'bold';
-                    heartMessage.style.color = 'green';
-                    heartMessage.innerText = 'Toxic!';
                     heartMessage.style.zIndex = '1000';
                     document.body.appendChild(heartMessage);
                     setTimeout(() => {
@@ -669,9 +646,8 @@ function drawMushroomQuestionBox() {
         // Just show the value
         ctx.fillStyle = '#000';
         ctx.font = '20px Arial';
-        let valueText = activeMushroom.value === 'reset'
-            ? 'Toxic!'
-            : `${activeMushroom.value > 0 ? '+' : ''}${activeMushroom.value}`;
+        const v = Number(activeMushroom.value) || 0;
+        let valueText = `${v > 0 ? '+' : ''}${v}`;
         ctx.fillText(valueText, canvas.width / 2 - ctx.measureText(valueText).width / 2, 180);
     } else {
         // Show mushroom image
