@@ -74,7 +74,9 @@ function showTrialOOO() {
 
     trialSetOOO.forEach((mushroomOOO) => {
         const img = document.createElement('img');
-        img.src = 'TexturePack/mushroom_pack/' + mushroomOOO.imagefilename;
+        img.src = (window.MUSHROOM_IMAGE_BASE_URL
+            ? `${window.MUSHROOM_IMAGE_BASE_URL}/${mushroomOOO.imagefilename}`
+            : `TexturePack/mushroom_pack/images_balanced/${mushroomOOO.imagefilename}`);
         img.style.width = '150px';
         img.alt = mushroomOOO.name;
         imgContainerOOO.appendChild(img);
