@@ -1,407 +1,393 @@
-// **Load mushroom sprite sheet**
-let mushroomList = new Image();
-mushroomList.src = 'TexturePack/mushroom_pack/';
+// === Base path for generated images (flat folder, no subdirs) ===
+const MUSHROOM_IMG_BASE = 'TexturePack/mushroom_pack/';
 
-// Function to get the RGB values from the filename (e.g., "R224G0B213.png")
-function extractRGBFromFilename(filename) {
-    const match = filename.match(/R(\d+)G(\d+)B(\d+)/);
-    if (match) {
-        return {
-            r: parseInt(match[1], 10),
-            g: parseInt(match[2], 10),
-            b: parseInt(match[3], 10)
-        };
-    }
-    return null;  // If no match, return null
+// If a filename already includes a path or URL, use it as-is; otherwise prepend base
+function resolveImgSrc(filename) {
+  if (!filename) return '';
+  if (filename.startsWith('http://') || filename.startsWith('https://')) return filename;
+  if (filename.includes('/')) return filename; // already has a path
+  return MUSHROOM_IMG_BASE.replace(/\/?$/, '/') + filename;
 }
 
-// Function to load an image and get its RGB values
-function getImageRGB(imageSrc) {
-    return new Promise((resolve, reject) => {
-        let img = new Image();
-        img.src = imageSrc;
+// === Fixed 8-color palette (canonical RGBs) ===
+const COLOR_RGB = {
+  black:   { r: 0,   g: 0,   b: 0   },
+  white:   { r: 255, g: 255, b: 255 },
+  red:     { r: 255, g: 0,   b: 0   },
+  green:   { r: 0,   g: 255, b: 0   },
+  blue:    { r: 0,   g: 0,   b: 255 },
+  cyan:    { r: 0,   g: 255, b: 255 },
+  magenta: { r: 255, g: 0,   b: 255 },
+  yellow:  { r: 255, g: 255, b: 0   },
+};
 
-        img.onload = function() {
-            let canvas = document.createElement('canvas');
-            let ctx = canvas.getContext('2d');
-            canvas.width = img.width;
-            canvas.height = img.height;
-
-            ctx.drawImage(img, 0, 0);
-
-            let pixel = ctx.getImageData(0, 0, 1, 1).data;
-            let rgb = {r: pixel[0], g: pixel[1], b: pixel[2]};
-
-            resolve(rgb);  // Resolve with the RGB data
-        };
-
-        img.onerror = function() {
-            reject(new Error(`Failed to load image: ${imageSrc}`));
-        };
-    });
+// === Parse new filename format: color-stem-cap-value.png ===
+function parseMushroomFilenameNew(filename) {
+  const m = filename.match(/^([a-z]+)-(\d+)-(\d+\.\d+)-([+-]?\d+)\.png$/i);
+  if (!m) return null;
+  return {
+    color: m[1].toLowerCase(),
+    stem: parseInt(m[2], 10),
+    cap: parseFloat(m[3]),
+    value: parseInt(m[4], 10),
+  };
 }
 
-// Function to get the RGB values from the filename (e.g., "R224G0B213.png")
-function extractRGBFromFilename(filename) {
-    const match = filename.match(/R(\d+)G(\d+)B(\d+)/);
-    if (match) {
-        return {
-            r: parseInt(match[1], 10),
-            g: parseInt(match[2], 10),
-            b: parseInt(match[3], 10)
-        };
-    }
-    return null;  // If no match, return null
+// Euclidean distance (RGB)
+function rgbDistance(a, b) {
+  const dr = a.r - b.r, dg = a.g - b.g, db = a.b - b.b;
+  return Math.sqrt(dr*dr + dg*dg + db*db);
 }
 
-// Function to calculate the Euclidean distance between two RGB colors
-function calculateRGBDistance(rgb1, rgb2) {
-    const dr = rgb1.r - rgb2.r;
-    const dg = rgb1.g - rgb2.g;
-    const db = rgb1.b - rgb2.b;
-    return Math.sqrt(dr * dr + dg * dg + db * db);
+// Map any RGB to nearest of the 8 canonical color names
+function nearestColorName(targetRGB) {
+  let best = null, bestD = Infinity;
+  for (const [name, rgb] of Object.entries(COLOR_RGB)) {
+    const d = rgbDistance(targetRGB, rgb);
+    if (d < bestD) { bestD = d; best = name; }
+  }
+  return best;
 }
 
-// Function to find the mushroom by RGB filename and store the result in a variable
+// ------------------------------
+// Expect an array `mushroom_filenames` to exist in scope containing all available
+// filenames in TexturePack/mushroom_pack/ (e.g., loaded from a CSV or manifest).
+// We'll build a per-color index for faster lookups.
+// ------------------------------
+let filesByColor = null;
+
+function buildFilesByColorFromList(list) {
+  const map = {};
+  for (const fn of list) {
+    const p = parseMushroomFilenameNew(fn);
+    if (!p) continue;
+    (map[p.color] ??= []).push(fn);
+  }
+  return map;
+}
+
+// Find a generated mushroom by nearest fixed color; value comes from the filename
 async function findMushroomByRGB(targetRGB) {
-    let matchingFilename = null;
-    let closestDistance = Infinity;  // Initialize with a large value to find the closest match
+  if (!Array.isArray(mushroom_filenames) || mushroom_filenames.length === 0) {
+    console.warn('mushroom_filenames is empty or missing.');
+    return null;
+  }
+  if (!filesByColor) filesByColor = buildFilesByColorFromList(mushroom_filenames);
 
-    // Loop through the filenames and check if they match the target RGB
-    for (let filename of mushroom_filenames) {
-        const rgbFromFile = extractRGBFromFilename(filename);
-        if (rgbFromFile) {
-            const distance = calculateRGBDistance(targetRGB, rgbFromFile);
+  const colorName = nearestColorName(targetRGB);
+  const list = filesByColor[colorName] || [];
 
-            if (distance === 0) {
-                matchingFilename = filename;
-                break;  // Exit loop after finding an exact match
-            } else if (distance < closestDistance) {
-                closestDistance = distance;
-                matchingFilename = filename;
-            }
-        }
-    }
+  if (list.length === 0) {
+    console.warn(`No generated files found for color ${colorName}.`);
+    return null;
+  }
 
-    if (!matchingFilename) {
-        console.log('No exact match found. Adjusting RGB randomly and searching again...');
-        let attempts = 0;
-        while (!matchingFilename && attempts < 10) {
-            targetRGB.r = Math.max(0, Math.min(255, targetRGB.r + (Math.random() * 20 - 10)));
-            targetRGB.g = Math.max(0, Math.min(255, targetRGB.g + (Math.random() * 20 - 10)));
-            targetRGB.b = Math.max(0, Math.min(255, targetRGB.b + (Math.random() * 20 - 10)));
-
-            for (let filename of mushroom_filenames) {
-                const rgbFromFile = extractRGBFromFilename(filename);
-                if (rgbFromFile) {
-                    const distance = calculateRGBDistance(targetRGB, rgbFromFile);
-                    if (distance === 0) {
-                        matchingFilename = filename;
-                        break;
-                    } else if (distance < closestDistance) {
-                        closestDistance = distance;
-                        matchingFilename = filename;
-                    }
-                }
-            }
-            attempts++;
-        }
-    }
-
-    return matchingFilename;  // The function still returns a promise, which resolves to the filename.
+  // Strategy: pick a random candidate for that color
+  const fn = list[Math.floor(Math.random() * list.length)];
+  return { fn, parsed: parseMushroomFilenameNew(fn) }; // { fn, parsed: { color, stem, cap, value } }
 }
 
-// **Define mushroom frame dimensions and spacing**
-let mushroomWidth = 45; // Width of each mushroom in the sprite sheet
-let mushroomHeight = 45; // Height of each mushroom in the sprite sheet
+// **Define mushroom frame dimensions and spacing (if you still use sprites)**
+let mushroomWidth = 45;  // Width of each mushroom in a sprite (unused for individual PNGs)
+let mushroomHeight = 45; // Height of each mushroom in a sprite
 let mushroomSpacing = 25; // Space between each mushroom (horizontal)
 
-
-// Define mushroom identification list
+// Define mushroom identification list (kept as-is)
 let mushroom_ident_list = [
-    {
-        name: "Mushroom1", 
-        targetRGB:{r: 255, g: 0, b: 0},
-        position: { x: 0, y: 0 },  // Position in the sprite sheet (x, y)
-        correctAnswer: "a"         // Correct answer for this mushroom
-    },
-    {
-        name: "Mushroom2",
-        targetRGB:{r: 255, g: 255, b: 0},
-        position: { x: 1, y: 0 },
-        correctAnswer: "b"
-    },
-    {
-        name: "Mushroom3",
-        targetRGB:{r: 0, g: 255, b: 0},
-        position: { x: 2, y: 0 },
-        correctAnswer: "c"
-    },
-    {
-        name: "Mushroom4",
-        targetRGB:{r: 0, g: 255, b: 255},
-        position: { x: 3, y: 0 },
-        correctAnswer: "d"
-    },
-    {
-        name: "Mushroom5",
-        targetRGB:{r: 0, g: 0, b: 255},
-        position: { x: 4, y: 0 },
-        correctAnswer: "e"
-    }
+  {
+    name: "Mushroom1",
+    targetRGB:{r: 255, g: 0, b: 0},
+    position: { x: 0, y: 0 },
+    correctAnswer: "a"
+  },
+  {
+    name: "Mushroom2",
+    targetRGB:{r: 255, g: 255, b: 0},
+    position: { x: 1, y: 0 },
+    correctAnswer: "b"
+  },
+  {
+    name: "Mushroom3",
+    targetRGB:{r: 0, g: 255, b: 0},
+    position: { x: 2, y: 0 },
+    correctAnswer: "c"
+  },
+  {
+    name: "Mushroom4",
+    targetRGB:{r: 0, g: 255, b: 255},
+    position: { x: 3, y: 0 },
+    correctAnswer: "d"
+  },
+  {
+    name: "Mushroom5",
+    targetRGB:{r: 0, g: 0, b: 255},
+    position: { x: 4, y: 0 },
+    correctAnswer: "e"
+  }
 ];
 
-
+// ------------------------------
+// Generate one set of mushrooms on platforms
+// ------------------------------
 async function generateMushroom(setNumber) {
-    const mushrooms = [];
+  const mushrooms = [];
 
-    // Define 5 different mushroom sets
-    const mushroomSets = [
-        [
-            { rgb: { r: 255, g: 0, b: 0 }, value: 1 },
-            { rgb: { r: 255, g: 255, b: 0 }, value: -1 },
-            { rgb: { r: 0, g: 255, b: 0 }, value: 3 },
-            { rgb: { r: 0, g: 255, b: 255 }, value: 'reset' },
-            { rgb: { r: 0, g: 0, b: 255 }, value: 5 }
-        ],
-        [
-            { rgb: { r: 128, g: 0, b: 0 }, value: 2 },
-            { rgb: { r: 128, g: 128, b: 0 }, value: -2 },
-            { rgb: { r: 0, g: 128, b: 0 }, value: 4 },
-            { rgb: { r: 0, g: 128, b: 128 }, value: 'reset' },
-            { rgb: { r: 0, g: 0, b: 128 }, value: 6 }
-        ],
-        [
-            { rgb: { r: 255, g: 102, b: 102 }, value: 1 },
-            { rgb: { r: 255, g: 204, b: 0 }, value: -1 },
-            { rgb: { r: 102, g: 255, b: 102 }, value: 3 },
-            { rgb: { r: 102, g: 255, b: 255 }, value: 'reset' },
-            { rgb: { r: 102, g: 102, b: 255 }, value: 5 }
-        ],
-        [
-            { rgb: { r: 200, g: 0, b: 0 }, value: 0 },
-            { rgb: { r: 200, g: 200, b: 0 }, value: -3 },
-            { rgb: { r: 0, g: 200, b: 0 }, value: 6 },
-            { rgb: { r: 0, g: 200, b: 200 }, value: 'reset' },
-            { rgb: { r: 0, g: 0, b: 200 }, value: 7 }
-        ],
-        [
-            { rgb: { r: 150, g: 50, b: 50 }, value: 2 },
-            { rgb: { r: 150, g: 150, b: 0 }, value: -2 },
-            { rgb: { r: 50, g: 150, b: 50 }, value: 4 },
-            { rgb: { r: 50, g: 150, b: 150 }, value: 'reset' },
-            { rgb: { r: 50, g: 50, b: 150 }, value: 6 }
-        ]
-    ];
+  // Define 5 different mushroom sets (we ignore the 'value' here; use filename value instead)
+  const mushroomSets = [
+    [
+      { rgb: { r: 255, g: 0, b: 0 } },
+      { rgb: { r: 255, g: 255, b: 0 } },
+      { rgb: { r: 0, g: 255, b: 0 } },
+      { rgb: { r: 0, g: 255, b: 255 } },
+      { rgb: { r: 0, g: 0, b: 255 } }
+    ],
+    [
+      { rgb: { r: 128, g: 0, b: 0 } },
+      { rgb: { r: 128, g: 128, b: 0 } },
+      { rgb: { r: 0, g: 128, b: 0 } },
+      { rgb: { r: 0, g: 128, b: 128 } },
+      { rgb: { r: 0, g: 0, b: 128 } }
+    ],
+    [
+      { rgb: { r: 255, g: 102, b: 102 } },
+      { rgb: { r: 255, g: 204, b: 0 } },
+      { rgb: { r: 102, g: 255, b: 102 } },
+      { rgb: { r: 102, g: 255, b: 255 } },
+      { rgb: { r: 102, g: 102, b: 255 } }
+    ],
+    [
+      { rgb: { r: 200, g: 0, b: 0 } },
+      { rgb: { r: 200, g: 200, b: 0 } },
+      { rgb: { r: 0, g: 200, b: 0 } },
+      { rgb: { r: 0, g: 200, b: 200 } },
+      { rgb: { r: 0, g: 0, b: 200 } }
+    ],
+    [
+      { rgb: { r: 150, g: 50, b: 50 } },
+      { rgb: { r: 150, g: 150, b: 0 } },
+      { rgb: { r: 50, g: 150, b: 50 } },
+      { rgb: { r: 50, g: 150, b: 150 } },
+      { rgb: { r: 50, g: 50, b: 150 } }
+    ]
+  ];
 
-    // Safety check
-    if (setNumber < 1 || setNumber > 5) {
-        console.warn("Invalid set number");
-        return [];
-    }
+  // Safety check
+  if (setNumber < 1 || setNumber > 5) {
+    console.warn("Invalid set number");
+    return [];
+  }
 
-    const selectedSet = mushroomSets[setNumber - 1];
-    const platformCount = groundPlatforms.length;
-    const shuffled = [...selectedSet].sort(() => Math.random() - 0.5);
+  const selectedSet = mushroomSets[setNumber - 1];
+  const platformCount = groundPlatforms.length;
+  const shuffled = [...selectedSet].sort(() => Math.random() - 0.5);
 
-    
-    // Assign mushrooms to platforms, possibly doubling up
-    const platformAssignments = [];
-    for (let i = 0; i < 5; i++) {
-        const platformIndex = i < platformCount ? i : Math.floor(Math.random() * platformCount);
-        platformAssignments.push(platformIndex);
-    }
+  // Assign mushrooms to platforms, possibly doubling up
+  const platformAssignments = [];
+  for (let i = 0; i < 5; i++) {
+    const platformIndex = i < platformCount ? i : Math.floor(Math.random() * platformCount);
+    platformAssignments.push(platformIndex);
+  }
 
-    const placedX = {};
-    const minSpacing = 80;
-    const buffer = 50;
+  const placedX = {};
+  const minSpacing = 80;
+  const buffer = 50;
 
-    for (let i = 0; i < 5; i++) {
-        const { rgb, value } = shuffled[i];
-        const platformIndex = platformAssignments[i];
-        const platform = groundPlatforms[platformIndex];
+  for (let i = 0; i < 5; i++) {
+    const { rgb } = shuffled[i]; // ignore any preset 'value'
+    const platformIndex = platformAssignments[i];
+    const platform = groundPlatforms[platformIndex];
 
-        const minX = platform.startX + buffer;
-        const maxX = platform.endX - buffer;
+    const minX = platform.startX + buffer;
+    const maxX = platform.endX - buffer;
 
-        if (!placedX[platformIndex]) placedX[platformIndex] = [];
+    if (!placedX[platformIndex]) placedX[platformIndex] = [];
 
-        let x;
-        let attempts = 0;
-        const maxAttempts = 100;
+    let x;
+    let attempts = 0;
+    const maxAttempts = 100;
 
-        do {
-            x = minX + Math.random() * (maxX - minX);
-            attempts++;
-        } while (
-            placedX[platformIndex].some(prevX => Math.abs(prevX - x) < minSpacing) &&
-            attempts < maxAttempts
-        );
+    do {
+      x = minX + Math.random() * (maxX - minX);
+      attempts++;
+    } while (
+      placedX[platformIndex].some(prevX => Math.abs(prevX - x) < minSpacing) &&
+      attempts < maxAttempts
+    );
 
-        placedX[platformIndex].push(x);
-        const y = platform.y - 150;
+    placedX[platformIndex].push(x);
+    const y = platform.y - 150;
 
-        const filename = await findMushroomByRGB(rgb);
-        const img = new Image();
-        img.src = 'TexturePack/mushroom_pack/' + filename;
+    const found = await findMushroomByRGB(rgb);
+    if (!found) continue; // or handle gracefully
 
-        await new Promise((resolve, reject) => {
-            img.onload = resolve;
-            img.onerror = reject;
-        });
+    const filename = found.fn;
+    const parsed = found.parsed;
 
-        mushrooms.push({
-            x,
-            y,
-            type: 0,
-            value,
-            isVisible: false,
-            growthFactor: 0,
-            growthSpeed: 0.05,
-            growthComplete: false,
-            targetRGB: rgb,
-            imagefilename: filename,
-            image: img
-        });
-    }
+    // Load image from the flat folder
+    const img = new Image();
+    img.src = resolveImgSrc(filename);
+    await new Promise((resolve, reject) => {
+      img.onload = resolve;
+      img.onerror = reject;
+    });
 
-    return mushrooms;
+    mushrooms.push({
+      x,
+      y,
+      type: 0,
+      value: parsed.value,                 // <-- value from filename
+      isVisible: false,
+      growthFactor: 0,
+      growthSpeed: 0.05,
+      growthComplete: false,
+      targetRGB: COLOR_RGB[parsed.color],  // lock to canonical RGB
+      imagefilename: filename,
+      image: img
+    });
+  }
+
+  return mushrooms;
 }
-
 
 let aMushrooms = [];
 let bMushrooms = [];
 
+// Preload all pair combinations from one generated set
 async function preloadMushroomPairs() {
-    const allMushrooms = await generateMushroom(1);  // Get the full set, e.g., 5 mushrooms
+  const allMushrooms = await generateMushroom(1);  // e.g., 5 mushrooms
 
-    const allPairs = [];
-
-    for (let i = 0; i < allMushrooms.length; i++) {
-        for (let j = 0; j < allMushrooms.length; j++) {
-            if (i !== j) {
-                // Add both (i, j) — mirror pairs included
-                allPairs.push([allMushrooms[i], allMushrooms[j]]);
-            }
-        }
+  const allPairs = [];
+  for (let i = 0; i < allMushrooms.length; i++) {
+    for (let j = 0; j < allMushrooms.length; j++) {
+      if (i !== j) {
+        allPairs.push([allMushrooms[i], allMushrooms[j]]); // mirror pairs included
+      }
     }
+  }
 
-    // Shuffle the list of pairs
-    for (let i = allPairs.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
-        [allPairs[i], allPairs[j]] = [allPairs[j], allPairs[i]];
-    }
+  // Shuffle pairs
+  for (let i = allPairs.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [allPairs[i], allPairs[j]] = [allPairs[j], allPairs[i]];
+  }
 
-    // Split shuffled pairs into aMushrooms and bMushrooms
-    aMushrooms = allPairs.map(pair => pair[0]);
-    bMushrooms = allPairs.map(pair => pair[1]);
+  // Split into aMushrooms and bMushrooms
+  aMushrooms = allPairs.map(pair => pair[0]);
+  bMushrooms = allPairs.map(pair => pair[1]);
 
-    console.log(`Randomized ${aMushrooms.length} mushroom pairs.`);
+  console.log(`Randomized ${aMushrooms.length} mushroom pairs.`);
 }
 
-
-
-// Utility to create a mushroom object
+// Utility to create a mushroom stub (if needed elsewhere)
 function createMushroom(rgb, name, correctAnswer = null) {
-    return {
-        name,
-        targetRGB: rgb,
-        correctAnswer,  // Optional
-        imagefilename: null,  // To be filled by findMushroomByRGB later
-    };
+  return {
+    name,
+    targetRGB: rgb,
+    correctAnswer,
+    imagefilename: null,
+  };
 }
 
-// Define RGBs for each set
+// Define RGBs for each set (inputs get mapped to nearest canonical color)
 const setA_RGBs = [
-    {r: 255, g: 0, b: 0},       // Red
-    {r: 0, g: 255, b: 0},
-    {r: 0, g: 20, b:250},
-    {r: 105, g: 105, b: 5}
+  {r: 255, g: 0, b: 0},       // Red
+  {r: 0, g: 255, b: 0},
+  {r: 0, g: 20, b: 250},
+  {r: 105, g: 105, b: 5}
 ];
 
 const planetRGBs = {
-    planet1: [{r: 255, g: 255, b: 0}, {r: 250, g: 230, b: 20}, {r: 245, g: 240, b: 10}],
-    planet2: [{r: 0, g: 255, b: 0}, {r: 10, g: 240, b: 10}, {r: 5, g: 250, b: 15}],
-    planet3: [{r: 0, g: 0, b: 255}, {r: 10, g: 10, b: 240}, {r: 20, g: 5, b: 245}],
-    planet4: [{r: 255, g: 0, b: 255}, {r: 240, g: 10, b: 230}, {r: 250, g: 20, b: 245}],
-    planet5: [{r: 0, g: 255, b: 255}, {r: 10, g: 240, b: 240}, {r: 5, g: 250, b: 230}]
+  planet1: [{r: 255, g: 255, b: 0}, {r: 250, g: 230, b: 20}, {r: 245, g: 240, b: 10}],
+  planet2: [{r: 0, g: 255, b: 0}, {r: 10, g: 240, b: 10}, {r: 5, g: 250, b: 15}],
+  planet3: [{r: 0, g: 0, b: 255}, {r: 10, g: 10, b: 240}, {r: 20, g: 5, b: 245}],
+  planet4: [{r: 255, g: 0, b: 255}, {r: 240, g: 10, b: 230}, {r: 250, g: 20, b: 245}],
+  planet5: [{r: 0, g: 255, b: 255}, {r: 10, g: 240, b: 240}, {r: 5, g: 250, b: 230}]
 };
 
 const setC_RGBs = [
-    {r: 255, g: 245, b: 30},
-    {r: 5, g: 230, b: 5},
-    {r: 15, g: 0, b: 230}
+  {r: 255, g: 245, b: 30},
+  {r: 5, g: 230, b: 5},
+  {r: 15, g: 0, b: 230}
 ];
 
 const setD_RGBs = [
-    {r: 180, g: 0, b: 0},
-    {r: 180, g: 180, b: 0},
-    {r: 0, g: 180, b: 0}
+  {r: 180, g: 0, b: 0},
+  {r: 180, g: 180, b: 0},
+  {r: 0, g: 180, b: 0}
 ];
 
 const setE_RGBs = [
-    {r: 200, g: 100, b: 0},
-    {r: 100, g: 200, b: 200},
-    {r: 80, g: 80, b: 250}
+  {r: 200, g: 100, b: 0},
+  {r: 100, g: 200, b: 200},
+  {r: 80, g: 80, b: 250}
 ];
 
+// Build full sets (images + parsed values)
 async function generateMushroomSets() {
-    // Utility to create full mushroom object with preload
-    async function buildMushroom(rgb, name, correctAnswer = null) {
-        const filename = await findMushroomByRGB(rgb);
-        const img = new Image();
-        img.src = 'TexturePack/mushroom_pack/' + filename;
-    
-        // Await the image load
-        await new Promise((resolve, reject) => {
-            img.onload = resolve;
-            img.onerror = reject;
-        });
-    
-        return {
-            name,
-            targetRGB: rgb,
-            correctAnswer,
-            imagefilename: filename,
-            image: img
-        };
-    }
+  async function buildMushroom(rgb, name, correctAnswer = null) {
+    const found = await findMushroomByRGB(rgb);
+    if (!found) return null;
 
-    // Set A
-    const setA = await Promise.all(setA_RGBs.map((rgb, idx) =>
-        buildMushroom(rgb, `SetA_${idx + 1}`)
-    ));
+    const filename = found.fn;
+    const parsed = found.parsed;
 
-    // Set B (planet-based)
-    const setB = {};
-    for (const [planet, rgbList] of Object.entries(planetRGBs)) {
-        setB[planet] = await Promise.all(rgbList.map((rgb, idx) =>
-            buildMushroom(rgb, `SetB_${planet}_${idx + 1}`)
-        ));
-    }
+    const img = new Image();
+    img.src = resolveImgSrc(filename);
 
-    // Set C
-    const setC = await Promise.all(setC_RGBs.map((rgb, idx) =>
-        buildMushroom(rgb, `SetC_${idx + 1}`)
-    ));
+    // Await load
+    await new Promise((resolve, reject) => {
+      img.onload = resolve;
+      img.onerror = reject;
+    });
 
-    // Set D
-    const setD = await Promise.all(setD_RGBs.map((rgb, idx) =>
-        buildMushroom(rgb, `SetD_${idx + 1}`)
-    ));
+    return {
+      name,
+      targetRGB: COLOR_RGB[parsed.color], // canonical 8-color RGB
+      correctAnswer,
+      imagefilename: filename,
+      image: img,
+      value: parsed.value                // from filename
+    };
+  }
 
-    // Set E
-    const setE = await Promise.all(setE_RGBs.map((rgb, idx) =>
-        buildMushroom(rgb, `SetE_${idx + 1}`)
-    ));
+  // Set A
+  const setA = (await Promise.all(setA_RGBs.map((rgb, idx) =>
+    buildMushroom(rgb, `SetA_${idx + 1}`)
+  ))).filter(Boolean);
 
-    return { A: setA, B: setB, C: setC, D: setD, E: setE };
+  // Set B (planet-based)
+  const setB = {};
+  for (const [planet, rgbList] of Object.entries(planetRGBs)) {
+    setB[planet] = (await Promise.all(rgbList.map((rgb, idx) =>
+      buildMushroom(rgb, `SetB_${planet}_${idx + 1}`)
+    ))).filter(Boolean);
+  }
+
+  // Set C
+  const setC = (await Promise.all(setC_RGBs.map((rgb, idx) =>
+    buildMushroom(rgb, `SetC_${idx + 1}`)
+  ))).filter(Boolean);
+
+  // Set D
+  const setD = (await Promise.all(setD_RGBs.map((rgb, idx) =>
+    buildMushroom(rgb, `SetD_${idx + 1}`)
+  ))).filter(Boolean);
+
+  // Set E
+  const setE = (await Promise.all(setE_RGBs.map((rgb, idx) =>
+    buildMushroom(rgb, `SetE_${idx + 1}`)
+  ))).filter(Boolean);
+
+  return { A: setA, B: setB, C: setC, D: setD, E: setE };
 }
 
 let mushroomSets = {};
 
 (async () => {
-    mushroomSets = await generateMushroomSets();
-    console.log(mushroomSets);
+  // Build the color index up front if the filenames exist
+  if (Array.isArray(mushroom_filenames) && mushroom_filenames.length > 0) {
+    filesByColor = buildFilesByColorFromList(mushroom_filenames);
+  }
+  mushroomSets = await generateMushroomSets();
+  console.log('mushroomSets:', mushroomSets);
 })();
-
