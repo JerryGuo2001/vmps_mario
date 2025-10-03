@@ -81,24 +81,56 @@ function nearestColorName(targetRGB) {
 }
 
 // ------------------------------
-// Expect an array `mushroom_filenames` in scope containing all available
-// filenames in TexturePack/mushroom_pack/ (e.g., from a manifest/CSV).
-// We'll build a per-color index for faster lookups.
+// Manifest loader: fetch `manifest.json` with filenames array
+// ------------------------------
+async function loadMushroomManifest() {
+  const url = MUSHROOM_IMG_BASE.replace(/\/?$/, '/') + 'manifest.json';
+  try {
+    const resp = await fetch(url, { cache: 'no-cache' });
+    if (!resp.ok) {
+      console.warn(`Manifest fetch failed (${resp.status}). Expected at: ${url}`);
+      return [];
+    }
+    const data = await resp.json();
+    if (!Array.isArray(data)) {
+      console.warn('Manifest JSON is not an array. Expected ["color-stem-cap-value.png", ...]');
+      return [];
+    }
+    console.log(`Loaded manifest: ${data.length} filenames from ${url}`);
+    // sample a few
+    console.log('Manifest sample:', data.slice(0, 5));
+    return data;
+  } catch (e) {
+    console.warn('Error fetching manifest:', e.message);
+    return [];
+  }
+}
+
+// ------------------------------
+// Build per-color index for faster lookups, with robust debug
 // ------------------------------
 let filesByColor = null;
 
 function buildFilesByColorFromList(list) {
   const map = {};
+  let unparsable = 0;
+  const badSamples = [];
+
   for (const fn of list) {
-    const p = parseMushroomFilenameNew(fn);  // now handles full paths
-    if (!p) continue;
+    const p = parseMushroomFilenameNew(fn);  // handles full paths
+    if (!p) {
+      unparsable++;
+      if (badSamples.length < 5) badSamples.push(basenameFromPath(fn));
+      continue;
+    }
     (map[p.color] ??= []).push(fn);
   }
+
   // Optionally limit per-color list to avoid huge scans
   for (const color of Object.keys(map)) {
-    if (map[color].length > CANDIDATES_PER_COLOR) {
+    const arr = map[color];
+    if (arr.length > CANDIDATES_PER_COLOR) {
       // simple uniform downsample
-      const arr = map[color];
       const step = arr.length / CANDIDATES_PER_COLOR;
       const sampled = [];
       for (let i = 0; i < CANDIDATES_PER_COLOR; i++) {
@@ -107,9 +139,15 @@ function buildFilesByColorFromList(list) {
       map[color] = sampled;
     }
   }
-  // Log index stats so you can see what's actually there
+
+  // Detailed logs
   const stats = Object.fromEntries(Object.entries(map).map(([k, v]) => [k, v.length]));
+  console.log('Total filenames provided:', list.length);
+  if (unparsable > 0) {
+    console.warn(`Unparsable filenames: ${unparsable}. Samples:`, badSamples);
+  }
   console.log('Indexed files by color:', stats);
+
   return map;
 }
 
@@ -120,12 +158,10 @@ function pickRandom(arr) {
 
 // Find a generated mushroom by nearest fixed color; value comes from the filename
 async function findMushroomByRGB(targetRGB) {
-  if (!Array.isArray(mushroom_filenames) || mushroom_filenames.length === 0) {
-    console.warn('mushroom_filenames is empty or missing.');
+  if (!filesByColor) {
+    console.warn('filesByColor not initialized yet.');
     return null;
   }
-  if (!filesByColor) filesByColor = buildFilesByColorFromList(mushroom_filenames);
-
   const colorName = nearestColorName(targetRGB);
   const list = filesByColor[colorName] || [];
 
@@ -158,12 +194,10 @@ let mushroom_ident_list = [
 // ------------------------------
 function getPlatforms(overridePlatforms) {
   if (Array.isArray(overridePlatforms) && overridePlatforms.length > 0) return overridePlatforms;
-  // use global if defined
   if (typeof groundPlatforms !== 'undefined' && Array.isArray(groundPlatforms) && groundPlatforms.length > 0) {
     return groundPlatforms;
   }
-  // fallback single platform (safe default)
-  return [{ startX: 0, endX: 800, y: 400 }];
+  return [{ startX: 0, endX: 800, y: 400 }]; // fallback single platform
 }
 
 // ------------------------------
@@ -234,7 +268,7 @@ async function generateMushroom(setNumber, platformsOverride = null) {
   const buffer = 50;
 
   for (let i = 0; i < 5; i++) {
-    const { rgb } = shuffled[i]; // ignore any preset 'value'
+    const { rgb } = shuffled[i];
     const platformIndex = platformAssignments[i];
     const platform = platforms[platformIndex];
 
@@ -259,7 +293,7 @@ async function generateMushroom(setNumber, platformsOverride = null) {
     const y = platform.y - 150;
 
     const found = await findMushroomByRGB(rgb);
-    if (!found) continue; // or handle gracefully
+    if (!found) continue;
 
     const filename = found.fn;
     const parsed = found.parsed;
@@ -277,12 +311,12 @@ async function generateMushroom(setNumber, platformsOverride = null) {
       x,
       y,
       type: 0,
-      value: parsed.value,                 // <-- value from filename
+      value: parsed.value,                 // value from filename
       isVisible: false,
       growthFactor: 0,
       growthSpeed: 0.05,
       growthComplete: false,
-      targetRGB: COLOR_RGB[parsed.color],  // lock to canonical RGB
+      targetRGB: COLOR_RGB[parsed.color],  // canonical 8-color RGB
       imagefilename: filename,
       image: img
     });
@@ -432,19 +466,23 @@ async function generateMushroomSets(platformsOverride = null) {
 }
 
 let mushroomSets = {};
+let mushroom_filenames = []; // will be filled by manifest
 
 (async () => {
-  // Build the color index up front if the filenames exist
+  // 1) Load manifest → populate filenames
+  mushroom_filenames = await loadMushroomManifest();
+
+  // 2) Build the color index
   if (Array.isArray(mushroom_filenames) && mushroom_filenames.length > 0) {
     filesByColor = buildFilesByColorFromList(mushroom_filenames);
   } else {
-    console.warn('mushroom_filenames manifest missing—please provide the list of PNG names.');
+    console.warn('mushroom_filenames manifest missing or empty—index will be empty and lookups will fail.');
   }
 
-  // Preload a limited number of trials (safe even without groundPlatforms)
+  // 3) Preload a limited number of trials (safe even without groundPlatforms)
   await preloadMushroomPairs();
 
-  // Build the sets (uses robust loaders)
+  // 4) Build the sets (uses robust loaders)
   mushroomSets = await generateMushroomSets();
   console.log('mushroomSets:', mushroomSets);
 })();
