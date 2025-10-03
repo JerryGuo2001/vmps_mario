@@ -42,7 +42,7 @@ const COLOR_RGB = {
   yellow:  { r: 255, g: 255, b: 0   },
 };
 
-// --- NEW: robust basename helper (handles paths, query, hash) ---
+// --- Basename helper (handles paths, query, hash) ---
 function basenameFromPath(p) {
   if (!p) return '';
   const q = p.split('?')[0].split('#')[0]; // strip URL params/hash
@@ -51,7 +51,7 @@ function basenameFromPath(p) {
 }
 
 // === Parse new filename format: color-stem-cap-value.png ===
-// (now parses the BASENAME so it works if entries include folder paths)
+// Parse the BASENAME so it works if entries include folder paths
 function parseMushroomFilenameNew(filename) {
   const base = basenameFromPath(filename).trim();
   const m = base.match(/^([a-z]+)-(\d+)-(\d+\.\d+)-([+-]?\d+)\.png$/i);
@@ -81,7 +81,7 @@ function nearestColorName(targetRGB) {
 }
 
 // ------------------------------
-// Expect an array `mushroom_filenames` to exist in scope containing all available
+// Expect an array `mushroom_filenames` in scope containing all available
 // filenames in TexturePack/mushroom_pack/ (e.g., from a manifest/CSV).
 // We'll build a per-color index for faster lookups.
 // ------------------------------
@@ -97,7 +97,7 @@ function buildFilesByColorFromList(list) {
   // Optionally limit per-color list to avoid huge scans
   for (const color of Object.keys(map)) {
     if (map[color].length > CANDIDATES_PER_COLOR) {
-      // sample uniformly
+      // simple uniform downsample
       const arr = map[color];
       const step = arr.length / CANDIDATES_PER_COLOR;
       const sampled = [];
@@ -107,7 +107,7 @@ function buildFilesByColorFromList(list) {
       map[color] = sampled;
     }
   }
-  // NEW: log index stats so you can see what we actually have per color
+  // Log index stats so you can see what's actually there
   const stats = Object.fromEntries(Object.entries(map).map(([k, v]) => [k, v.length]));
   console.log('Indexed files by color:', stats);
   return map;
@@ -153,9 +153,23 @@ let mushroom_ident_list = [
 ];
 
 // ------------------------------
+// Platform helper: use provided platforms, global groundPlatforms,
+// or a safe default if neither exists.
+// ------------------------------
+function getPlatforms(overridePlatforms) {
+  if (Array.isArray(overridePlatforms) && overridePlatforms.length > 0) return overridePlatforms;
+  // use global if defined
+  if (typeof groundPlatforms !== 'undefined' && Array.isArray(groundPlatforms) && groundPlatforms.length > 0) {
+    return groundPlatforms;
+  }
+  // fallback single platform (safe default)
+  return [{ startX: 0, endX: 800, y: 400 }];
+}
+
+// ------------------------------
 // Generate one set of mushrooms on platforms
 // ------------------------------
-async function generateMushroom(setNumber) {
+async function generateMushroom(setNumber, platformsOverride = null) {
   const mushrooms = [];
 
   // Define 5 different mushroom sets (we ignore the 'value'; use filename value instead)
@@ -203,8 +217,9 @@ async function generateMushroom(setNumber) {
     return [];
   }
 
+  const platforms = getPlatforms(platformsOverride);
   const selectedSet = mushroomSets[setNumber - 1];
-  const platformCount = groundPlatforms.length;
+  const platformCount = platforms.length;
   const shuffled = [...selectedSet].sort(() => Math.random() - 0.5);
 
   // Assign mushrooms to platforms, possibly doubling up
@@ -221,10 +236,10 @@ async function generateMushroom(setNumber) {
   for (let i = 0; i < 5; i++) {
     const { rgb } = shuffled[i]; // ignore any preset 'value'
     const platformIndex = platformAssignments[i];
-    const platform = groundPlatforms[platformIndex];
+    const platform = platforms[platformIndex];
 
     const minX = platform.startX + buffer;
-    const maxX = platform.endX - buffer;
+    const maxX = Math.max(minX + 1, platform.endX - buffer); // guard degenerate widths
 
     if (!placedX[platformIndex]) placedX[platformIndex] = [];
 
@@ -280,8 +295,8 @@ let aMushrooms = [];
 let bMushrooms = [];
 
 // Preload pair combinations from one generated set, but limit total trials
-async function preloadMushroomPairs() {
-  const allMushrooms = await generateMushroom(1);  // e.g., 5 mushrooms
+async function preloadMushroomPairs(platformsOverride = null) {
+  const allMushrooms = await generateMushroom(1, platformsOverride);  // e.g., 5 mushrooms
   if (!allMushrooms || allMushrooms.length === 0) {
     console.warn('No mushrooms generated.');
     aMushrooms = [];
@@ -359,7 +374,7 @@ const setE_RGBs = [
 ];
 
 // Build full sets (images + parsed values)
-async function generateMushroomSets() {
+async function generateMushroomSets(platformsOverride = null) {
   async function buildMushroom(rgb, name, correctAnswer = null) {
     const found = await findMushroomByRGB(rgb);
     if (!found) return null;
@@ -426,10 +441,10 @@ let mushroomSets = {};
     console.warn('mushroom_filenames manifest missing—please provide the list of PNG names.');
   }
 
-  // Optionally preload a limited number of trials
+  // Preload a limited number of trials (safe even without groundPlatforms)
   await preloadMushroomPairs();
 
-  // Build the sets (uses the same limited, robust loaders)
+  // Build the sets (uses robust loaders)
   mushroomSets = await generateMushroomSets();
   console.log('mushroomSets:', mushroomSets);
 })();
