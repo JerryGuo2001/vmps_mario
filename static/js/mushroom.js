@@ -269,3 +269,12 @@ async function generateMushroom(setNumber) {
   const mushrooms = await makeLevelMushroomsFromCatalog(catalog, N);
   return mushrooms;
 }
+
+
+let mushroomSets = {};
+
+(async () => {
+    mushroomSets = await generateMushroomSets();
+    console.log(mushroomSets);
+})();
+
