@@ -66,34 +66,6 @@
             <p>Thank you for completing the task.</p>
         </div>
     </div>
-    <!-- CSV parser (robust) -->
-    <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
-
-    <!-- Adapter (GLOBAL). We wrap your module into window.* helpers inline for simplicity -->
-    <script type="module">
-    import { loadMushroomCatalog, preloadCatalogImages, makeLevelMushroomsFromCatalog } from "./static/js/mushroom_catalog_adapter.js";
-    window.loadMushroomCatalog = loadMushroomCatalog;
-    window.preloadCatalogImages = preloadCatalogImages;
-    window.makeLevelMushroomsFromCatalog = makeLevelMushroomsFromCatalog;
-
-    // Boot the catalog once; expose a promise others can await.
-    window.CATALOG_READY = (async () => {
-        // Where your generator wrote files originally:
-        const stripPrefix = "/Users/jianleguo/Desktop/MUSHROOM/Dimensionality_Reward_Setup/images_balanced";
-        // Where they are hosted in your app:
-        const imageBaseUrl = "TexturePack/Mushroom_pac/images_balanced";
-        // Use the stable CSV you exported (or symlink) into that folder:
-        const csvUrl = "TexturePack/Mushroom_pac/images_balanced/mushroom_catalog_balanced_latest.csv";
-
-        const catalog = await window.loadMushroomCatalog({ csvUrl, imageBaseUrl, stripPrefix });
-        await window.preloadCatalogImages(catalog);
-        window.MUSHROOM_CATALOG = catalog;
-        console.log("Catalog ready:", catalog.length);
-        return catalog;
-    })();
-    </script>
-
-
     <script src="static/js/data_save.js"></script>
     <script src="static/js/mushroom_filename.js"></script>
     <script src="static/js/mushroom.js"></script>
@@ -103,11 +75,5 @@
     <script src="static/js/game_function.js"></script>
     <script src="static/js/task.js"></script>
     <script src="static/js/Odd_One_Out_Phase.js"></script>
-    <button id="startBtn" onclick="startWithID()" disabled>Start Task</button>
-    <script>
-    window.CATALOG_READY.finally(() => {
-        document.getElementById('startBtn').disabled = false;
-    });
-    </script>
 </body>
 </html>

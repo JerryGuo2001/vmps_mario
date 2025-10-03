@@ -3,23 +3,16 @@ window.onload = () => {
 };
 
 
-// Make it async so we can await the catalog
-async function startWithID() {
+function startWithID() {
     const idInput = document.getElementById('participantIdInput').value.trim();
     if (!idInput) {
         alert("Please enter your participant ID.");
         return;
     }
     participantData.id = idInput;
-    participantData.startTime = performance.now();
-
-    // Ensure catalog is ready before starting any phase that relies on it
-    if (window.CATALOG_READY) await window.CATALOG_READY;
-
+    participantData.startTime = performance.now(); // ✅ set here
     initTaskOOO(); // or your starting function
 }
-
-
 
 
 function startExplore() {
@@ -48,11 +41,8 @@ function completeExplore() {
 }
 
 
-let mushrooms = [];
+let mushrooms=[]
 async function initGame() {
-    // Make sure the catalog is ready here too (defensive)
-    if (window.CATALOG_READY) await window.CATALOG_READY;
-
     mushrooms = await generateMushroom(1);
     canvas = document.getElementById('gameCanvas');
     canvas.width = 600;
@@ -62,14 +52,16 @@ async function initGame() {
     character = createCharacter();
     gravity = 0.5;
     keys = {};
-    currentQuestion = 1;
-    currentCanvas = 4;
+    currentQuestion = 1; // Initialize here
+    currentCanvas = 4
 
     showPrompt = false;
+
     totalMushrooms = 3;
     collectedMushrooms = [];
 
-    character.x = 30;
+
+    character.x = 30
     character.y = 10;
 
     window.addEventListener('keydown', handleKeyDown);

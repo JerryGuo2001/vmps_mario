@@ -152,22 +152,121 @@ let mushroom_ident_list = [
 ];
 
 
-// --- REPLACEMENT: catalog-driven generator ---
 async function generateMushroom(setNumber) {
-    // Ensure catalog is ready
-    if (window.CATALOG_READY) await window.CATALOG_READY;
+    const mushrooms = [];
 
-    const N = 5; // how many to place per level
-    if (!Array.isArray(window.MUSHROOM_CATALOG) || window.MUSHROOM_CATALOG.length === 0) {
-        console.warn("MUSHROOM_CATALOG is empty; falling back to []");
+    // Define 5 different mushroom sets
+    const mushroomSets = [
+        [
+            { rgb: { r: 255, g: 0, b: 0 }, value: 1 },
+            { rgb: { r: 255, g: 255, b: 0 }, value: -1 },
+            { rgb: { r: 0, g: 255, b: 0 }, value: 3 },
+            { rgb: { r: 0, g: 255, b: 255 }, value: 'reset' },
+            { rgb: { r: 0, g: 0, b: 255 }, value: 5 }
+        ],
+        [
+            { rgb: { r: 128, g: 0, b: 0 }, value: 2 },
+            { rgb: { r: 128, g: 128, b: 0 }, value: -2 },
+            { rgb: { r: 0, g: 128, b: 0 }, value: 4 },
+            { rgb: { r: 0, g: 128, b: 128 }, value: 'reset' },
+            { rgb: { r: 0, g: 0, b: 128 }, value: 6 }
+        ],
+        [
+            { rgb: { r: 255, g: 102, b: 102 }, value: 1 },
+            { rgb: { r: 255, g: 204, b: 0 }, value: -1 },
+            { rgb: { r: 102, g: 255, b: 102 }, value: 3 },
+            { rgb: { r: 102, g: 255, b: 255 }, value: 'reset' },
+            { rgb: { r: 102, g: 102, b: 255 }, value: 5 }
+        ],
+        [
+            { rgb: { r: 200, g: 0, b: 0 }, value: 0 },
+            { rgb: { r: 200, g: 200, b: 0 }, value: -3 },
+            { rgb: { r: 0, g: 200, b: 0 }, value: 6 },
+            { rgb: { r: 0, g: 200, b: 200 }, value: 'reset' },
+            { rgb: { r: 0, g: 0, b: 200 }, value: 7 }
+        ],
+        [
+            { rgb: { r: 150, g: 50, b: 50 }, value: 2 },
+            { rgb: { r: 150, g: 150, b: 0 }, value: -2 },
+            { rgb: { r: 50, g: 150, b: 50 }, value: 4 },
+            { rgb: { r: 50, g: 150, b: 150 }, value: 'reset' },
+            { rgb: { r: 50, g: 50, b: 150 }, value: 6 }
+        ]
+    ];
+
+    // Safety check
+    if (setNumber < 1 || setNumber > 5) {
+        console.warn("Invalid set number");
         return [];
     }
-    // Uses groundPlatforms from game_env.js to position mushrooms, and
-    // returns objects shaped exactly like your game expects (image, value, etc.)
-    const placed = await window.makeLevelMushroomsFromCatalog(window.MUSHROOM_CATALOG, N);
-    return placed;
-}
 
+    const selectedSet = mushroomSets[setNumber - 1];
+    const platformCount = groundPlatforms.length;
+    const shuffled = [...selectedSet].sort(() => Math.random() - 0.5);
+
+    
+    // Assign mushrooms to platforms, possibly doubling up
+    const platformAssignments = [];
+    for (let i = 0; i < 5; i++) {
+        const platformIndex = i < platformCount ? i : Math.floor(Math.random() * platformCount);
+        platformAssignments.push(platformIndex);
+    }
+
+    const placedX = {};
+    const minSpacing = 80;
+    const buffer = 50;
+
+    for (let i = 0; i < 5; i++) {
+        const { rgb, value } = shuffled[i];
+        const platformIndex = platformAssignments[i];
+        const platform = groundPlatforms[platformIndex];
+
+        const minX = platform.startX + buffer;
+        const maxX = platform.endX - buffer;
+
+        if (!placedX[platformIndex]) placedX[platformIndex] = [];
+
+        let x;
+        let attempts = 0;
+        const maxAttempts = 100;
+
+        do {
+            x = minX + Math.random() * (maxX - minX);
+            attempts++;
+        } while (
+            placedX[platformIndex].some(prevX => Math.abs(prevX - x) < minSpacing) &&
+            attempts < maxAttempts
+        );
+
+        placedX[platformIndex].push(x);
+        const y = platform.y - 150;
+
+        const filename = await findMushroomByRGB(rgb);
+        const img = new Image();
+        img.src = 'TexturePack/mushroom_pack/' + filename;
+
+        await new Promise((resolve, reject) => {
+            img.onload = resolve;
+            img.onerror = reject;
+        });
+
+        mushrooms.push({
+            x,
+            y,
+            type: 0,
+            value,
+            isVisible: false,
+            growthFactor: 0,
+            growthSpeed: 0.05,
+            growthComplete: false,
+            targetRGB: rgb,
+            imagefilename: filename,
+            image: img
+        });
+    }
+
+    return mushrooms;
+}
 
 
 let aMushrooms = [];
@@ -246,30 +345,58 @@ const setE_RGBs = [
     {r: 80, g: 80, b: 250}
 ];
 
-// NEW generateMushroom: pull from catalog (ignores setNumber for now or map it as you like)
-async function generateMushroom(setNumber) {
-  // Wait until catalog is ready
-  if (!window.MUSHROOM_CATALOG || window.MUSHROOM_CATALOG.length === 0) {
-    // simple poll; in your app you can gate start until catalog loads
-    let tries = 0;
-    while ((!window.MUSHROOM_CATALOG || window.MUSHROOM_CATALOG.length === 0) && tries < 300) {
-      await new Promise(r => setTimeout(r, 50));
-      tries++;
+async function generateMushroomSets() {
+    // Utility to create full mushroom object with preload
+    async function buildMushroom(rgb, name, correctAnswer = null) {
+        const filename = await findMushroomByRGB(rgb);
+        const img = new Image();
+        img.src = 'TexturePack/mushroom_pack/' + filename;
+    
+        // Await the image load
+        await new Promise((resolve, reject) => {
+            img.onload = resolve;
+            img.onerror = reject;
+        });
+    
+        return {
+            name,
+            targetRGB: rgb,
+            correctAnswer,
+            imagefilename: filename,
+            image: img
+        };
     }
-  }
-  const catalog = window.MUSHROOM_CATALOG || [];
-  // Sample 5 by default (your old logic); feel free to vary by setNumber
-  const N = 5;
 
-  // Optional: filter by constraints (examples)
-  // const onlyNeutralRect = catalog.filter(m => m.meta.in_neutral_rectangle);
-  // const onlyColorRed    = catalog.filter(m => m.meta.color_name === "red");
-  // const onlyRoundThick  = catalog.filter(m => m.meta.cap_roundness_zone === "round" && m.meta.stem_width_zone === "thick");
+    // Set A
+    const setA = await Promise.all(setA_RGBs.map((rgb, idx) =>
+        buildMushroom(rgb, `SetA_${idx + 1}`)
+    ));
 
-  const mushrooms = await makeLevelMushroomsFromCatalog(catalog, N);
-  return mushrooms;
+    // Set B (planet-based)
+    const setB = {};
+    for (const [planet, rgbList] of Object.entries(planetRGBs)) {
+        setB[planet] = await Promise.all(rgbList.map((rgb, idx) =>
+            buildMushroom(rgb, `SetB_${planet}_${idx + 1}`)
+        ));
+    }
+
+    // Set C
+    const setC = await Promise.all(setC_RGBs.map((rgb, idx) =>
+        buildMushroom(rgb, `SetC_${idx + 1}`)
+    ));
+
+    // Set D
+    const setD = await Promise.all(setD_RGBs.map((rgb, idx) =>
+        buildMushroom(rgb, `SetD_${idx + 1}`)
+    ));
+
+    // Set E
+    const setE = await Promise.all(setE_RGBs.map((rgb, idx) =>
+        buildMushroom(rgb, `SetE_${idx + 1}`)
+    ));
+
+    return { A: setA, B: setB, C: setC, D: setD, E: setE };
 }
-
 
 let mushroomSets = {};
 
