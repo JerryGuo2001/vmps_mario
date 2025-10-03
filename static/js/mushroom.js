@@ -42,9 +42,19 @@ const COLOR_RGB = {
   yellow:  { r: 255, g: 255, b: 0   },
 };
 
+// --- NEW: robust basename helper (handles paths, query, hash) ---
+function basenameFromPath(p) {
+  if (!p) return '';
+  const q = p.split('?')[0].split('#')[0]; // strip URL params/hash
+  const parts = q.split('/');
+  return parts[parts.length - 1];
+}
+
 // === Parse new filename format: color-stem-cap-value.png ===
+// (now parses the BASENAME so it works if entries include folder paths)
 function parseMushroomFilenameNew(filename) {
-  const m = filename.match(/^([a-z]+)-(\d+)-(\d+\.\d+)-([+-]?\d+)\.png$/i);
+  const base = basenameFromPath(filename).trim();
+  const m = base.match(/^([a-z]+)-(\d+)-(\d+\.\d+)-([+-]?\d+)\.png$/i);
   if (!m) return null;
   return {
     color: m[1].toLowerCase(),
@@ -80,7 +90,7 @@ let filesByColor = null;
 function buildFilesByColorFromList(list) {
   const map = {};
   for (const fn of list) {
-    const p = parseMushroomFilenameNew(fn);
+    const p = parseMushroomFilenameNew(fn);  // now handles full paths
     if (!p) continue;
     (map[p.color] ??= []).push(fn);
   }
@@ -97,6 +107,9 @@ function buildFilesByColorFromList(list) {
       map[color] = sampled;
     }
   }
+  // NEW: log index stats so you can see what we actually have per color
+  const stats = Object.fromEntries(Object.entries(map).map(([k, v]) => [k, v.length]));
+  console.log('Indexed files by color:', stats);
   return map;
 }
 
