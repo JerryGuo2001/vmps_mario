@@ -40,7 +40,7 @@ function shuffleWithNoSamePosition(originalList, idenTotalRepetition = 1) {
     return shuffledList;
 }
 
-iden_shuffled_list = shuffleWithNoSamePosition(mushroom_ident_list, iden_total_repetition);
+// iden_shuffled_list = shuffleWithNoSamePosition(mushroom_ident_list, iden_total_repetition);
 
 
 // Function to display the mushroom on the canvas based on the targetRGB
