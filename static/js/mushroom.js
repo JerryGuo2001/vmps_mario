@@ -1,10 +1,26 @@
-// === Limits to prevent freezes ===
-const MAX_TRIALS = 40;               // cap the number of pair trials created
-const CANDIDATES_PER_COLOR = 100;    // limit how many files we consider per color
-const IMG_LOAD_TIMEOUT_MS = 5000;    // timeout image loads (ms)
+/*******************************************************
+ * VMPS Mario — Catalog-first Mushrooms (OOO Anchors)
+ * ---------------------------------------------------
+ * - No RGB matching. Uses CSV catalog fields:
+ *     filename,color,stem,cap,value
+ * - Builds Phase-1 SetA as anchored OOO triplets.
+ * - Leaves helpers for later phases to pick images.
+ *******************************************************/
 
-// === Base path for generated images (flat folder, no subdirs) ===
-const MUSHROOM_IMG_BASE = 'TexturePack/mushroom_pack/';
+/* ==================== CONFIG ==================== */
+
+// Limits & timeouts
+const MAX_TRIALS = 40;               // used only by example pair-preloader below
+const IMG_LOAD_TIMEOUT_MS = 5000;    // image load timeout in ms
+
+// Static assets
+const MUSHROOM_IMG_BASE = 'TexturePack/mushroom_pack/';             // flat folder
+const CATALOG_CSV_URL   = 'TexturePack/mushroom_pack/mushroom_catalog.csv';
+
+// Valid colors (names only; no RGB anywhere)
+const EIGHT_COLORS = ['black','white','red','green','blue','cyan','magenta','yellow'];
+
+/* ==================== UTILS ==================== */
 
 // Resolve an image source with base and allow absolute/with-path filenames
 function resolveImgSrc(filename) {
@@ -30,18 +46,6 @@ function loadImage(src, timeoutMs = IMG_LOAD_TIMEOUT_MS) {
   });
 }
 
-// === Fixed 8-color palette (canonical RGBs) ===
-const COLOR_RGB = {
-  black:   { r: 0,   g: 0,   b: 0   },
-  white:   { r: 255, g: 255, b: 255 },
-  red:     { r: 255, g: 0,   b: 0   },
-  green:   { r: 0,   g: 255, b: 0   },
-  blue:    { r: 0,   g: 0,   b: 255 },
-  cyan:    { r: 0,   g: 255, b: 255 },
-  magenta: { r: 255, g: 0,   b: 255 },
-  yellow:  { r: 255, g: 255, b: 0   },
-};
-
 // --- Basename helper (handles paths, query, hash) ---
 function basenameFromPath(p) {
   if (!p) return '';
@@ -50,148 +54,354 @@ function basenameFromPath(p) {
   return parts[parts.length - 1];
 }
 
-// === Parse new filename format: color-stem-cap-value.png ===
-// Parse the BASENAME so it works if entries include folder paths
-function parseMushroomFilenameNew(filename) {
-  const base = basenameFromPath(filename).trim();
-  const m = base.match(/^([a-z]+)-(\d+)-(\d+\.\d+)-([+-]?\d+)\.png$/i);
-  if (!m) return null;
-  return {
-    color: m[1].toLowerCase(),
-    stem: parseInt(m[2], 10),
-    cap: parseFloat(m[3]),
-    value: parseInt(m[4], 10),
-  };
+/* ==================== CATALOG LOADING ==================== */
+
+// Minimal CSV parser (swap with PapaParse if you prefer)
+function parseCSV(text) {
+  const lines = text.trim().split(/\r?\n/);
+  const header = lines[0].split(',').map(s => s.trim());
+  return lines.slice(1).map(line => {
+    const parts = line.split(',').map(s => s.trim());
+    const row = {};
+    header.forEach((h, i) => { row[h] = parts[i]; });
+    // normalize types
+    if ('stem' in row)   row.stem  = parseInt(row.stem, 10);
+    if ('cap' in row)    row.cap   = parseFloat(row.cap);
+    if ('value' in row)  row.value = parseInt(row.value, 10);
+    // ensure color normalized
+    if ('color' in row && typeof row.color === 'string') {
+      row.color = row.color.toLowerCase();
+    }
+    return row;
+  });
 }
 
-// Euclidean distance (RGB)
-function rgbDistance(a, b) {
-  const dr = a.r - b.r, dg = a.g - b.g, db = a.b - b.b;
-  return Math.sqrt(dr*dr + dg*dg + db*db);
-}
-
-// Map any RGB to nearest of the 8 canonical color names
-function nearestColorName(targetRGB) {
-  let best = null, bestD = Infinity;
-  for (const [name, rgb] of Object.entries(COLOR_RGB)) {
-    const d = rgbDistance(targetRGB, rgb);
-    if (d < bestD) { bestD = d; best = name; }
-  }
-  return best;
-}
-
-// ------------------------------
-// Manifest loader: fetch `manifest.json` with filenames array
-// ------------------------------
-async function loadMushroomManifest() {
-  const url = MUSHROOM_IMG_BASE.replace(/\/?$/, '/') + 'manifest.json';
+async function loadMushroomCatalogCSV() {
   try {
-    const resp = await fetch(url, { cache: 'no-cache' });
+    const resp = await fetch(CATALOG_CSV_URL, { cache: 'no-cache' });
     if (!resp.ok) {
-      console.warn(`Manifest fetch failed (${resp.status}). Expected at: ${url}`);
+      console.warn(`Catalog CSV fetch failed (${resp.status}) at: ${CATALOG_CSV_URL}`);
       return [];
     }
-    const data = await resp.json();
-    if (!Array.isArray(data)) {
-      console.warn('Manifest JSON is not an array. Expected ["color-stem-cap-value.png", ...]');
-      return [];
-    }
-    console.log(`Loaded manifest: ${data.length} filenames from ${url}`);
-    // sample a few
-    console.log('Manifest sample:', data.slice(0, 5));
-    return data;
+    const txt = await resp.text();
+    const rows = parseCSV(txt).filter(r =>
+      r.filename && r.color && EIGHT_COLORS.includes(r.color)
+    );
+    console.log(`Loaded catalog rows: ${rows.length}`);
+    return rows;
   } catch (e) {
-    console.warn('Error fetching manifest:', e.message);
+    console.warn('Error fetching catalog CSV:', e.message);
     return [];
   }
 }
 
-// ------------------------------
-// Build per-color index for faster lookups, with robust debug
-// ------------------------------
-let filesByColor = null;
+/* ==================== CATALOG INDEXES ==================== */
 
-function buildFilesByColorFromList(list) {
-  const map = {};
-  let unparsable = 0;
-  const badSamples = [];
+function indexCatalog(rows) {
+  const byColor = {};                    // color -> [rows]
+  const byKey   = {};                    // `${color}|${stem}|${cap}` -> row (first)
+  const uniqCapsByColor = {};            // color -> sorted unique caps
+  const uniqStemsByColor = {};           // color -> sorted unique stems
 
-  for (const fn of list) {
-    const p = parseMushroomFilenameNew(fn);  // handles full paths
-    if (!p) {
-      unparsable++;
-      if (badSamples.length < 5) badSamples.push(basenameFromPath(fn));
-      continue;
-    }
-    (map[p.color] ??= []).push(fn);
+  for (const r of rows) {
+    if (!r.filename || !r.color) continue;
+    (byColor[r.color] ??= []).push(r);
+    const key = `${r.color}|${r.stem}|${r.cap}`;
+    if (!(key in byKey)) byKey[key] = r;
   }
 
-  // Optionally limit per-color list to avoid huge scans
-  for (const color of Object.keys(map)) {
-    const arr = map[color];
-    if (arr.length > CANDIDATES_PER_COLOR) {
-      // simple uniform downsample
-      const step = arr.length / CANDIDATES_PER_COLOR;
-      const sampled = [];
-      for (let i = 0; i < CANDIDATES_PER_COLOR; i++) {
-        sampled.push(arr[Math.floor(i * step)]);
-      }
-      map[color] = sampled;
-    }
+  for (const [color, arr] of Object.entries(byColor)) {
+    const caps  = Array.from(new Set(arr.map(x => x.cap))).sort((a,b)=>a-b);
+    const stems = Array.from(new Set(arr.map(x => x.stem))).sort((a,b)=>a-b);
+    uniqCapsByColor[color]  = caps;
+    uniqStemsByColor[color] = stems;
   }
 
-  // Detailed logs
-  const stats = Object.fromEntries(Object.entries(map).map(([k, v]) => [k, v.length]));
-  console.log('Total filenames provided:', list.length);
-  if (unparsable > 0) {
-    console.warn(`Unparsable filenames: ${unparsable}. Samples:`, badSamples);
-  }
-  console.log('Indexed files by color:', stats);
-
-  return map;
+  return { byColor, byKey, uniqCapsByColor, uniqStemsByColor };
 }
 
-// Pick a random item from an array
-function pickRandom(arr) {
-  return arr[Math.floor(Math.random() * arr.length)];
+// Pick extremes & center for a color
+function pickExtremesForColor(color, idx) {
+  const stems = idx.uniqStemsByColor[color] || [];
+  const caps  = idx.uniqCapsByColor[color]  || [];
+  if (stems.length === 0 || caps.length === 0) return null;
+
+  const sMin = stems[0], sMax = stems[stems.length-1];
+  const cMin = caps[0],  cMax = caps[caps.length-1];
+
+  const corners = [
+    { stem: sMin, cap: cMin }, // flat-thin
+    { stem: sMax, cap: cMin }, // flat-thick
+    { stem: sMin, cap: cMax }, // round-thin
+    { stem: sMax, cap: cMax }, // round-thick
+  ];
+
+  const sMid = stems[Math.floor(stems.length/2)];
+  const cMid = caps[Math.floor(caps.length/2)];
+  const center = { stem: sMid, cap: cMid };
+
+  return { corners, center, stems, caps };
 }
 
-// Find a generated mushroom by nearest fixed color; value comes from the filename
-async function findMushroomByRGB(targetRGB) {
-  if (!filesByColor) {
-    console.warn('filesByColor not initialized yet.');
+// Find nearest existing row to (stem,cap) within a color
+function nearestRowFor(color, wantStem, wantCap, idx) {
+  const pool = idx.byColor[color] || [];
+  if (pool.length === 0) return null;
+  let best = null, bestD = Infinity;
+  for (const r of pool) {
+    const ds = (r.stem - wantStem);
+    const dc = (r.cap  - wantCap);
+    const d2 = ds*ds + dc*dc;
+    if (d2 < bestD) { bestD = d2; best = r; }
+  }
+  return best;
+}
+
+function rowId(r) { return `${r.color}|${r.stem}|${r.cap}|${basenameFromPath(r.filename)}`; }
+
+/* ==================== OOO: ANCHORED TRIPLETS ==================== */
+
+function buildOOOTripletsAnchored(catalogRows, options={}) {
+  const {
+    perColorSanity = 3,     // corner sanity/catch triplets per color
+    crossColorPerColor = 3, // calibration triplets per non-ref color
+    refColor = null         // if null -> first color alphabetically with data
+  } = options;
+
+  const idx = indexCatalog(catalogRows);
+  const colors = Object.keys(idx.byColor).sort().filter(c => (idx.byColor[c] || []).length > 0);
+  if (colors.length === 0) {
+    console.warn('No colors in catalog—cannot build OOO triplets.');
+    return [];
+  }
+
+  const referenceColor = refColor || colors[0];
+  const triplets = [];   // { a,b,c, note }
+
+  const pushTriplet = (a,b,c,note=null) => {
+    if (!a || !b || !c) return;
+    triplets.push({ a, b, c, note });
+  };
+
+  // Per color: anchors + triangulation
+  for (const color of colors) {
+    const meta = pickExtremesForColor(color, idx);
+    if (!meta) continue;
+
+    const A = nearestRowFor(color, meta.corners[0].stem, meta.corners[0].cap, idx);
+    const B = nearestRowFor(color, meta.corners[1].stem, meta.corners[1].cap, idx);
+    const C = nearestRowFor(color, meta.corners[2].stem, meta.corners[2].cap, idx);
+    const D = nearestRowFor(color, meta.corners[3].stem, meta.corners[3].cap, idx);
+    const center = nearestRowFor(color, meta.center.stem, meta.center.cap, idx);
+
+    const anchors = [A,B,C,D].filter(Boolean);
+    const anchorIds = new Set(anchors.map(rowId));
+
+    const others = (idx.byColor[color] || []).filter(r => !anchorIds.has(rowId(r)));
+
+    // Triangulate each "other" with two diagonals: (A,C) and (B,D)
+    for (const x of others) {
+      pushTriplet(x, A, C, `triag1:${color}`);
+      pushTriplet(x, B, D, `triag2:${color}`);
+    }
+
+    // Sanity among anchors: pick up to perColorSanity combos
+    const anchorTriples = [
+      [A,B,C], [A,B,D], [A,C,D], [B,C,D]
+    ].filter(t => t.every(Boolean));
+
+    for (let i=0; i<perColorSanity && i<anchorTriples.length; i++) {
+      const t = anchorTriples[i];
+      pushTriplet(t[0], t[1], t[2], `sanity:${color}`);
+    }
+
+    // A couple of center triangulations (optional)
+    if (center) {
+      pushTriplet(center, A, D, `centerDiag:${color}`);
+      pushTriplet(center, B, C, `centerDiag:${color}`);
+    }
+  }
+
+  // Cross-color calibration (align local grids)
+  const refMeta = pickExtremesForColor(referenceColor, idx);
+  const refNeutral = refMeta ? nearestRowFor(referenceColor, refMeta.center.stem, refMeta.center.cap, idx) : null;
+  const refA = refMeta ? nearestRowFor(referenceColor, refMeta.corners[0].stem, refMeta.corners[0].cap, idx) : null;
+  const refD = refMeta ? nearestRowFor(referenceColor, refMeta.corners[3].stem, refMeta.corners[3].cap, idx) : null;
+
+  for (const color of colors) {
+    if (color === referenceColor) continue;
+    const meta = pickExtremesForColor(color, idx);
+    if (!meta) continue;
+    const candidates = [
+      nearestRowFor(color, meta.center.stem, meta.center.cap, idx),
+      nearestRowFor(color, meta.corners[0].stem, meta.corners[0].cap, idx),
+      nearestRowFor(color, meta.corners[3].stem, meta.corners[3].cap, idx),
+      nearestRowFor(color, meta.corners[1].stem, meta.corners[1].cap, idx),
+    ].filter(Boolean);
+
+    for (let k=0; k<Math.min(crossColorPerColor, candidates.length); k++) {
+      const x = candidates[k];
+      if (refNeutral && refA) pushTriplet(x, refNeutral, refA, `xRefA:${color}`);
+      if (refNeutral && refD) pushTriplet(x, refNeutral, refD, `xRefD:${color}`);
+    }
+  }
+
+  console.log(`Built OOO triplets (anchored): ${triplets.length}`);
+  return triplets;
+}
+
+/* ==================== OOO RENDER HELPERS ==================== */
+
+async function rowToRenderable(r) {
+  const src = resolveImgSrc(r.filename);
+  try {
+    const img = await loadImage(src);
+    return {
+      filename: r.filename,
+      color: r.color,
+      stem: r.stem,
+      cap: r.cap,
+      value: r.value,
+      image: img
+    };
+  } catch(e) {
+    console.warn('Image load failed for', r.filename, e.message);
     return null;
   }
-  const colorName = nearestColorName(targetRGB);
-  const list = filesByColor[colorName] || [];
-
-  if (list.length === 0) {
-    console.warn(`No generated files found for color ${colorName}.`);
-    return null;
-  }
-
-  const fn = pickRandom(list);
-  return { fn, parsed: parseMushroomFilenameNew(fn) }; // { fn, parsed: { color, stem, cap, value } }
 }
 
-// **Define mushroom frame dimensions and spacing (if you still use sprites)**
-let mushroomWidth = 45;   // may be unused for individual PNGs
-let mushroomHeight = 45;
-let mushroomSpacing = 25;
+async function materializeOOOTriplet(tri) {
+  const a = await rowToRenderable(tri.a);
+  const b = await rowToRenderable(tri.b);
+  const c = await rowToRenderable(tri.c);
+  if (!a || !b || !c) return null;
+  return { a, b, c, note: tri.note };
+}
 
-// Define mushroom identification list (kept as-is)
-let mushroom_ident_list = [
-  { name: "Mushroom1", targetRGB:{r: 255, g: 0, b: 0},   position: { x: 0, y: 0 }, correctAnswer: "a" },
-  { name: "Mushroom2", targetRGB:{r: 255, g: 255, b: 0}, position: { x: 1, y: 0 }, correctAnswer: "b" },
-  { name: "Mushroom3", targetRGB:{r: 0, g: 255, b: 0},   position: { x: 2, y: 0 }, correctAnswer: "c" },
-  { name: "Mushroom4", targetRGB:{r: 0, g: 255, b: 255}, position: { x: 3, y: 0 }, correctAnswer: "d" },
-  { name: "Mushroom5", targetRGB:{r: 0, g: 0, b: 255},   position: { x: 4, y: 0 }, correctAnswer: "e" }
-];
+/* ==================== PUBLIC API (SETS & OOO) ==================== */
 
-// ------------------------------
-// Platform helper: use provided platforms, global groundPlatforms,
-// or a safe default if neither exists.
-// ------------------------------
+// Global state you can read in your task code
+let mushroomCatalogRows = [];
+let catalogIndex = null;
+
+let OOOTriplets = [];        // as {a,b,c,note} with catalog rows
+let OOOTrialsRendered = [];  // as {a,b,c,note} with images
+
+// Build Set A for OOO (call this during init)
+async function buildSetAForOOO() {
+  if (!mushroomCatalogRows || mushroomCatalogRows.length === 0) {
+    console.warn('Catalog not loaded yet; loading now…');
+    mushroomCatalogRows = await loadMushroomCatalogCSV();
+  }
+  catalogIndex = indexCatalog(mushroomCatalogRows);
+
+  OOOTriplets = buildOOOTripletsAnchored(mushroomCatalogRows, {
+    perColorSanity: 3,
+    crossColorPerColor: 3,
+    refColor: null
+  });
+
+  // Hard cap (optional)
+  const MAX_OOO = 180;
+  if (OOOTriplets.length > MAX_OOO) {
+    const stride = OOOTriplets.length / MAX_OOO;
+    const sampled = [];
+    for (let i=0;i<MAX_OOO;i++) sampled.push(OOOTriplets[Math.floor(i*stride)]);
+    OOOTriplets = sampled;
+  }
+
+  // Shuffle for presentation
+  for (let i = OOOTriplets.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [OOOTriplets[i], OOOTriplets[j]] = [OOOTriplets[j], OOOTriplets[i]];
+  }
+
+  // Eagerly materialize (or lazy-load per trial in your renderer)
+  OOOTrialsRendered = [];
+  for (const tri of OOOTriplets) {
+    const mat = await materializeOOOTriplet(tri);
+    if (mat) OOOTrialsRendered.push(mat);
+  }
+
+  console.log(`Prepared OOO trials: ${OOOTrialsRendered.length}`);
+  return OOOTrialsRendered;
+}
+
+/* ==================== OPTIONAL HELPERS FOR OTHER PHASES ==================== */
+
+// Get nearest available row to a requested (color, stem, cap)
+function getNearestCatalogRow(color, stem, cap) {
+  if (!catalogIndex) catalogIndex = indexCatalog(mushroomCatalogRows || []);
+  return nearestRowFor(color, stem, cap, catalogIndex);
+}
+
+// Pick N random rows (optionally constrained by color list)
+function sampleRows(n=5, colorWhitelist=null) {
+  const pool = (mushroomCatalogRows || []).filter(r =>
+    !colorWhitelist || colorWhitelist.includes(r.color)
+  );
+  const out = [];
+  for (let i=0; i<n && pool.length>0; i++) {
+    const j = Math.floor(Math.random() * pool.length);
+    out.push(pool.splice(j,1)[0]);
+  }
+  return out;
+}
+
+// Example: generate N random “stage mushrooms” (no RGB; just images + values)
+async function generateRandomMushroomsForStage(n=5) {
+  const rows = sampleRows(n);
+  const items = [];
+  for (const r of rows) {
+    const ren = await rowToRenderable(r);
+    if (ren) {
+      items.push({
+        x: 0, y: 0,                // let your stage layout place them
+        type: 0,
+        value: ren.value,
+        isVisible: false,
+        growthFactor: 0,
+        growthSpeed: 0.05,
+        growthComplete: false,
+        color: ren.color,
+        imagefilename: ren.filename,
+        image: ren.image
+      });
+    }
+  }
+  return items;
+}
+
+// Example: preload a small set of AB pairs for a quick 2AFC (keeps MAX_TRIALS)
+let aMushrooms = [];
+let bMushrooms = [];
+
+async function preloadMushroomPairsQuick(n=5) {
+  const rows = sampleRows(n);
+  const mats = [];
+  for (const r of rows) {
+    const mr = await rowToRenderable(r);
+    if (mr) mats.push(mr);
+  }
+  const allPairs = [];
+  for (let i=0;i<mats.length;i++) {
+    for (let j=0;j<mats.length;j++) {
+      if (i!==j) allPairs.push([mats[i], mats[j]]);
+    }
+  }
+  // shuffle
+  for (let i = allPairs.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [allPairs[i], allPairs[j]] = [allPairs[j], allPairs[i]];
+  }
+  const limited = allPairs.slice(0, MAX_TRIALS);
+  aMushrooms = limited.map(p => p[0]);
+  bMushrooms = limited.map(p => p[1]);
+  console.log(`Prepared ${aMushrooms.length} limited pairs (MAX_TRIALS=${MAX_TRIALS}).`);
+}
+
+/* ==================== PLATFORM FALLBACK (used by stage UI) ==================== */
+
 function getPlatforms(overridePlatforms) {
   if (Array.isArray(overridePlatforms) && overridePlatforms.length > 0) return overridePlatforms;
   if (typeof groundPlatforms !== 'undefined' && Array.isArray(groundPlatforms) && groundPlatforms.length > 0) {
@@ -200,289 +410,24 @@ function getPlatforms(overridePlatforms) {
   return [{ startX: 0, endX: 800, y: 400 }]; // fallback single platform
 }
 
-// ------------------------------
-// Generate one set of mushrooms on platforms
-// ------------------------------
-async function generateMushroom(setNumber, platformsOverride = null) {
-  const mushrooms = [];
-
-  // Define 5 different mushroom sets (we ignore the 'value'; use filename value instead)
-  const mushroomSets = [
-    [
-      { rgb: { r: 255, g: 0, b: 0 } },
-      { rgb: { r: 255, g: 255, b: 0 } },
-      { rgb: { r: 0, g: 255, b: 0 } },
-      { rgb: { r: 0, g: 255, b: 255 } },
-      { rgb: { r: 0, g: 0, b: 255 } }
-    ],
-    [
-      { rgb: { r: 128, g: 0, b: 0 } },
-      { rgb: { r: 128, g: 128, b: 0 } },
-      { rgb: { r: 0, g: 128, b: 0 } },
-      { rgb: { r: 0, g: 128, b: 128 } },
-      { rgb: { r: 0, g: 0, b: 128 } }
-    ],
-    [
-      { rgb: { r: 255, g: 102, b: 102 } },
-      { rgb: { r: 255, g: 204, b: 0 } },
-      { rgb: { r: 102, g: 255, b: 102 } },
-      { rgb: { r: 102, g: 255, b: 255 } },
-      { rgb: { r: 102, g: 102, b: 255 } }
-    ],
-    [
-      { rgb: { r: 200, g: 0, b: 0 } },
-      { rgb: { r: 200, g: 200, b: 0 } },
-      { rgb: { r: 0, g: 200, b: 0 } },
-      { rgb: { r: 0, g: 200, b: 200 } },
-      { rgb: { r: 0, g: 0, b: 200 } }
-    ],
-    [
-      { rgb: { r: 150, g: 50, b: 50 } },
-      { rgb: { r: 150, g: 150, b: 0 } },
-      { rgb: { r: 50, g: 150, b: 50 } },
-      { rgb: { r: 50, g: 150, b: 150 } },
-      { rgb: { r: 50, g: 50, b: 150 } }
-    ]
-  ];
-
-  // Safety check
-  if (setNumber < 1 || setNumber > 5) {
-    console.warn("Invalid set number");
-    return [];
-  }
-
-  const platforms = getPlatforms(platformsOverride);
-  const selectedSet = mushroomSets[setNumber - 1];
-  const platformCount = platforms.length;
-  const shuffled = [...selectedSet].sort(() => Math.random() - 0.5);
-
-  // Assign mushrooms to platforms, possibly doubling up
-  const platformAssignments = [];
-  for (let i = 0; i < 5; i++) {
-    const platformIndex = i < platformCount ? i : Math.floor(Math.random() * platformCount);
-    platformAssignments.push(platformIndex);
-  }
-
-  const placedX = {};
-  const minSpacing = 80;
-  const buffer = 50;
-
-  for (let i = 0; i < 5; i++) {
-    const { rgb } = shuffled[i];
-    const platformIndex = platformAssignments[i];
-    const platform = platforms[platformIndex];
-
-    const minX = platform.startX + buffer;
-    const maxX = Math.max(minX + 1, platform.endX - buffer); // guard degenerate widths
-
-    if (!placedX[platformIndex]) placedX[platformIndex] = [];
-
-    let x;
-    let attempts = 0;
-    const maxAttempts = 100;
-
-    do {
-      x = minX + Math.random() * (maxX - minX);
-      attempts++;
-    } while (
-      placedX[platformIndex].some(prevX => Math.abs(prevX - x) < minSpacing) &&
-      attempts < maxAttempts
-    );
-
-    placedX[platformIndex].push(x);
-    const y = platform.y - 150;
-
-    const found = await findMushroomByRGB(rgb);
-    if (!found) continue;
-
-    const filename = found.fn;
-    const parsed = found.parsed;
-
-    // Load image from the flat folder (with timeout)
-    let img;
-    try {
-      img = await loadImage(resolveImgSrc(filename));
-    } catch (e) {
-      console.warn('Skipping image due to load error:', filename, e.message);
-      continue;
-    }
-
-    mushrooms.push({
-      x,
-      y,
-      type: 0,
-      value: parsed.value,                 // value from filename
-      isVisible: false,
-      growthFactor: 0,
-      growthSpeed: 0.05,
-      growthComplete: false,
-      targetRGB: COLOR_RGB[parsed.color],  // canonical 8-color RGB
-      imagefilename: filename,
-      image: img
-    });
-  }
-
-  return mushrooms;
-}
-
-let aMushrooms = [];
-let bMushrooms = [];
-
-// Preload pair combinations from one generated set, but limit total trials
-async function preloadMushroomPairs(platformsOverride = null) {
-  const allMushrooms = await generateMushroom(1, platformsOverride);  // e.g., 5 mushrooms
-  if (!allMushrooms || allMushrooms.length === 0) {
-    console.warn('No mushrooms generated.');
-    aMushrooms = [];
-    bMushrooms = [];
-    return;
-  }
-
-  const allPairs = [];
-  for (let i = 0; i < allMushrooms.length; i++) {
-    for (let j = 0; j < allMushrooms.length; j++) {
-      if (i !== j) {
-        allPairs.push([allMushrooms[i], allMushrooms[j]]); // mirror pairs included
-      }
-    }
-  }
-
-  // Shuffle pairs
-  for (let i = allPairs.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [allPairs[i], allPairs[j]] = [allPairs[j], allPairs[i]];
-  }
-
-  // Limit total trials
-  const limited = allPairs.slice(0, MAX_TRIALS);
-
-  // Split into aMushrooms and bMushrooms
-  aMushrooms = limited.map(pair => pair[0]);
-  bMushrooms = limited.map(pair => pair[1]);
-
-  console.log(`Prepared ${aMushrooms.length} limited trials (MAX_TRIALS=${MAX_TRIALS}).`);
-}
-
-// Utility to create a mushroom stub (if needed elsewhere)
-function createMushroom(rgb, name, correctAnswer = null) {
-  return {
-    name,
-    targetRGB: rgb,
-    correctAnswer,
-    imagefilename: null,
-  };
-}
-
-// Define RGBs for each set (inputs get mapped to nearest canonical color)
-const setA_RGBs = [
-  {r: 255, g: 0, b: 0},       // Red
-  {r: 0, g: 255, b: 0},
-  {r: 0, g: 20, b: 250},
-  {r: 105, g: 105, b: 5}
-];
-
-const planetRGBs = {
-  planet1: [{r: 255, g: 255, b: 0}, {r: 250, g: 230, b: 20}, {r: 245, g: 240, b: 10}],
-  planet2: [{r: 0, g: 255, b: 0}, {r: 10, g: 240, b: 10}, {r: 5, g: 250, b: 15}],
-  planet3: [{r: 0, g: 0, b: 255}, {r: 10, g: 10, b: 240}, {r: 20, g: 5, b: 245}],
-  planet4: [{r: 255, g: 0, b: 255}, {r: 240, g: 10, b: 230}, {r: 250, g: 20, b: 245}],
-  planet5: [{r: 0, g: 255, b: 255}, {r: 10, g: 240, b: 240}, {r: 5, g: 250, b: 230}]
-};
-
-const setC_RGBs = [
-  {r: 255, g: 245, b: 30},
-  {r: 5, g: 230, b: 5},
-  {r: 15, g: 0, b: 230}
-];
-
-const setD_RGBs = [
-  {r: 180, g: 0, b: 0},
-  {r: 180, g: 180, b: 0},
-  {r: 0, g: 180, b: 0}
-];
-
-const setE_RGBs = [
-  {r: 200, g: 100, b: 0},
-  {r: 100, g: 200, b: 200},
-  {r: 80, g: 80, b: 250}
-];
-
-// Build full sets (images + parsed values)
-async function generateMushroomSets(platformsOverride = null) {
-  async function buildMushroom(rgb, name, correctAnswer = null) {
-    const found = await findMushroomByRGB(rgb);
-    if (!found) return null;
-
-    const filename = found.fn;
-    const parsed = found.parsed;
-
-    let img;
-    try {
-      img = await loadImage(resolveImgSrc(filename));
-    } catch (e) {
-      console.warn('Skipping image due to load error:', filename, e.message);
-      return null;
-    }
-
-    return {
-      name,
-      targetRGB: COLOR_RGB[parsed.color], // canonical 8-color RGB
-      correctAnswer,
-      imagefilename: filename,
-      image: img,
-      value: parsed.value                // from filename
-    };
-  }
-
-  // Set A
-  const setA = (await Promise.all(setA_RGBs.map((rgb, idx) =>
-    buildMushroom(rgb, `SetA_${idx + 1}`)
-  ))).filter(Boolean);
-
-  // Set B (planet-based)
-  const setB = {};
-  for (const [planet, rgbList] of Object.entries(planetRGBs)) {
-    setB[planet] = (await Promise.all(rgbList.map((rgb, idx) =>
-      buildMushroom(rgb, `SetB_${planet}_${idx + 1}`)
-    ))).filter(Boolean);
-  }
-
-  // Set C
-  const setC = (await Promise.all(setC_RGBs.map((rgb, idx) =>
-    buildMushroom(rgb, `SetC_${idx + 1}`)
-  ))).filter(Boolean);
-
-  // Set D
-  const setD = (await Promise.all(setD_RGBs.map((rgb, idx) =>
-    buildMushroom(rgb, `SetD_${idx + 1}`)
-  ))).filter(Boolean);
-
-  // Set E
-  const setE = (await Promise.all(setE_RGBs.map((rgb, idx) =>
-    buildMushroom(rgb, `SetE_${idx + 1}`)
-  ))).filter(Boolean);
-
-  return { A: setA, B: setB, C: setC, D: setD, E: setE };
-}
-
-let mushroomSets = {};
-let mushroom_filenames = []; // will be filled by manifest
+/* ==================== BOOTSTRAP ==================== */
 
 (async () => {
-  // 1) Load manifest → populate filenames
-  mushroom_filenames = await loadMushroomManifest();
+  // 1) Load catalog
+  mushroomCatalogRows = await loadMushroomCatalogCSV();
+  catalogIndex = indexCatalog(mushroomCatalogRows);
 
-  // 2) Build the color index
-  if (Array.isArray(mushroom_filenames) && mushroom_filenames.length > 0) {
-    filesByColor = buildFilesByColorFromList(mushroom_filenames);
-  } else {
-    console.warn('mushroom_filenames manifest missing or empty—index will be empty and lookups will fail.');
-  }
+  // 2) Build OOO SetA (anchored triplets)
+  await buildSetAForOOO();
 
-  // 3) Preload a limited number of trials (safe even without groundPlatforms)
-  await preloadMushroomPairs();
+  // 3) (Optional) Quick preload for a tiny 2AFC block elsewhere
+  await preloadMushroomPairsQuick(6);
 
-  // 4) Build the sets (uses robust loaders)
-  mushroomSets = await generateMushroomSets();
-  console.log('mushroomSets:', mushroomSets);
+  // Expose globals for your task code
+  window.mushroomCatalogRows   = mushroomCatalogRows;
+  window.OOOTriplets           = OOOTriplets;
+  window.OOOTrialsRendered     = OOOTrialsRendered;
+  window.preloadMushroomPairsQuick = preloadMushroomPairsQuick;
+  window.generateRandomMushroomsForStage = generateRandomMushroomsForStage;
+  window.getNearestCatalogRow  = getNearestCatalogRow;
 })();
