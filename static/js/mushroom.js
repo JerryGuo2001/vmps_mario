@@ -1,88 +1,78 @@
 /*******************************************************
  * VMPS Mario — Catalog-first Mushrooms (OOO Anchors)
  * ---------------------------------------------------
- * - No RGB matching. Uses CSV catalog fields:
+ * - No RGB matching. Uses CSV catalog fields normalized to:
  *     filename,color,stem,cap,value
- *   (also accepts aliases like: name,color_name,stem_width,
- *    cap_roundness,assigned_value, etc. — normalized below)
+ *   Accepts aliases:
+ *     filename  <- image_relpath | image_webpath | image_filename_abs | filename | file | image | img | basename | name
+ *     color     <- color_name | color | colour | colour_name
+ *     stem      <- stem_width | stemwidth | stem_w | stem | stem-size | stemsize
+ *     cap       <- cap_roundness | cap | cap_r | caproundness | roundness
+ *     value     <- assigned_value | value | reward | val
  * - Builds Phase-1 SetA as anchored OOO triplets.
- * - Leaves helpers for later phases to pick images.
  *******************************************************/
 
 /* ==================== CONFIG ==================== */
 
-// Limits & timeouts
-const MAX_TRIALS = 40;               // used only by example pair-preloader below
-const IMG_LOAD_TIMEOUT_MS = 5000;    // image load timeout in ms
+const MAX_TRIALS = 40;
+const IMG_LOAD_TIMEOUT_MS = 5000;
 
-// Static assets
-const MUSHROOM_IMG_BASE = 'TexturePack/mushroom_pack/';             // flat folder
+const MUSHROOM_IMG_BASE = 'TexturePack/mushroom_pack/';   // used when filename has no "/" in it
 const CATALOG_CSV_URL   = 'TexturePack/mushroom_pack/mushroom_catalog.csv';
 
-// Valid colors (names only; no RGB anywhere)
 const EIGHT_COLORS = ['black','white','red','green','blue','cyan','magenta','yellow'];
 
 /* ==================== UTILS ==================== */
 
-// Resolve an image source with base and allow absolute/with-path filenames
 function resolveImgSrc(filename) {
   if (!filename) return '';
-  if (filename.startsWith('http://') || filename.startsWith('https://')) return filename;
-  if (filename.includes('/')) return filename; // already has a path
+  // If it already looks like a path (has a slash) or is a URL, just use it.
+  if (filename.startsWith('http://') || filename.startsWith('https://') || filename.includes('/')) return filename;
+  // Otherwise, join with our base folder.
   return MUSHROOM_IMG_BASE.replace(/\/?$/, '/') + filename;
 }
 
-// Promise that loads an image with a timeout (prevents hangs)
 function loadImage(src, timeoutMs = IMG_LOAD_TIMEOUT_MS) {
   return new Promise((resolve, reject) => {
     const img = new Image();
     const timer = setTimeout(() => {
-      img.src = ''; // stop loading
+      img.src = '';
       reject(new Error(`Image load timeout: ${src}`));
     }, timeoutMs);
-
     img.onload = () => { clearTimeout(timer); resolve(img); };
     img.onerror = () => { clearTimeout(timer); reject(new Error(`Failed to load: ${src}`)); };
-
     img.src = src;
   });
 }
 
-// --- Basename helper (handles paths, query, hash) ---
 function basenameFromPath(p) {
   if (!p) return '';
-  const q = p.split('?')[0].split('#')[0]; // strip URL params/hash
+  const q = p.split('?')[0].split('#')[0];
   const parts = q.split('/');
   return parts[parts.length - 1];
 }
 
 /* ==================== CATALOG LOADING ==================== */
-/* Flexible CSV parsing: accepts multiple header aliases and
-   normalizes each row to { filename,color,stem,cap,value } */
+/* Flexible CSV parsing: normalize rows to { filename,color,stem,cap,value } */
 
 function parseCSVFlexible(text) {
   const lines = text.trim().split(/\r?\n/);
   if (lines.length <= 1) return [];
 
-  // naive delimiter detect (comma or tab)
-  const guessDelim = (hdr) => (hdr.includes('\t') ? '\t' : ',');
-  const delim = guessDelim(lines[0]);
-
+  // Detect comma vs tab (supports either)
+  const delim = lines[0].includes('\t') ? '\t' : ',';
   const split = (line) => line.split(delim).map(s => s.trim());
 
-  // raw headers
   const headerRaw = split(lines[0]);
 
-  // alias map -> canonical
   const alias = {
-    filename: ['filename','file','image','img','basename','name'],
-    color: ['color','colour','color_name','colour_name'],
-    stem: ['stem','stem_width','stemwidth','stem_w','stem-size','stemsize'],
-    cap: ['cap','cap_roundness','caproundness','cap_r','roundness'],
-    value: ['value','assigned_value','reward','val']
+    filename: ['image_relpath','image_webpath','image_filename_abs','filename','file','image','img','basename','name'],
+    color: ['color_name','color','colour','colour_name'],
+    stem: ['stem_width','stemwidth','stem_w','stem','stem-size','stemsize'],
+    cap: ['cap_roundness','cap','cap_r','caproundness','roundness'],
+    value: ['assigned_value','value','reward','val']
   };
 
-  // build column index for each canonical field
   const colIdx = {};
   for (const [canon, alist] of Object.entries(alias)) {
     let idx = -1;
@@ -90,19 +80,18 @@ function parseCSVFlexible(text) {
       const j = headerRaw.findIndex(h => h.toLowerCase() === a.toLowerCase());
       if (j !== -1) { idx = j; break; }
     }
-    colIdx[canon] = idx; // may stay -1 (we'll warn below)
+    colIdx[canon] = idx;
   }
 
   const missing = Object.entries(colIdx).filter(([,i]) => i === -1).map(([k]) => k);
   if (missing.length) {
     console.warn('[catalog] Missing expected columns (normalized):', missing.join(', '));
-    console.warn('[catalog] Found headers:', headerRaw);
+    console.warn('[catalog] Found headers: ', headerRaw);
   }
 
   const rows = [];
   for (let li = 1; li < lines.length; li++) {
     const parts = split(lines[li]);
-    // skip totally blank lines
     if (parts.length === 1 && parts[0] === '') continue;
 
     const row = {
@@ -113,7 +102,6 @@ function parseCSVFlexible(text) {
       value   : colIdx.value    >= 0 ? parts[colIdx.value]    : undefined,
     };
 
-    // normalize / coerce
     if (typeof row.color === 'string') row.color = row.color.toLowerCase();
     if (row.stem   != null && row.stem   !== '') row.stem  = parseInt(row.stem, 10);
     if (row.cap    != null && row.cap    !== '') row.cap   = parseFloat(row.cap);
@@ -133,7 +121,6 @@ async function loadMushroomCatalogCSV() {
     }
     const txt = await resp.text();
 
-    // parse + filter to the 8 colors and rows with filenames
     const parsed = parseCSVFlexible(txt);
     const rows = parsed.filter(r => r.filename && r.color && EIGHT_COLORS.includes(r.color));
 
@@ -141,7 +128,7 @@ async function loadMushroomCatalogCSV() {
     if (rows.length === 0) {
       console.warn('[catalog] 0 usable rows after normalization. Check:');
       console.warn(' - Color names must be one of:', EIGHT_COLORS.join(', '));
-      console.warn(' - Filenames must be non-empty and point to images present in:', MUSHROOM_IMG_BASE);
+      console.warn(' - Filenames must be present in CSV (e.g., image_relpath) and exist in your server paths.');
     }
     return rows;
   } catch (e) {
@@ -153,10 +140,10 @@ async function loadMushroomCatalogCSV() {
 /* ==================== CATALOG INDEXES ==================== */
 
 function indexCatalog(rows) {
-  const byColor = {};                    // color -> [rows]
-  const byKey   = {};                    // `${color}|${stem}|${cap}` -> row (first)
-  const uniqCapsByColor = {};            // color -> sorted unique caps
-  const uniqStemsByColor = {};           // color -> sorted unique stems
+  const byColor = {};
+  const byKey   = {};
+  const uniqCapsByColor = {};
+  const uniqStemsByColor = {};
 
   for (const r of rows) {
     if (!r.filename || !r.color) continue;
@@ -175,7 +162,6 @@ function indexCatalog(rows) {
   return { byColor, byKey, uniqCapsByColor, uniqStemsByColor };
 }
 
-// Pick extremes & center for a color
 function pickExtremesForColor(color, idx) {
   const stems = idx.uniqStemsByColor[color] || [];
   const caps  = idx.uniqCapsByColor[color]  || [];
@@ -198,7 +184,6 @@ function pickExtremesForColor(color, idx) {
   return { corners, center, stems, caps };
 }
 
-// Find nearest existing row to (stem,cap) within a color
 function nearestRowFor(color, wantStem, wantCap, idx) {
   const pool = idx.byColor[color] || [];
   if (pool.length === 0) return null;
@@ -218,9 +203,9 @@ function rowId(r) { return `${r.color}|${r.stem}|${r.cap}|${basenameFromPath(r.f
 
 function buildOOOTripletsAnchored(catalogRows, options={}) {
   const {
-    perColorSanity = 3,     // corner sanity/catch triplets per color
-    crossColorPerColor = 3, // calibration triplets per non-ref color
-    refColor = null         // if null -> first color alphabetically with data
+    perColorSanity = 3,
+    crossColorPerColor = 3,
+    refColor = null
   } = options;
 
   const idx = indexCatalog(catalogRows);
@@ -231,14 +216,13 @@ function buildOOOTripletsAnchored(catalogRows, options={}) {
   }
 
   const referenceColor = refColor || colors[0];
-  const triplets = [];   // { a,b,c, note }
+  const triplets = [];
 
   const pushTriplet = (a,b,c,note=null) => {
     if (!a || !b || !c) return;
     triplets.push({ a, b, c, note });
   };
 
-  // Per color: anchors + triangulation
   for (const color of colors) {
     const meta = pickExtremesForColor(color, idx);
     if (!meta) continue;
@@ -254,13 +238,11 @@ function buildOOOTripletsAnchored(catalogRows, options={}) {
 
     const others = (idx.byColor[color] || []).filter(r => !anchorIds.has(rowId(r)));
 
-    // Triangulate each "other" with two diagonals: (A,C) and (B,D)
     for (const x of others) {
       pushTriplet(x, A, C, `triag1:${color}`);
       pushTriplet(x, B, D, `triag2:${color}`);
     }
 
-    // Sanity among anchors: pick up to perColorSanity combos
     const anchorTriples = [
       [A,B,C], [A,B,D], [A,C,D], [B,C,D]
     ].filter(t => t.every(Boolean));
@@ -270,14 +252,12 @@ function buildOOOTripletsAnchored(catalogRows, options={}) {
       pushTriplet(t[0], t[1], t[2], `sanity:${color}`);
     }
 
-    // A couple of center triangulations (optional)
     if (center) {
       pushTriplet(center, A, D, `centerDiag:${color}`);
       pushTriplet(center, B, C, `centerDiag:${color}`);
     }
   }
 
-  // Cross-color calibration (align local grids)
   const refMeta = pickExtremesForColor(referenceColor, idx);
   const refNeutral = refMeta ? nearestRowFor(referenceColor, refMeta.center.stem, refMeta.center.cap, idx) : null;
   const refA = refMeta ? nearestRowFor(referenceColor, refMeta.corners[0].stem, refMeta.corners[0].cap, idx) : null;
@@ -335,14 +315,12 @@ async function materializeOOOTriplet(tri) {
 
 /* ==================== PUBLIC API (SETS & OOO) ==================== */
 
-// Global state you can read in your task code
 let mushroomCatalogRows = [];
 let catalogIndex = null;
 
-let OOOTriplets = [];        // as {a,b,c,note} with catalog rows
-let OOOTrialsRendered = [];  // as {a,b,c,note} with images
+let OOOTriplets = [];
+let OOOTrialsRendered = [];
 
-// Build Set A for OOO (call this during init)
 async function buildSetAForOOO() {
   if (!mushroomCatalogRows || mushroomCatalogRows.length === 0) {
     console.warn('Catalog not loaded yet; loading now…');
@@ -359,7 +337,6 @@ async function buildSetAForOOO() {
     refColor: null
   });
 
-  // Hard cap (optional)
   const MAX_OOO = 180;
   if (OOOTriplets.length > MAX_OOO) {
     const stride = OOOTriplets.length / MAX_OOO;
@@ -368,13 +345,11 @@ async function buildSetAForOOO() {
     OOOTriplets = sampled;
   }
 
-  // Shuffle for presentation
   for (let i = OOOTriplets.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
     [OOOTriplets[i], OOOTriplets[j]] = [OOOTriplets[j], OOOTriplets[i]];
   }
 
-  // Eagerly materialize (or lazy-load per trial in your renderer)
   OOOTrialsRendered = [];
   for (const tri of OOOTriplets) {
     const mat = await materializeOOOTriplet(tri);
@@ -387,13 +362,11 @@ async function buildSetAForOOO() {
 
 /* ==================== OPTIONAL HELPERS FOR OTHER PHASES ==================== */
 
-// Get nearest available row to a requested (color, stem, cap)
 function getNearestCatalogRow(color, stem, cap) {
   if (!catalogIndex) catalogIndex = indexCatalog(mushroomCatalogRows || []);
   return nearestRowFor(color, stem, cap, catalogIndex);
 }
 
-// Pick N random rows (optionally constrained by color list)
 function sampleRows(n=5, colorWhitelist=null) {
   const pool = (mushroomCatalogRows || []).filter(r =>
     !colorWhitelist || colorWhitelist.includes(r.color)
@@ -406,7 +379,6 @@ function sampleRows(n=5, colorWhitelist=null) {
   return out;
 }
 
-// Example: generate N random “stage mushrooms” (no RGB; just images + values)
 async function generateRandomMushroomsForStage(n=5) {
   const rows = sampleRows(n);
   const items = [];
@@ -414,7 +386,7 @@ async function generateRandomMushroomsForStage(n=5) {
     const ren = await rowToRenderable(r);
     if (ren) {
       items.push({
-        x: 0, y: 0,                // let your stage layout place them
+        x: 0, y: 0,
         type: 0,
         value: ren.value,
         isVisible: false,
@@ -430,7 +402,6 @@ async function generateRandomMushroomsForStage(n=5) {
   return items;
 }
 
-// Example: preload a small set of AB pairs for a quick 2AFC (keeps MAX_TRIALS)
 let aMushrooms = [];
 let bMushrooms = [];
 
@@ -447,7 +418,6 @@ async function preloadMushroomPairsQuick(n=5) {
       if (i!==j) allPairs.push([mats[i], mats[j]]);
     }
   }
-  // shuffle
   for (let i = allPairs.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
     [allPairs[i], allPairs[j]] = [allPairs[j], allPairs[i]];
@@ -458,30 +428,25 @@ async function preloadMushroomPairsQuick(n=5) {
   console.log(`Prepared ${aMushrooms.length} limited pairs (MAX_TRIALS=${MAX_TRIALS}).`);
 }
 
-/* ==================== PLATFORM FALLBACK (used by stage UI) ==================== */
+/* ==================== PLATFORM FALLBACK ==================== */
 
 function getPlatforms(overridePlatforms) {
   if (Array.isArray(overridePlatforms) && overridePlatforms.length > 0) return overridePlatforms;
   if (typeof groundPlatforms !== 'undefined' && Array.isArray(groundPlatforms) && groundPlatforms.length > 0) {
     return groundPlatforms;
   }
-  return [{ startX: 0, endX: 800, y: 400 }]; // fallback single platform
+  return [{ startX: 0, endX: 800, y: 400 }];
 }
 
 /* ==================== BOOTSTRAP ==================== */
 
 (async () => {
-  // 1) Load catalog
   mushroomCatalogRows = await loadMushroomCatalogCSV();
   catalogIndex = indexCatalog(mushroomCatalogRows);
 
-  // 2) Build OOO SetA (anchored triplets)
   await buildSetAForOOO();
-
-  // 3) (Optional) Quick preload for a tiny 2AFC block elsewhere
   await preloadMushroomPairsQuick(6);
 
-  // Expose globals for your task code
   window.mushroomCatalogRows   = mushroomCatalogRows;
   window.OOOTriplets           = OOOTriplets;
   window.OOOTrialsRendered     = OOOTrialsRendered;
