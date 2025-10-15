@@ -17,21 +17,63 @@
 const MAX_TRIALS = 40;
 const IMG_LOAD_TIMEOUT_MS = 5000;
 
-const MUSHROOM_IMG_BASE = 'TexturePack/mushroom_pack/';   // used when filename has no "/" in it
+const MUSHROOM_IMG_BASE = 'TexturePack/mushroom_pack';   // folder root for pack
 const CATALOG_CSV_URL   = 'TexturePack/mushroom_pack/mushroom_catalog.csv';
 
 const EIGHT_COLORS = ['black','white','red','green','blue','cyan','magenta','yellow'];
 
 /* ==================== UTILS ==================== */
 
-function resolveImgSrc(filename) {
-  if (!filename) return '';
-  // If it already looks like a path (has a slash) or is a URL, just use it.
-  if (filename.startsWith('http://') || filename.startsWith('https://') || filename.includes('/')) return filename;
-  // Otherwise, join with our base folder.
-  return MUSHROOM_IMG_BASE.replace(/\/?$/, '/') + filename;
+// Join two URL/path segments with exactly one slash
+function joinPath(a, b) {
+  if (!a) return b || '';
+  if (!b) return a || '';
+  return a.replace(/\/+$/, '') + '/' + b.replace(/^\/+/, '');
 }
 
+// Normalize any CSV filename/path to the correct served path
+// Rules:
+//  - Strip site origin and optional leading "vmps_mario/"
+//  - If path starts with "images_balanced/", prefix "TexturePack/mushroom_pack/"
+//  - If it's just a basename, prefix pack base
+//  - If already absolute URL (http/https) or already includes pack base, keep
+function normalizeFilename(raw) {
+  if (!raw || typeof raw !== 'string') return '';
+
+  let s = raw.trim();
+
+  // If it's an absolute URL to your GitHub Pages with the wrong directory, strip origin + repo root
+  s = s.replace(/^https?:\/\/[^/]+\/vmps_mario\//i, '');
+  // Or if it starts with "/vmps_mario/", strip that
+  s = s.replace(/^\/?vmps_mario\//i, '');
+
+  // If it already points inside the pack, keep as is (but remove any duplicate leading slash)
+  if (/^texturepack\/mushroom_pack\//i.test(s)) {
+    return s.replace(/^\/+/, '');
+  }
+
+  // If it starts with images_balanced/, prefix the pack base
+  if (/^images_balanced\//i.test(s)) {
+    return joinPath(MUSHROOM_IMG_BASE, s);
+  }
+
+  // If it's a plain basename (no slash), place it under the pack root
+  if (!/^https?:\/\//i.test(s) && !s.includes('/')) {
+    return joinPath(MUSHROOM_IMG_BASE, s);
+  }
+
+  // Otherwise return as-is (could be another relative subdir or absolute URL)
+  return s;
+}
+
+// Resolve final <img src> URL
+function resolveImgSrc(filename) {
+  const normalized = normalizeFilename(filename);
+  // If relative, leave as relative; if absolute, keep. encodeURI is safe for spaces etc.
+  return encodeURI(normalized);
+}
+
+// Promise that loads an image with a timeout (prevents hangs)
 function loadImage(src, timeoutMs = IMG_LOAD_TIMEOUT_MS) {
   return new Promise((resolve, reject) => {
     const img = new Image();
@@ -39,12 +81,15 @@ function loadImage(src, timeoutMs = IMG_LOAD_TIMEOUT_MS) {
       img.src = '';
       reject(new Error(`Image load timeout: ${src}`));
     }, timeoutMs);
+
     img.onload = () => { clearTimeout(timer); resolve(img); };
     img.onerror = () => { clearTimeout(timer); reject(new Error(`Failed to load: ${src}`)); };
+
     img.src = src;
   });
 }
 
+// --- Basename helper (handles paths, query, hash) ---
 function basenameFromPath(p) {
   if (!p) return '';
   const q = p.split('?')[0].split('#')[0];
@@ -122,13 +167,18 @@ async function loadMushroomCatalogCSV() {
     const txt = await resp.text();
 
     const parsed = parseCSVFlexible(txt);
-    const rows = parsed.filter(r => r.filename && r.color && EIGHT_COLORS.includes(r.color));
+    // Normalize filenames now so downstream never worries about prefixes
+    const normalized = parsed.map(r => ({
+      ...r,
+      filename: r.filename ? normalizeFilename(r.filename) : r.filename
+    }));
+    const rows = normalized.filter(r => r.filename && r.color && EIGHT_COLORS.includes(r.color));
 
     console.log(`Loaded catalog rows: ${rows.length}`);
     if (rows.length === 0) {
       console.warn('[catalog] 0 usable rows after normalization. Check:');
       console.warn(' - Color names must be one of:', EIGHT_COLORS.join(', '));
-      console.warn(' - Filenames must be present in CSV (e.g., image_relpath) and exist in your server paths.');
+      console.warn(' - Filenames must exist under TexturePack/mushroom_pack or be valid URLs.');
     }
     return rows;
   } catch (e) {
@@ -413,6 +463,7 @@ async function preloadMushroomPairsQuick(n=5) {
     if (mr) mats.push(mr);
   }
   const allPairs = [];
+  for (let i=0;i+mats.length>i;i++) {} // keep linter happy; real logic below
   for (let i=0;i<mats.length;i++) {
     for (let j=0;j<mats.length;j++) {
       if (i!==j) allPairs.push([mats[i], mats[j]]);
@@ -431,7 +482,7 @@ async function preloadMushroomPairsQuick(n=5) {
 /* ==================== PLATFORM FALLBACK ==================== */
 
 function getPlatforms(overridePlatforms) {
-  if (Array.isArray(overridePlatforms) && overridePlatforms.length > 0) return overridePlatforms;
+  if (Array.isArray(overridePlatforms) && Array.isArray(overridePlatforms) && overridePlatforms.length > 0) return overridePlatforms;
   if (typeof groundPlatforms !== 'undefined' && Array.isArray(groundPlatforms) && groundPlatforms.length > 0) {
     return groundPlatforms;
   }
