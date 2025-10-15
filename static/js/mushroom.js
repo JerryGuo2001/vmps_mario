@@ -3,6 +3,8 @@
  * ---------------------------------------------------
  * - No RGB matching. Uses CSV catalog fields:
  *     filename,color,stem,cap,value
+ *   (also accepts aliases like: name,color_name,stem_width,
+ *    cap_roundness,assigned_value, etc. — normalized below)
  * - Builds Phase-1 SetA as anchored OOO triplets.
  * - Leaves helpers for later phases to pick images.
  *******************************************************/
@@ -55,25 +57,71 @@ function basenameFromPath(p) {
 }
 
 /* ==================== CATALOG LOADING ==================== */
+/* Flexible CSV parsing: accepts multiple header aliases and
+   normalizes each row to { filename,color,stem,cap,value } */
 
-// Minimal CSV parser (swap with PapaParse if you prefer)
-function parseCSV(text) {
+function parseCSVFlexible(text) {
   const lines = text.trim().split(/\r?\n/);
-  const header = lines[0].split(',').map(s => s.trim());
-  return lines.slice(1).map(line => {
-    const parts = line.split(',').map(s => s.trim());
-    const row = {};
-    header.forEach((h, i) => { row[h] = parts[i]; });
-    // normalize types
-    if ('stem' in row)   row.stem  = parseInt(row.stem, 10);
-    if ('cap' in row)    row.cap   = parseFloat(row.cap);
-    if ('value' in row)  row.value = parseInt(row.value, 10);
-    // ensure color normalized
-    if ('color' in row && typeof row.color === 'string') {
-      row.color = row.color.toLowerCase();
+  if (lines.length <= 1) return [];
+
+  // naive delimiter detect (comma or tab)
+  const guessDelim = (hdr) => (hdr.includes('\t') ? '\t' : ',');
+  const delim = guessDelim(lines[0]);
+
+  const split = (line) => line.split(delim).map(s => s.trim());
+
+  // raw headers
+  const headerRaw = split(lines[0]);
+
+  // alias map -> canonical
+  const alias = {
+    filename: ['filename','file','image','img','basename','name'],
+    color: ['color','colour','color_name','colour_name'],
+    stem: ['stem','stem_width','stemwidth','stem_w','stem-size','stemsize'],
+    cap: ['cap','cap_roundness','caproundness','cap_r','roundness'],
+    value: ['value','assigned_value','reward','val']
+  };
+
+  // build column index for each canonical field
+  const colIdx = {};
+  for (const [canon, alist] of Object.entries(alias)) {
+    let idx = -1;
+    for (const a of alist) {
+      const j = headerRaw.findIndex(h => h.toLowerCase() === a.toLowerCase());
+      if (j !== -1) { idx = j; break; }
     }
-    return row;
-  });
+    colIdx[canon] = idx; // may stay -1 (we'll warn below)
+  }
+
+  const missing = Object.entries(colIdx).filter(([,i]) => i === -1).map(([k]) => k);
+  if (missing.length) {
+    console.warn('[catalog] Missing expected columns (normalized):', missing.join(', '));
+    console.warn('[catalog] Found headers:', headerRaw);
+  }
+
+  const rows = [];
+  for (let li = 1; li < lines.length; li++) {
+    const parts = split(lines[li]);
+    // skip totally blank lines
+    if (parts.length === 1 && parts[0] === '') continue;
+
+    const row = {
+      filename: colIdx.filename >= 0 ? parts[colIdx.filename] : undefined,
+      color   : colIdx.color    >= 0 ? parts[colIdx.color]    : undefined,
+      stem    : colIdx.stem     >= 0 ? parts[colIdx.stem]     : undefined,
+      cap     : colIdx.cap      >= 0 ? parts[colIdx.cap]      : undefined,
+      value   : colIdx.value    >= 0 ? parts[colIdx.value]    : undefined,
+    };
+
+    // normalize / coerce
+    if (typeof row.color === 'string') row.color = row.color.toLowerCase();
+    if (row.stem   != null && row.stem   !== '') row.stem  = parseInt(row.stem, 10);
+    if (row.cap    != null && row.cap    !== '') row.cap   = parseFloat(row.cap);
+    if (row.value  != null && row.value  !== '') row.value = parseInt(row.value, 10);
+
+    rows.push(row);
+  }
+  return rows;
 }
 
 async function loadMushroomCatalogCSV() {
@@ -84,10 +132,17 @@ async function loadMushroomCatalogCSV() {
       return [];
     }
     const txt = await resp.text();
-    const rows = parseCSV(txt).filter(r =>
-      r.filename && r.color && EIGHT_COLORS.includes(r.color)
-    );
+
+    // parse + filter to the 8 colors and rows with filenames
+    const parsed = parseCSVFlexible(txt);
+    const rows = parsed.filter(r => r.filename && r.color && EIGHT_COLORS.includes(r.color));
+
     console.log(`Loaded catalog rows: ${rows.length}`);
+    if (rows.length === 0) {
+      console.warn('[catalog] 0 usable rows after normalization. Check:');
+      console.warn(' - Color names must be one of:', EIGHT_COLORS.join(', '));
+      console.warn(' - Filenames must be non-empty and point to images present in:', MUSHROOM_IMG_BASE);
+    }
     return rows;
   } catch (e) {
     console.warn('Error fetching catalog CSV:', e.message);
@@ -294,6 +349,9 @@ async function buildSetAForOOO() {
     mushroomCatalogRows = await loadMushroomCatalogCSV();
   }
   catalogIndex = indexCatalog(mushroomCatalogRows);
+
+  const colorsAvail = Object.keys(catalogIndex.byColor);
+  console.log('Colors present in catalog:', colorsAvail);
 
   OOOTriplets = buildOOOTripletsAnchored(mushroomCatalogRows, {
     perColorSanity: 3,
