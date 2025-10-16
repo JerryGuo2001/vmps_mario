@@ -81,6 +81,7 @@
 
     async function boot() {
       // 1) Load mushroom.js first
+      await loadScript('static/js/data_save.js'),
       await loadScript('static/js/mushroom.js');
 
       // 2) Wait 3 seconds
@@ -88,7 +89,6 @@
 
       // 3) Load the rest sequentially
       const rest = [
-        'static/js/data_save.js',
         'static/js/idenphase.js',
         'static/js/memory_phase.js',
         'static/js/game_env.js',
