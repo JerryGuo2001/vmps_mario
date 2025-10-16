@@ -1,15 +1,10 @@
 /*******************************************************
  * VMPS Mario — Catalog-first Mushrooms (OOO Anchors)
+ * LAZY IMAGE LOADING edition
  * ---------------------------------------------------
- * - No RGB matching. Uses CSV catalog fields normalized to:
- *     filename,color,stem,cap,value
- *   Accepts aliases:
- *     filename  <- image_relpath | image_webpath | image_filename_abs | filename | file | image | img | basename | name
- *     color     <- color_name | color | colour | colour_name
- *     stem      <- stem_width | stemwidth | stem_w | stem | stem-size | stemsize
- *     cap       <- cap_roundness | cap | cap_r | caproundness | roundness
- *     value     <- assigned_value | value | reward | val
- * - Builds Phase-1 SetA as anchored OOO triplets.
+ * - Normalizes CSV to { filename,color,stem,cap,value }
+ * - Builds OOO triplets but DOES NOT preload images.
+ * - Use getOOOTrial(i) to load only what you need.
  *******************************************************/
 
 /* ==================== CONFIG ==================== */
@@ -17,79 +12,55 @@
 const MAX_TRIALS = 40;
 const IMG_LOAD_TIMEOUT_MS = 5000;
 
-const MUSHROOM_IMG_BASE = 'TexturePack/mushroom_pack';   // folder root for pack
+const MUSHROOM_IMG_BASE = 'TexturePack/mushroom_pack';
 const CATALOG_CSV_URL   = 'TexturePack/mushroom_pack/mushroom_catalog.csv';
 
 const EIGHT_COLORS = ['black','white','red','green','blue','cyan','magenta','yellow'];
 
-/* ==================== UTILS ==================== */
+/* ==================== PATH UTILS ==================== */
 
-// Join two URL/path segments with exactly one slash
 function joinPath(a, b) {
   if (!a) return b || '';
   if (!b) return a || '';
   return a.replace(/\/+$/, '') + '/' + b.replace(/^\/+/, '');
 }
 
-// Normalize any CSV filename/path to the correct served path
-// Rules:
-//  - Strip site origin and optional leading "vmps_mario/"
-//  - If path starts with "images_balanced/", prefix "TexturePack/mushroom_pack/"
-//  - If it's just a basename, prefix pack base
-//  - If already absolute URL (http/https) or already includes pack base, keep
 function normalizeFilename(raw) {
   if (!raw || typeof raw !== 'string') return '';
-
   let s = raw.trim();
-
-  // If it's an absolute URL to your GitHub Pages with the wrong directory, strip origin + repo root
   s = s.replace(/^https?:\/\/[^/]+\/vmps_mario\//i, '');
-  // Or if it starts with "/vmps_mario/", strip that
   s = s.replace(/^\/?vmps_mario\//i, '');
-
-  // If it already points inside the pack, keep as is (but remove any duplicate leading slash)
-  if (/^texturepack\/mushroom_pack\//i.test(s)) {
-    return s.replace(/^\/+/, '');
-  }
-
-  // If it starts with images_balanced/, prefix the pack base
-  if (/^images_balanced\//i.test(s)) {
-    return joinPath(MUSHROOM_IMG_BASE, s);
-  }
-
-  // If it's a plain basename (no slash), place it under the pack root
-  if (!/^https?:\/\//i.test(s) && !s.includes('/')) {
-    return joinPath(MUSHROOM_IMG_BASE, s);
-  }
-
-  // Otherwise return as-is (could be another relative subdir or absolute URL)
+  if (/^texturepack\/mushroom_pack\//i.test(s)) return s.replace(/^\/+/, '');
+  if (/^images_balanced\//i.test(s)) return joinPath(MUSHROOM_IMG_BASE, s);
+  if (!/^https?:\/\//i.test(s) && !s.includes('/')) return joinPath(MUSHROOM_IMG_BASE, s);
   return s;
 }
 
-// Resolve final <img src> URL
 function resolveImgSrc(filename) {
   const normalized = normalizeFilename(filename);
-  // If relative, leave as relative; if absolute, keep. encodeURI is safe for spaces etc.
   return encodeURI(normalized);
 }
 
-// Promise that loads an image with a timeout (prevents hangs)
-function loadImage(src, timeoutMs = IMG_LOAD_TIMEOUT_MS) {
-  return new Promise((resolve, reject) => {
+/* ==================== IMAGE LOADER (with cache) ==================== */
+
+const _imageCache = new Map(); // src -> Promise<HTMLImageElement>
+
+function _loadImageOnce(src, timeoutMs = IMG_LOAD_TIMEOUT_MS) {
+  if (_imageCache.has(src)) return _imageCache.get(src);
+  const p = new Promise((resolve, reject) => {
     const img = new Image();
     const timer = setTimeout(() => {
       img.src = '';
       reject(new Error(`Image load timeout: ${src}`));
     }, timeoutMs);
-
-    img.onload = () => { clearTimeout(timer); resolve(img); };
+    img.onload  = () => { clearTimeout(timer); resolve(img); };
     img.onerror = () => { clearTimeout(timer); reject(new Error(`Failed to load: ${src}`)); };
-
     img.src = src;
   });
+  _imageCache.set(src, p);
+  return p;
 }
 
-// --- Basename helper (handles paths, query, hash) ---
 function basenameFromPath(p) {
   if (!p) return '';
   const q = p.split('?')[0].split('#')[0];
@@ -98,16 +69,12 @@ function basenameFromPath(p) {
 }
 
 /* ==================== CATALOG LOADING ==================== */
-/* Flexible CSV parsing: normalize rows to { filename,color,stem,cap,value } */
 
 function parseCSVFlexible(text) {
   const lines = text.trim().split(/\r?\n/);
   if (lines.length <= 1) return [];
-
-  // Detect comma vs tab (supports either)
   const delim = lines[0].includes('\t') ? '\t' : ',';
   const split = (line) => line.split(delim).map(s => s.trim());
-
   const headerRaw = split(lines[0]);
 
   const alias = {
@@ -128,17 +95,10 @@ function parseCSVFlexible(text) {
     colIdx[canon] = idx;
   }
 
-  const missing = Object.entries(colIdx).filter(([,i]) => i === -1).map(([k]) => k);
-  if (missing.length) {
-    console.warn('[catalog] Missing expected columns (normalized):', missing.join(', '));
-    console.warn('[catalog] Found headers: ', headerRaw);
-  }
-
   const rows = [];
   for (let li = 1; li < lines.length; li++) {
     const parts = split(lines[li]);
     if (parts.length === 1 && parts[0] === '') continue;
-
     const row = {
       filename: colIdx.filename >= 0 ? parts[colIdx.filename] : undefined,
       color   : colIdx.color    >= 0 ? parts[colIdx.color]    : undefined,
@@ -146,12 +106,10 @@ function parseCSVFlexible(text) {
       cap     : colIdx.cap      >= 0 ? parts[colIdx.cap]      : undefined,
       value   : colIdx.value    >= 0 ? parts[colIdx.value]    : undefined,
     };
-
     if (typeof row.color === 'string') row.color = row.color.toLowerCase();
     if (row.stem   != null && row.stem   !== '') row.stem  = parseInt(row.stem, 10);
     if (row.cap    != null && row.cap    !== '') row.cap   = parseFloat(row.cap);
     if (row.value  != null && row.value  !== '') row.value = parseInt(row.value, 10);
-
     rows.push(row);
   }
   return rows;
@@ -165,20 +123,15 @@ async function loadMushroomCatalogCSV() {
       return [];
     }
     const txt = await resp.text();
-
     const parsed = parseCSVFlexible(txt);
-    // Normalize filenames now so downstream never worries about prefixes
     const normalized = parsed.map(r => ({
       ...r,
       filename: r.filename ? normalizeFilename(r.filename) : r.filename
     }));
     const rows = normalized.filter(r => r.filename && r.color && EIGHT_COLORS.includes(r.color));
-
     console.log(`Loaded catalog rows: ${rows.length}`);
     if (rows.length === 0) {
-      console.warn('[catalog] 0 usable rows after normalization. Check:');
-      console.warn(' - Color names must be one of:', EIGHT_COLORS.join(', '));
-      console.warn(' - Filenames must exist under TexturePack/mushroom_pack or be valid URLs.');
+      console.warn('[catalog] 0 usable rows after normalization.');
     }
     return rows;
   } catch (e) {
@@ -190,25 +143,19 @@ async function loadMushroomCatalogCSV() {
 /* ==================== CATALOG INDEXES ==================== */
 
 function indexCatalog(rows) {
-  const byColor = {};
-  const byKey   = {};
-  const uniqCapsByColor = {};
-  const uniqStemsByColor = {};
-
+  const byColor = {}, byKey = {}, uniqCapsByColor = {}, uniqStemsByColor = {};
   for (const r of rows) {
     if (!r.filename || !r.color) continue;
     (byColor[r.color] ??= []).push(r);
     const key = `${r.color}|${r.stem}|${r.cap}`;
     if (!(key in byKey)) byKey[key] = r;
   }
-
   for (const [color, arr] of Object.entries(byColor)) {
     const caps  = Array.from(new Set(arr.map(x => x.cap))).sort((a,b)=>a-b);
     const stems = Array.from(new Set(arr.map(x => x.stem))).sort((a,b)=>a-b);
     uniqCapsByColor[color]  = caps;
     uniqStemsByColor[color] = stems;
   }
-
   return { byColor, byKey, uniqCapsByColor, uniqStemsByColor };
 }
 
@@ -216,21 +163,17 @@ function pickExtremesForColor(color, idx) {
   const stems = idx.uniqStemsByColor[color] || [];
   const caps  = idx.uniqCapsByColor[color]  || [];
   if (stems.length === 0 || caps.length === 0) return null;
-
   const sMin = stems[0], sMax = stems[stems.length-1];
   const cMin = caps[0],  cMax = caps[caps.length-1];
-
   const corners = [
-    { stem: sMin, cap: cMin }, // flat-thin
-    { stem: sMax, cap: cMin }, // flat-thick
-    { stem: sMin, cap: cMax }, // round-thin
-    { stem: sMax, cap: cMax }, // round-thick
+    { stem: sMin, cap: cMin },
+    { stem: sMax, cap: cMin },
+    { stem: sMin, cap: cMax },
+    { stem: sMax, cap: cMax },
   ];
-
   const sMid = stems[Math.floor(stems.length/2)];
   const cMid = caps[Math.floor(caps.length/2)];
   const center = { stem: sMid, cap: cMid };
-
   return { corners, center, stems, caps };
 }
 
@@ -335,41 +278,43 @@ function buildOOOTripletsAnchored(catalogRows, options={}) {
   return triplets;
 }
 
-/* ==================== OOO RENDER HELPERS ==================== */
+/* ==================== LAZY OOO RENDER HELPERS ==================== */
 
-async function rowToRenderable(r) {
-  const src = resolveImgSrc(r.filename);
-  try {
-    const img = await loadImage(src);
-    return {
-      filename: r.filename,
-      color: r.color,
-      stem: r.stem,
-      cap: r.cap,
-      value: r.value,
-      image: img
-    };
-  } catch(e) {
-    console.warn('Image load failed for', r.filename, e.message);
-    return null;
-  }
+function _rowToRenderableMeta(r) {
+  // metadata only (no image yet)
+  return {
+    filename: r.filename,
+    color: r.color,
+    stem: r.stem,
+    cap: r.cap,
+    value: r.value
+  };
 }
 
-async function materializeOOOTriplet(tri) {
-  const a = await rowToRenderable(tri.a);
-  const b = await rowToRenderable(tri.b);
-  const c = await rowToRenderable(tri.c);
-  if (!a || !b || !c) return null;
-  return { a, b, c, note: tri.note };
+async function _materializeOOOTripletLazy(tri) {
+  const srcA = resolveImgSrc(tri.a.filename);
+  const srcB = resolveImgSrc(tri.b.filename);
+  const srcC = resolveImgSrc(tri.c.filename);
+  const [imgA, imgB, imgC] = await Promise.all([
+    _loadImageOnce(srcA),
+    _loadImageOnce(srcB),
+    _loadImageOnce(srcC),
+  ]);
+  return {
+    a: { ..._rowToRenderableMeta(tri.a), image: imgA },
+    b: { ..._rowToRenderableMeta(tri.b), image: imgB },
+    c: { ..._rowToRenderableMeta(tri.c), image: imgC },
+    note: tri.note
+  };
 }
 
-/* ==================== PUBLIC API (SETS & OOO) ==================== */
+/* ==================== PUBLIC STATE & API ==================== */
 
 let mushroomCatalogRows = [];
 let catalogIndex = null;
 
-let OOOTriplets = [];
-let OOOTrialsRendered = [];
+let OOOTriplets = [];        // {a,b,c,note} — catalog rows, no images
+let _OOOTrialsCache = new Map(); // index -> Promise<rendered triplet>
 
 async function buildSetAForOOO() {
   if (!mushroomCatalogRows || mushroomCatalogRows.length === 0) {
@@ -378,8 +323,7 @@ async function buildSetAForOOO() {
   }
   catalogIndex = indexCatalog(mushroomCatalogRows);
 
-  const colorsAvail = Object.keys(catalogIndex.byColor);
-  console.log('Colors present in catalog:', colorsAvail);
+  console.log('Colors present in catalog:', Object.keys(catalogIndex.byColor));
 
   OOOTriplets = buildOOOTripletsAnchored(mushroomCatalogRows, {
     perColorSanity: 3,
@@ -387,6 +331,7 @@ async function buildSetAForOOO() {
     refColor: null
   });
 
+  // Hard cap / uniform subsample (keeps diversity, keeps runtime low)
   const MAX_OOO = 180;
   if (OOOTriplets.length > MAX_OOO) {
     const stride = OOOTriplets.length / MAX_OOO;
@@ -395,28 +340,43 @@ async function buildSetAForOOO() {
     OOOTriplets = sampled;
   }
 
+  // Shuffle order
   for (let i = OOOTriplets.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
     [OOOTriplets[i], OOOTriplets[j]] = [OOOTriplets[j], OOOTriplets[i]];
   }
 
-  OOOTrialsRendered = [];
-  for (const tri of OOOTriplets) {
-    const mat = await materializeOOOTriplet(tri);
-    if (mat) OOOTrialsRendered.push(mat);
+  console.log(`Prepared OOO trials (meta only): ${OOOTriplets.length}`);
+  return OOOTriplets.length;
+}
+
+// Load and return the rendered triplet for index i (with caching)
+async function getOOOTrial(i) {
+  if (i < 0 || i >= OOOTriplets.length) return null;
+  if (_OOOTrialsCache.has(i)) return _OOOTrialsCache.get(i);
+  const tri = OOOTriplets[i];
+  const p = _materializeOOOTripletLazy(tri);
+  _OOOTrialsCache.set(i, p);
+  return p;
+}
+
+// Optional: prefetch a few trials ahead to hide latency
+function prefetchOOO(i, lookahead = 2) {
+  for (let k = 1; k <= lookahead; k++) {
+    const j = i + k;
+    if (j >= 0 && j < OOOTriplets.length && !_OOOTrialsCache.has(j)) {
+      const tri = OOOTriplets[j];
+      _OOOTrialsCache.set(j, _materializeOOOTripletLazy(tri));
+    }
   }
-
-  console.log(`Prepared OOO trials: ${OOOTrialsRendered.length}`);
-  return OOOTrialsRendered;
 }
 
-/* ==================== OPTIONAL HELPERS FOR OTHER PHASES ==================== */
+// Accessors
+function getOOOCount() { return OOOTriplets.length; }
+function getOOOMeta(i) { return (i>=0 && i<OOOTriplets.length) ? OOOTriplets[i] : null; }
 
-function getNearestCatalogRow(color, stem, cap) {
-  if (!catalogIndex) catalogIndex = indexCatalog(mushroomCatalogRows || []);
-  return nearestRowFor(color, stem, cap, catalogIndex);
-}
-
+/* ==================== OPTIONAL: 2AFC helpers (lazy) ==================== */
+// NOTE: No startup preload anymore; call when needed.
 function sampleRows(n=5, colorWhitelist=null) {
   const pool = (mushroomCatalogRows || []).filter(r =>
     !colorWhitelist || colorWhitelist.includes(r.color)
@@ -429,60 +389,23 @@ function sampleRows(n=5, colorWhitelist=null) {
   return out;
 }
 
-async function generateRandomMushroomsForStage(n=5) {
-  const rows = sampleRows(n);
-  const items = [];
-  for (const r of rows) {
-    const ren = await rowToRenderable(r);
-    if (ren) {
-      items.push({
-        x: 0, y: 0,
-        type: 0,
-        value: ren.value,
-        isVisible: false,
-        growthFactor: 0,
-        growthSpeed: 0.05,
-        growthComplete: false,
-        color: ren.color,
-        imagefilename: ren.filename,
-        image: ren.image
-      });
-    }
-  }
-  return items;
-}
-
-let aMushrooms = [];
-let bMushrooms = [];
-
-async function preloadMushroomPairsQuick(n=5) {
-  const rows = sampleRows(n);
-  const mats = [];
-  for (const r of rows) {
-    const mr = await rowToRenderable(r);
-    if (mr) mats.push(mr);
-  }
-  const allPairs = [];
-  for (let i=0;i+mats.length>i;i++) {} // keep linter happy; real logic below
-  for (let i=0;i<mats.length;i++) {
-    for (let j=0;j<mats.length;j++) {
-      if (i!==j) allPairs.push([mats[i], mats[j]]);
-    }
-  }
-  for (let i = allPairs.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [allPairs[i], allPairs[j]] = [allPairs[j], allPairs[i]];
-  }
-  const limited = allPairs.slice(0, MAX_TRIALS);
-  aMushrooms = limited.map(p => p[0]);
-  bMushrooms = limited.map(p => p[1]);
-  console.log(`Prepared ${aMushrooms.length} limited pairs (MAX_TRIALS=${MAX_TRIALS}).`);
+async function getRandomPair() {
+  const [r1, r2] = sampleRows(2);
+  if (!r1 || !r2) return null;
+  const [img1, img2] = await Promise.all([
+    _loadImageOnce(resolveImgSrc(r1.filename)),
+    _loadImageOnce(resolveImgSrc(r2.filename))
+  ]);
+  return [
+    { ..._rowToRenderableMeta(r1), image: img1 },
+    { ..._rowToRenderableMeta(r2), image: img2 }
+  ];
 }
 
 /* ==================== PLATFORM FALLBACK ==================== */
 
 function getPlatforms(overridePlatforms) {
-  if (Array.isArray(overridePlatforms) && Array.isArray(overridePlatforms) && overridePlatforms.length > 0) return overridePlatforms;
+  if (Array.isArray(overridePlatforms) && overridePlatforms.length > 0) return overridePlatforms;
   if (typeof groundPlatforms !== 'undefined' && Array.isArray(groundPlatforms) && groundPlatforms.length > 0) {
     return groundPlatforms;
   }
@@ -492,16 +415,21 @@ function getPlatforms(overridePlatforms) {
 /* ==================== BOOTSTRAP ==================== */
 
 (async () => {
-  mushroomCatalogRows = await loadMushroomCatalogCSV();
-  catalogIndex = indexCatalog(mushroomCatalogRows);
-
+  // Load catalog + build triplets (meta only; no images)
   await buildSetAForOOO();
-  await preloadMushroomPairsQuick(6);
 
+  // Expose globals your task can call on-demand
   window.mushroomCatalogRows   = mushroomCatalogRows;
-  window.OOOTriplets           = OOOTriplets;
-  window.OOOTrialsRendered     = OOOTrialsRendered;
-  window.preloadMushroomPairsQuick = preloadMushroomPairsQuick;
-  window.generateRandomMushroomsForStage = generateRandomMushroomsForStage;
-  window.getNearestCatalogRow  = getNearestCatalogRow;
+  window.OOOTriplets           = OOOTriplets;           // meta only
+  window.getOOOTrial           = getOOOTrial;           // async -> with images
+  window.prefetchOOO           = prefetchOOO;
+  window.getOOOCount           = getOOOCount;
+  window.getOOOMeta            = getOOOMeta;
+
+  // 2AFC helpers
+  window.getRandomPair         = getRandomPair;
+
+  // No eager image loading here — render loop should call:
+  // const trial = await getOOOTrial(currentIndex);
+  // prefetchOOO(currentIndex);
 })();
