@@ -80,7 +80,7 @@ function generateGroundPlatforms(worldWidth, minHeight, maxHeight, numSections =
 
 // Generate new platforms each time with varied height
 let groundPlatforms = generateGroundPlatforms(worldWidth, 200, 400);
-
+let mushrooms = await generateMushroom(5);
 
 // Get ground Y at character position
 function getGroundY(xPosition) {
