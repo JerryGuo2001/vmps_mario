@@ -49,14 +49,15 @@ function completeExplore() {
    - Returns objects shaped to match your game’s expectations
    ======================================================================= */
 
+// Replace this whole function in task.js
 async function generateMushroom(count = 1, colorWhitelist = null) {
-  // Guard: make sure catalog is available
+  // Guard: catalog ready?
   if (!Array.isArray(window.mushroomCatalogRows) || window.mushroomCatalogRows.length === 0) {
     console.warn('[generateMushroom] Catalog is empty. Did mushroom.js finish building?');
     return [];
   }
 
-  // Filter pool by color (optional)
+  // Choose pool
   let pool = window.mushroomCatalogRows;
   if (Array.isArray(colorWhitelist) && colorWhitelist.length > 0) {
     const set = new Set(colorWhitelist.map(c => String(c).toLowerCase()));
@@ -65,46 +66,74 @@ async function generateMushroom(count = 1, colorWhitelist = null) {
   if (pool.length === 0) return [];
 
   // Sample without replacement
-  const picked = [];
+  const chosen = [];
   const tmp = pool.slice();
   for (let i = 0; i < count && tmp.length > 0; i++) {
     const j = Math.floor(Math.random() * tmp.length);
-    picked.push(tmp.splice(j, 1)[0]);
+    chosen.push(tmp.splice(j, 1)[0]);
   }
 
-  // Helper: load one image with timeout (kept small; we only load what we need)
-  const loadImageOnce = (src, timeoutMs = 5000) => new Promise((resolve, reject) => {
-    const img = new Image();
-    const timer = setTimeout(() => {
-      img.src = '';
-      reject(new Error(`Image load timeout: ${src}`));
-    }, timeoutMs);
-    img.onload  = () => { clearTimeout(timer); resolve(img); };
-    img.onerror = () => { clearTimeout(timer); reject(new Error(`Failed to load: ${src}`)); };
-    // IMPORTANT: filenames are already normalized by mushroom.js (TexturePack/… or absolute)
-    img.src = encodeURI(pickedPathFix(src));
-  });
-
-  // If any row has a bare basename or starts with images_balanced/, patch it to the served path.
-  function pickedPathFix(filename) {
-    if (!filename) return '';
-    // If already absolute URL, or already under TexturePack/mushroom_pack, keep as is.
-    if (/^https?:\/\//i.test(filename) || /^texturepack\/mushroom_pack\//i.test(filename)) {
-      return filename;
+  // Use the lazy image cache from mushroom.js if available; otherwise load once here
+  const loadImageOnce = async (filename) => {
+    if (typeof window !== 'undefined' && typeof window.getOOOTrial === 'function') {
+      // mushroom.js (lazy) has an internal cache; emulate the same load function
+      const src = encodeURI(filename);
+      // reuse the global image cache if exposed; if not, just load once here:
+      return await new Promise((resolve, reject) => {
+        const img = new Image();
+        const timer = setTimeout(() => { img.src=''; reject(new Error('timeout')); }, 5000);
+        img.onload  = () => { clearTimeout(timer); resolve(img); };
+        img.onerror = () => { clearTimeout(timer); reject(new Error('load error')); };
+        img.src = src;
+      });
+    } else {
+      // Fallback simple loader
+      return await new Promise((resolve, reject) => {
+        const img = new Image();
+        const timer = setTimeout(() => { img.src=''; reject(new Error('timeout')); }, 5000);
+        img.onload  = () => { clearTimeout(timer); resolve(img); };
+        img.onerror = () => { clearTimeout(timer); reject(new Error('load error')); };
+        img.src = encodeURI(filename);
+      });
     }
-    // If it's "images_balanced/..." or a bare file, point it under the pack root
+  };
+
+  // Helper: ensure filename is under TexturePack/mushroom_pack if needed
+  const fixPath = (filename) => {
+    if (!filename) return '';
+    if (/^https?:\/\//i.test(filename) || /^texturepack\/mushroom_pack\//i.test(filename)) return filename;
     if (!filename.includes('/')) return `TexturePack/mushroom_pack/${filename}`;
     if (/^images_balanced\//i.test(filename)) return `TexturePack/mushroom_pack/${filename}`;
     return filename;
-  }
+  };
 
-  // Load images in parallel (only the selected ones)
+  // Compute even X placements across the world; put each on top of its platform
+  const W = (typeof worldWidth === 'number' ? worldWidth : 2000);
+  const margin = 150;
+  const bandStart = margin, bandEnd = Math.max(margin + 1, W - margin);
+  const stride = (bandEnd - bandStart) / (chosen.length + 1);
+
   const items = [];
-  await Promise.all(picked.map(async (r) => {
+  await Promise.all(chosen.map(async (r, idx) => {
     try {
-      const img = await loadImageOnce(r.filename);
+      const filename = fixPath(r.filename);
+      const img = await loadImageOnce(filename);
+
+      // Even spread in world space, with small jitter
+      const jitter = Math.floor(Math.random() * 61) - 30; // [-30, +30]
+      const worldX = Math.round(bandStart + (idx + 1) * stride + jitter);
+
+      // Determine ground at this X and place the BOX top there; mushroom will draw above it
+      const topOfGround = (typeof getGroundY === 'function')
+        ? getGroundY(worldX)
+        : (canvas?.height ? Math.floor(canvas.height * 0.8) : 400);
+
+      const BOX_HEIGHT = 50; // your box is 50x50 in drawMysBox
+      const boxTopY = topOfGround - BOX_HEIGHT;
+
       items.push({
-        x: 0, y: 0,                // game will position them
+        x: worldX,          // WORLD coordinate, draw functions subtract cameraOffset
+        y: boxTopY,         // this is the TOP of the box; mushroom draws above it
         type: 0,
         value: r.value,
         isVisible: false,
@@ -112,16 +141,17 @@ async function generateMushroom(count = 1, colorWhitelist = null) {
         growthSpeed: 0.05,
         growthComplete: false,
         color: r.color,
-        imagefilename: r.filename, // keep original normalized path for logging
-        image: img                 // actual HTMLImageElement
+        imagefilename: filename, // normalized path for logging
+        image: img               // reuse this in renderer (DON'T rebuild every frame)
       });
     } catch (e) {
-      console.warn('[generateMushroom] Failed to load', r.filename, e.message);
+      console.warn('[generateMushroom] Failed image', r.filename, e.message);
     }
   }));
 
   return items;
 }
+
 
 /* =======================================================================
    Your existing game code
