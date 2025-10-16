@@ -187,7 +187,7 @@ async function generateMushroom(count = 5, colorWhitelist = null) {
       // lock to actual platform under xWorld
       const under = groundAtX(xWorld) || plat;
 
-      const BOX_H = 100;                // your box is 50x50 in drawMysBox
+      const BOX_H = 200;                // your box is 50x50 in drawMysBox
       const boxTopY = under.y - BOX_H; // TOP of the box aligned to platform
 
       items.push({
