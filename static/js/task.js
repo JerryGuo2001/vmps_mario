@@ -1,4 +1,4 @@
-// ========== task.js (updated: 5 per room, platform-locked placement) ==========
+// ========== task.js (platform-locked mushrooms; 5 per room; waits for platforms) ==========
 
 window.onload = () => {
   const w = document.getElementById('welcome');
@@ -39,30 +39,50 @@ function completeExplore() {
 }
 
 /* =======================================================================
+   Wait helpers to ensure platforms exist before we place mushrooms
+   ======================================================================= */
+
+function platformsReady() {
+  return Array.isArray(window.groundPlatforms) && window.groundPlatforms.length > 0;
+}
+function getCanvasReady() {
+  return (typeof canvas !== 'undefined') && canvas && canvas.height;
+}
+
+async function ensurePlatformsReady(timeoutMs = 3000) {
+  const t0 = performance.now();
+  while (!(platformsReady() && getCanvasReady())) {
+    if (performance.now() - t0 > timeoutMs) {
+      console.warn('[task] groundPlatforms/canvas not ready; using flat fallback.');
+      break;
+    }
+    await new Promise(r => setTimeout(r, 16));
+  }
+}
+
+/* =======================================================================
    Helpers for platform-aware placement (WORLD space)
    ======================================================================= */
 
-// Return the platform object that spans xWorld, or null if none.
 function groundAtX(xWorld) {
-  if (!Array.isArray(window.groundPlatforms)) return null;
+  if (!platformsReady()) return null;
   for (const p of window.groundPlatforms) {
     if (xWorld >= p.startX && xWorld <= p.endX) return p;
   }
   return null;
 }
 
-// Pick a non-overlapping X inside a given platform, with spacing.
 function pickXInPlatform(p, pickedXs, minMargin = 35, minSpacing = 120) {
   const xMin = p.startX + minMargin;
   const xMax = p.endX   - minMargin;
   if (xMax <= xMin) return null;
 
-  // try a few times to avoid overlaps
   for (let t = 0; t < 10; t++) {
     const x = xMin + Math.random() * (xMax - xMin);
     if (pickedXs.every(px => Math.abs(px - x) >= minSpacing)) return Math.round(x);
   }
-  // fallback: best of 12 candidates
+
+  // fallback: maximize distance to neighbors
   let best = null, bestScore = -Infinity;
   for (let t = 0; t < 12; t++) {
     const x = xMin + Math.random() * (xMax - xMin);
@@ -75,10 +95,12 @@ function pickXInPlatform(p, pickedXs, minMargin = 35, minSpacing = 120) {
 /* =======================================================================
    Generate mushrooms from the lazy catalog
    - 5 per room
-   - Each placed on TOP of the actual platform under its X
+   - Each placed on TOP of the actual platform under its X (box is 50x50)
    ======================================================================= */
 
 async function generateMushroom(count = 5, colorWhitelist = null) {
+  await ensurePlatformsReady();
+
   // Guard: catalog ready?
   if (!Array.isArray(window.mushroomCatalogRows) || window.mushroomCatalogRows.length === 0) {
     console.warn('[generateMushroom] Catalog is empty. Did mushroom.js finish building?');
@@ -101,7 +123,7 @@ async function generateMushroom(count = 5, colorWhitelist = null) {
     chosen.push(tmp.splice(j, 1)[0]);
   }
 
-  // Tiny loader (only what we need)
+  // Loader (only what we need)
   const loadImageOnce = (filename) => new Promise((resolve, reject) => {
     const img = new Image();
     const timer = setTimeout(() => { img.src=''; reject(new Error('timeout')); }, 5000);
@@ -119,13 +141,13 @@ async function generateMushroom(count = 5, colorWhitelist = null) {
     return filename;
   };
 
-  // Use actual platform list; fallback to a single flat if none exist
-  const platforms = (Array.isArray(window.groundPlatforms) && window.groundPlatforms.length)
+  // Platform list (fallback if not ready)
+  const flatY = (canvas?.height ? Math.floor(canvas.height * 0.8) : 400);
+  const platforms = platformsReady()
     ? window.groundPlatforms
-    : [{ startX: 0, endX: (typeof worldWidth === 'number' ? worldWidth : 2000),
-         y: (canvas?.height ? Math.floor(canvas.height * 0.8) : 400) }];
+    : [{ startX: 0, endX: (typeof worldWidth === 'number' ? worldWidth : 2000), y: flatY }];
 
-  // Distribute picks across platforms roughly evenly
+  // Distribute across platforms
   const platOrder = [];
   for (let i = 0; i < count; i++) {
     const idx = Math.floor(i * platforms.length / count);
@@ -135,43 +157,38 @@ async function generateMushroom(count = 5, colorWhitelist = null) {
   const pickedXs = [];
   const items = [];
 
-  // Place each mushroom: choose a platform, choose an X inside that platform,
-  // then lock Y to that platform's top (box top = platform.y - 50).
   await Promise.all(chosen.map(async (r, i) => {
     try {
       const filename = fixPath(r.filename);
       const img = await loadImageOnce(filename);
 
-      // pick a platform; if too narrow, find any usable one
+      // choose usable platform
       let plat = platOrder[i];
-      if (!plat || plat.endX - plat.startX < 80) {
-        plat = platforms.find(p => p.endX - p.startX >= 80) || platforms[0];
+      if (!plat || (plat.endX - plat.startX) < 80) {
+        plat = platforms.find(p => (p.endX - p.startX) >= 80) || platforms[0];
       }
 
-      // get an x inside this platform without crowding
+      // choose X inside platform, avoid overlap
       let xWorld = pickXInPlatform(plat, pickedXs, 35, 120);
       if (xWorld == null) {
-        // last resort: scan all platforms for any non-overlapping spot
+        // last resort: search any platform
         for (const p of platforms) {
           xWorld = pickXInPlatform(p, pickedXs, 35, 120);
           if (xWorld != null) { plat = p; break; }
         }
       }
-      if (xWorld == null) {
-        // really no room; place center of chosen platform
-        xWorld = Math.round((plat.startX + plat.endX) / 2);
-      }
+      if (xWorld == null) xWorld = Math.round((plat.startX + plat.endX) / 2);
       pickedXs.push(xWorld);
 
-      // Sanity: ensure we use the actual platform under xWorld
+      // lock to actual platform under xWorld
       const under = groundAtX(xWorld) || plat;
 
-      const BOX_H = 50; // your box is 50x50 in drawMysBox
-      const boxTopY = under.y - BOX_H; // top-left Y for the box; mushroom draws above it
+      const BOX_H = 50;           // your box is 50x50 in drawMysBox
+      const boxTopY = under.y - BOX_H;  // TOP of the box aligned to platform
 
       items.push({
         x: xWorld,                 // WORLD coordinate
-        y: boxTopY,                // TOP of the box aligned to platform
+        y: boxTopY,                // TOP of box; mushroom draws above it
         type: 0,
         value: r.value,
         isVisible: false,
@@ -179,8 +196,8 @@ async function generateMushroom(count = 5, colorWhitelist = null) {
         growthSpeed: 0.05,
         growthComplete: false,
         color: r.color,
-        imagefilename: filename,   // normalized path for logging
-        image: img                 // preloaded image (renderer uses this)
+        imagefilename: filename,
+        image: img
       });
     } catch (e) {
       console.warn('[generateMushroom] Failed image', r.filename, e.message);
@@ -191,22 +208,23 @@ async function generateMushroom(count = 5, colorWhitelist = null) {
 }
 
 /* =======================================================================
-   Your existing game code (unchanged except spawn count = 5)
+   Your existing game code (only spawn counts changed to 5)
    ======================================================================= */
 
 let mushrooms = [];
 async function initGame() {
-  // Spawn 5 per room
-  mushrooms = await generateMushroom(5);
   canvas = document.getElementById('gameCanvas');
   canvas.width = 600;
   canvas.height = 500;
   ctx = canvas.getContext('2d');
 
+  await ensurePlatformsReady();        // ✅ wait for platforms first
+  mushrooms = await generateMushroom(5);
+
   character = createCharacter();
   gravity = 0.5;
   keys = {};
-  currentQuestion = 1;
+  currentQuestion = 1; // Initialize here
   currentCanvas = 4;
 
   showPrompt = false;
@@ -237,9 +255,13 @@ function updateGame(currentTime) {
 
   // Handle freeze due to mushroom decision
   if (freezeState && activeMushroom) {
+
+    // ✅ Allow only 'e' and 'i' keys during freeze
     const allowedKeys = ['e', 'i'];
     for (let key in keys) {
-      if (!allowedKeys.includes(key)) keys[key] = false;
+      if (!allowedKeys.includes(key)) {
+        keys[key] = false; // Disable any other key
+      }
     }
 
     if (freezeTime > 0) {
