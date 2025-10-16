@@ -1,4 +1,4 @@
-// ========== task.js (updated to work with lazy mushroom catalog) ==========
+// ========== task.js (updated: 5 per room, platform-locked placement) ==========
 
 window.onload = () => {
   const w = document.getElementById('welcome');
@@ -32,21 +32,50 @@ function startMemorry() {
 
 // Complete Task
 function completeExplore() {
-  // Stop the game loop
   gameRunning = false;
-
-  // Hide all phases
   const phases = document.querySelectorAll('.phase');
   phases.forEach(phase => { phase.style.display = 'none'; });
-
   startMemorry();
 }
 
 /* =======================================================================
-   🔽 Generate mushrooms from the lazy catalog
-   - Uses window.mushroomCatalogRows (normalized by mushroom.js)
-   - Loads only the 'count' images you request
-   - Places each mushroom on top of a platform (relative to ground)
+   Helpers for platform-aware placement (WORLD space)
+   ======================================================================= */
+
+// Return the platform object that spans xWorld, or null if none.
+function groundAtX(xWorld) {
+  if (!Array.isArray(window.groundPlatforms)) return null;
+  for (const p of window.groundPlatforms) {
+    if (xWorld >= p.startX && xWorld <= p.endX) return p;
+  }
+  return null;
+}
+
+// Pick a non-overlapping X inside a given platform, with spacing.
+function pickXInPlatform(p, pickedXs, minMargin = 35, minSpacing = 120) {
+  const xMin = p.startX + minMargin;
+  const xMax = p.endX   - minMargin;
+  if (xMax <= xMin) return null;
+
+  // try a few times to avoid overlaps
+  for (let t = 0; t < 10; t++) {
+    const x = xMin + Math.random() * (xMax - xMin);
+    if (pickedXs.every(px => Math.abs(px - x) >= minSpacing)) return Math.round(x);
+  }
+  // fallback: best of 12 candidates
+  let best = null, bestScore = -Infinity;
+  for (let t = 0; t < 12; t++) {
+    const x = xMin + Math.random() * (xMax - xMin);
+    const score = Math.min(...pickedXs.map(px => Math.abs(px - x)).concat([Infinity]));
+    if (score > bestScore) { bestScore = score; best = Math.round(x); }
+  }
+  return best;
+}
+
+/* =======================================================================
+   Generate mushrooms from the lazy catalog
+   - 5 per room
+   - Each placed on TOP of the actual platform under its X
    ======================================================================= */
 
 async function generateMushroom(count = 5, colorWhitelist = null) {
@@ -56,7 +85,7 @@ async function generateMushroom(count = 5, colorWhitelist = null) {
     return [];
   }
 
-  // Filter by color if requested
+  // Pool
   let pool = window.mushroomCatalogRows;
   if (Array.isArray(colorWhitelist) && colorWhitelist.length > 0) {
     const set = new Set(colorWhitelist.map(c => String(c).toLowerCase()));
@@ -72,8 +101,8 @@ async function generateMushroom(count = 5, colorWhitelist = null) {
     chosen.push(tmp.splice(j, 1)[0]);
   }
 
-  // Loader (simple, loads only needed images)
-  const loadImageOnce = async (filename) => new Promise((resolve, reject) => {
+  // Tiny loader (only what we need)
+  const loadImageOnce = (filename) => new Promise((resolve, reject) => {
     const img = new Image();
     const timer = setTimeout(() => { img.src=''; reject(new Error('timeout')); }, 5000);
     img.onload  = () => { clearTimeout(timer); resolve(img); };
@@ -81,69 +110,68 @@ async function generateMushroom(count = 5, colorWhitelist = null) {
     img.src = encodeURI(filename);
   });
 
-  // Ensure path under TexturePack/mushroom_pack if needed
+  // Normalize path
   const fixPath = (filename) => {
     if (!filename) return '';
     if (/^https?:\/\//i.test(filename) || /^texturepack\/mushroom_pack\//i.test(filename)) return filename;
-    if (!filename.includes('/')) return `TexturePack/mushroom_pack/${filename}`;
     if (/^images_balanced\//i.test(filename)) return `TexturePack/mushroom_pack/${filename}`;
+    if (!filename.includes('/')) return `TexturePack/mushroom_pack/${filename}`;
     return filename;
   };
 
-  // Helpers for placement relative to platforms (WORLD space)
-  const platforms = Array.isArray(window.groundPlatforms) && window.groundPlatforms.length
+  // Use actual platform list; fallback to a single flat if none exist
+  const platforms = (Array.isArray(window.groundPlatforms) && window.groundPlatforms.length)
     ? window.groundPlatforms
-    : [{ startX: 0, endX: (typeof worldWidth === 'number' ? worldWidth : 2000), y: (canvas?.height ? Math.floor(canvas.height * 0.8) : 400) }];
+    : [{ startX: 0, endX: (typeof worldWidth === 'number' ? worldWidth : 2000),
+         y: (canvas?.height ? Math.floor(canvas.height * 0.8) : 400) }];
 
-  const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
-  const minBoxMargin = 35;  // keep off platform edges (box is 50px wide)
-  const minSpacing = 120;   // min horizontal spacing between mushrooms
+  // Distribute picks across platforms roughly evenly
+  const platOrder = [];
+  for (let i = 0; i < count; i++) {
+    const idx = Math.floor(i * platforms.length / count);
+    platOrder.push(platforms[Math.min(idx, platforms.length - 1)]);
+  }
 
-  // Choose a platform index for each mushroom (spread fairly evenly)
-  const platformForIndex = (i, n) => {
-    if (platforms.length === 0) return null;
-    const idx = Math.floor(i * platforms.length / n);
-    return platforms[clamp(idx, 0, platforms.length - 1)];
-  };
-
-  // Record picked Xs to avoid overlapped mushrooms
   const pickedXs = [];
-
   const items = [];
-  await Promise.all(chosen.map(async (r, idx) => {
+
+  // Place each mushroom: choose a platform, choose an X inside that platform,
+  // then lock Y to that platform's top (box top = platform.y - 50).
+  await Promise.all(chosen.map(async (r, i) => {
     try {
       const filename = fixPath(r.filename);
       const img = await loadImageOnce(filename);
 
-      // Pick a platform and an X inside it
-      let plat = platformForIndex(idx, chosen.length) || platforms[0];
-      // Fallback if a platform is too small
-      let xMin = plat.startX + minBoxMargin;
-      let xMax = plat.endX - minBoxMargin;
-      if (xMax <= xMin) {
-        // find a wider platform
-        const wide = platforms.find(p => (p.endX - p.startX) > (2 * minBoxMargin + 10)) || plat;
-        plat = wide;
-        xMin = plat.startX + minBoxMargin;
-        xMax = plat.endX - minBoxMargin;
+      // pick a platform; if too narrow, find any usable one
+      let plat = platOrder[i];
+      if (!plat || plat.endX - plat.startX < 80) {
+        plat = platforms.find(p => p.endX - p.startX >= 80) || platforms[0];
       }
 
-      // Try a few times to find a non-overlapping x
-      let xWorld = xMin + Math.random() * (xMax - xMin);
-      for (let tries = 0; tries < 8; tries++) {
-        const ok = pickedXs.every(px => Math.abs(px - xWorld) >= minSpacing);
-        if (ok) break;
-        xWorld = xMin + Math.random() * (xMax - xMin);
+      // get an x inside this platform without crowding
+      let xWorld = pickXInPlatform(plat, pickedXs, 35, 120);
+      if (xWorld == null) {
+        // last resort: scan all platforms for any non-overlapping spot
+        for (const p of platforms) {
+          xWorld = pickXInPlatform(p, pickedXs, 35, 120);
+          if (xWorld != null) { plat = p; break; }
+        }
+      }
+      if (xWorld == null) {
+        // really no room; place center of chosen platform
+        xWorld = Math.round((plat.startX + plat.endX) / 2);
       }
       pickedXs.push(xWorld);
 
-      // Set y so the BOX sits on platform; mushroom will draw above it
-      const BOX_HEIGHT = 50;
-      const boxTopY = plat.y - BOX_HEIGHT;
+      // Sanity: ensure we use the actual platform under xWorld
+      const under = groundAtX(xWorld) || plat;
+
+      const BOX_H = 50; // your box is 50x50 in drawMysBox
+      const boxTopY = under.y - BOX_H; // top-left Y for the box; mushroom draws above it
 
       items.push({
-        x: Math.round(xWorld), // WORLD coordinate
-        y: Math.round(boxTopY), // top of the box aligned to platform ground
+        x: xWorld,                 // WORLD coordinate
+        y: boxTopY,                // TOP of the box aligned to platform
         type: 0,
         value: r.value,
         isVisible: false,
@@ -151,8 +179,8 @@ async function generateMushroom(count = 5, colorWhitelist = null) {
         growthSpeed: 0.05,
         growthComplete: false,
         color: r.color,
-        imagefilename: filename, // normalized path for logging
-        image: img               // preloaded image (renderer uses this)
+        imagefilename: filename,   // normalized path for logging
+        image: img                 // preloaded image (renderer uses this)
       });
     } catch (e) {
       console.warn('[generateMushroom] Failed image', r.filename, e.message);
@@ -163,7 +191,7 @@ async function generateMushroom(count = 5, colorWhitelist = null) {
 }
 
 /* =======================================================================
-   Your existing game code
+   Your existing game code (unchanged except spawn count = 5)
    ======================================================================= */
 
 let mushrooms = [];
@@ -178,7 +206,7 @@ async function initGame() {
   character = createCharacter();
   gravity = 0.5;
   keys = {};
-  currentQuestion = 1; // Initialize here
+  currentQuestion = 1;
   currentCanvas = 4;
 
   showPrompt = false;
@@ -209,13 +237,9 @@ function updateGame(currentTime) {
 
   // Handle freeze due to mushroom decision
   if (freezeState && activeMushroom) {
-
-    // ✅ Allow only 'e' and 'i' keys during freeze
     const allowedKeys = ['e', 'i'];
     for (let key in keys) {
-      if (!allowedKeys.includes(key)) {
-        keys[key] = false; // Disable any other key
-      }
+      if (!allowedKeys.includes(key)) keys[key] = false;
     }
 
     if (freezeTime > 0) {
