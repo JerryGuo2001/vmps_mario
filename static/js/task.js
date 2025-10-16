@@ -98,41 +98,38 @@ function pickXInPlatform(p, pickedXs, minMargin = 35, minSpacing = 120) {
    - Each placed on TOP of the actual platform under its X (box is 50x50)
    ======================================================================= */
 
+// --- task.js: platform-aware mushroom generator (5 per room) ---
 async function generateMushroom(count = 5, colorWhitelist = null) {
-  await ensurePlatformsReady();
+  // Wait for platforms to exist (created in game_env.js)
+  const waitStart = performance.now();
+  while ((!Array.isArray(window.groundPlatforms) || window.groundPlatforms.length === 0) && performance.now() - waitStart < 2000) {
+    await new Promise(r => setTimeout(r, 16));
+  }
 
   // Guard: catalog ready?
-  if (!Array.isArray(window.mushroomCatalogRows) || window.mushroomCatalogRows.length === 0) {
-    console.warn('[generateMushroom] Catalog is empty. Did mushroom.js finish building?');
+  const cat = Array.isArray(window.mushroomCatalogRows) ? window.mushroomCatalogRows : [];
+  if (cat.length === 0) {
+    console.warn('[generateMushroom] Catalog empty.');
     return [];
   }
 
-  // Pool
-  let pool = window.mushroomCatalogRows;
-  if (Array.isArray(colorWhitelist) && colorWhitelist.length > 0) {
-    const set = new Set(colorWhitelist.map(c => String(c).toLowerCase()));
+  // Optional color filter
+  let pool = cat;
+  if (Array.isArray(colorWhitelist) && colorWhitelist.length) {
+    const set = new Set(colorWhitelist.map(s => String(s).toLowerCase()));
     pool = pool.filter(r => set.has(r.color));
   }
   if (pool.length === 0) return [];
 
-  // Sample without replacement
-  const chosen = [];
+  // Sample N without replacement
+  const pickedRows = [];
   const tmp = pool.slice();
   for (let i = 0; i < count && tmp.length > 0; i++) {
     const j = Math.floor(Math.random() * tmp.length);
-    chosen.push(tmp.splice(j, 1)[0]);
+    pickedRows.push(tmp.splice(j, 1)[0]);
   }
 
-  // Loader (only what we need)
-  const loadImageOnce = (filename) => new Promise((resolve, reject) => {
-    const img = new Image();
-    const timer = setTimeout(() => { img.src=''; reject(new Error('timeout')); }, 5000);
-    img.onload  = () => { clearTimeout(timer); resolve(img); };
-    img.onerror = () => { clearTimeout(timer); reject(new Error('load error')); };
-    img.src = encodeURI(filename);
-  });
-
-  // Normalize path
+  // Path normalize
   const fixPath = (filename) => {
     if (!filename) return '';
     if (/^https?:\/\//i.test(filename) || /^texturepack\/mushroom_pack\//i.test(filename)) return filename;
@@ -141,71 +138,59 @@ async function generateMushroom(count = 5, colorWhitelist = null) {
     return filename;
   };
 
-  // Platform list (fallback if not ready)
-  const flatY = (canvas?.height ? Math.floor(canvas.height * 0.8) : 400);
-  const platforms = platformsReady()
+  // Choose platforms to distribute mushrooms
+  const platforms = (Array.isArray(window.groundPlatforms) && window.groundPlatforms.length)
     ? window.groundPlatforms
-    : [{ startX: 0, endX: (typeof worldWidth === 'number' ? worldWidth : 2000), y: flatY }];
+    : [{ startX: 0, endX: (typeof worldWidth === 'number' ? worldWidth : 2000), y: (canvas?.height ? Math.floor(canvas.height * 0.8) : 400) }];
 
-  // Distribute across platforms
+  // Helper to pick an X inside a platform with minimum spacing
+  const pickedXs = [];
+  const pickXInPlatform = (p, minMargin = 35, minSpacing = 120) => {
+    const xMin = p.startX + minMargin;
+    const xMax = p.endX   - minMargin;
+    if (xMax <= xMin) return null;
+
+    for (let t = 0; t < 10; t++) {
+      const x = xMin + Math.random() * (xMax - xMin);
+      if (pickedXs.every(px => Math.abs(px - x) >= minSpacing)) return Math.round(x);
+    }
+    // fallback: center
+    return Math.round((xMin + xMax) / 2);
+  };
+
+  // Distribute across available platforms
   const platOrder = [];
-  for (let i = 0; i < count; i++) {
-    const idx = Math.floor(i * platforms.length / count);
-    platOrder.push(platforms[Math.min(idx, platforms.length - 1)]);
+  for (let i = 0; i < pickedRows.length; i++) {
+    const idx = Math.min(Math.floor(i * platforms.length / pickedRows.length), platforms.length - 1);
+    platOrder.push(platforms[idx]);
   }
 
-  const pickedXs = [];
-  const items = [];
+  // Create minimal objects expected by your game (mushroom.y = top-of-box)
+  const BOX_H = 50;
+  const shrooms = pickedRows.map((r, i) => {
+    const p = platOrder[i] || platforms[0];
+    let xWorld = pickXInPlatform(p, 35, 120);
+    if (xWorld == null) xWorld = Math.round((p.startX + p.endX) / 2);
+    pickedXs.push(xWorld);
 
-  await Promise.all(chosen.map(async (r, i) => {
-    try {
-      const filename = fixPath(r.filename);
-      const img = await loadImageOnce(filename);
+    return {
+      x: xWorld,                 // WORLD X (draw code subtracts cameraOffset)
+      y: p.y - BOX_H,            // TOP of the 50×50 box — sits on platform
+      type: 0,
+      value: r.value,
+      isVisible: false,
+      growthFactor: 0,
+      growthSpeed: 0.05,
+      growthComplete: false,
+      color: r.color,
+      imagefilename: fixPath(r.filename),
+      image: null                // image not needed until question box; draw uses pack path directly
+    };
+  });
 
-      // choose usable platform
-      let plat = platOrder[i];
-      if (!plat || (plat.endX - plat.startX) < 80) {
-        plat = platforms.find(p => (p.endX - p.startX) >= 80) || platforms[0];
-      }
-
-      // choose X inside platform, avoid overlap
-      let xWorld = pickXInPlatform(plat, pickedXs, 35, 120);
-      if (xWorld == null) {
-        // last resort: search any platform
-        for (const p of platforms) {
-          xWorld = pickXInPlatform(p, pickedXs, 35, 120);
-          if (xWorld != null) { plat = p; break; }
-        }
-      }
-      if (xWorld == null) xWorld = Math.round((plat.startX + plat.endX) / 2);
-      pickedXs.push(xWorld);
-
-      // lock to actual platform under xWorld
-      const under = groundAtX(xWorld) || plat;
-
-      const BOX_H = 50;           // your box is 50x50 in drawMysBox
-      const boxTopY = under.y - BOX_H;  // TOP of the box aligned to platform
-
-      items.push({
-        x: xWorld,                 // WORLD coordinate
-        y: boxTopY,                // TOP of box; mushroom draws above it
-        type: 0,
-        value: r.value,
-        isVisible: false,
-        growthFactor: 0,
-        growthSpeed: 0.05,
-        growthComplete: false,
-        color: r.color,
-        imagefilename: filename,
-        image: img
-      });
-    } catch (e) {
-      console.warn('[generateMushroom] Failed image', r.filename, e.message);
-    }
-  }));
-
-  return items;
+  return shrooms;
 }
+
 
 /* =======================================================================
    Your existing game code (only spawn counts changed to 5)
