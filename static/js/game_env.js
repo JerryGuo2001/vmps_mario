@@ -18,6 +18,10 @@ let revealOnlyValue;
 let mushroomTrialIndex = 0;
 let mushroomDecisionStartTime = null;
 
+// --- Box (platform block) size used everywhere ---
+const BOX_W = 50;
+const BOX_H = 50;
+
 // Define object properties
 const OBJECT_TYPES = {
   OBSTACLE: 'obstacle',
@@ -68,6 +72,17 @@ function pickXInPlatform(plat, pickedXs, minGap = 35, maxGap = 120) {
   }
   // last resort
   return Math.floor((plat.startX + plat.endX) / 2);
+}
+
+// --- camera/coord helpers ---
+function worldToScreenX(xWorld) { return xWorld - cameraOffset; }
+function getCharacterScreenX() {
+  // When camera is centered, we render the character at canvas center
+  return (cameraOffset > 0 && cameraOffset < worldWidth - canvas.width) ? (canvas.width / 2) : character.x;
+}
+function getCharacterWorldX() {
+  // World-X of character regardless of camera mode
+  return cameraOffset + getCharacterScreenX();
 }
 
 // -----------------------------------------------------------
@@ -184,10 +199,8 @@ async function generateMushroom(count = 5, colorWhitelist = null) {
       if (xWorld == null) xWorld = Math.round((plat.startX + plat.endX) / 2);
       pickedXs.push(xWorld);
 
-      // lock to actual platform under xWorld
+      // lock to the *actual* platform under xWorld and put the box just above it
       const under = groundAtX(xWorld) || plat;
-
-      const BOX_H = 200;                // your box is 50x50 in drawMysBox
       const boxTopY = under.y - BOX_H; // TOP of the box aligned to platform
 
       items.push({
@@ -218,7 +231,7 @@ let groundPlatforms = generateGroundPlatforms(worldWidth, 200, 400);
 let mushrooms = [];
 generateMushroom(5).then(ms => { mushrooms = ms; }).catch(err => console.warn('[init mushrooms]', err));
 
-// Get ground Y at character position
+// Get ground Y at character position (world-X)
 function getGroundY(xPosition) {
   for (let platform of groundPlatforms) {
     if (xPosition >= platform.startX && xPosition <= platform.endX) {
@@ -230,32 +243,23 @@ function getGroundY(xPosition) {
 
 function drawBackground_canvas4() {
   let Imagetouse;
-  if (env_deter == 'sky') {
-    Imagetouse = skyImage;
-  } else if (env_deter == 'desert') {
-    Imagetouse = desertImage;
-  } else if (env_deter == 'ocean') {
-    Imagetouse = oceanImage;
-  } else if (env_deter == 'forest') {
-    Imagetouse = forestImage;
-  } else if (env_deter == 'cave') {
-    Imagetouse = caveImage;
-  } else if (env_deter == 'lava') {
-    Imagetouse = lavaImage;
-  }
+  if (env_deter == 'sky')       Imagetouse = skyImage;
+  else if (env_deter == 'desert') Imagetouse = desertImage;
+  else if (env_deter == 'ocean')  Imagetouse = oceanImage;
+  else if (env_deter == 'forest') Imagetouse = forestImage;
+  else if (env_deter == 'cave')   Imagetouse = caveImage;
+  else if (env_deter == 'lava')   Imagetouse = lavaImage;
 
-  // Draw the sky background
+  // Draw the background
   if (Imagetouse && Imagetouse.complete) {
     ctx.drawImage(Imagetouse, 0, 0, canvas.width, canvas.height);
   } else if (Imagetouse) {
-    Imagetouse.onload = () => {
-      drawBackground_canvas4(); // Redraw once loaded
-    };
+    Imagetouse.onload = () => drawBackground_canvas4();
   }
 
   groundPlatforms.forEach(platform => {
-    let screenStartX = platform.startX - cameraOffset;
-    let screenEndX = platform.endX - cameraOffset;
+    let screenStartX = worldToScreenX(platform.startX);
+    let screenEndX   = worldToScreenX(platform.endX);
 
     // Draw bricks only when the image is loaded
     if (groundImage.complete) {
@@ -265,9 +269,7 @@ function drawBackground_canvas4() {
         }
       }
     } else {
-      groundImage.onload = () => {
-        drawBackground_canvas4(); // Redraw once loaded
-      };
+      groundImage.onload = () => drawBackground_canvas4();
     }
   });
 }
@@ -276,24 +278,21 @@ function drawBackground_canvas4() {
 function handleCollisions_canvas4() {
   groundPlatforms.forEach(platform => {
     const epsilon = 0.5;
-    const stuckLeft = Math.abs(character.x + character.width - platform.startX) < epsilon;
-    const stuckRight = Math.abs(character.x - platform.endX) < epsilon;
+    const stuckLeft = Math.abs(character.x + character.width - worldToScreenX(platform.startX)) < epsilon;
+    const stuckRight = Math.abs(character.x - worldToScreenX(platform.endX)) < epsilon;
 
+    // vertical overlap in screen space
     if (character.y + character.height > platform.y) {
       if (character.y + character.height > platform.y &&
-          character.y < platform.y + 10) {
-        character.x = platform.startX - character.width;
+          character.y < platform.y + 10 ){
+        character.x = worldToScreenX(platform.startX) - character.width;
       }
-      if (character.x < platform.endX && character.x + character.width > platform.endX) {
-        character.x = platform.endX;
+      if (character.x < worldToScreenX(platform.endX) && character.x + character.width > worldToScreenX(platform.endX)) {
+        character.x = worldToScreenX(platform.endX);
       }
 
-      if (stuckLeft) {
-        character.x -= 1;
-      }
-      if (stuckRight) {
-        character.x += 1;
-      }
+      if (stuckLeft)  character.x -= 1;
+      if (stuckRight) character.x += 1;
     }
   });
 
@@ -341,41 +340,40 @@ boxImage.src = 'TexturePack/box.jpg'; // Replace with the correct path to your b
 
 function drawMysBox() {
   let canJump;
-  let offset = cameraOffset;
-  mushrooms.forEach(mushroom => {
+  const offset = cameraOffset;
 
-    let boxX = mushroom.x - offset;
-    let boxY = mushroom.y;
+  mushrooms.forEach(mushroom => {
+    const boxX_screen = worldToScreenX(mushroom.x);
+    const boxY = mushroom.y;
+
     // Draw the box image below the mushroom
-    ctx.drawImage(
-      boxImage,
-      boxX - 25, // Adjust the X position of the box relative to the mushroom
-      boxY,      // Position the box below the mushroom
-      50, 50     // Set the size of the box
-    );
+    ctx.drawImage(boxImage, boxX_screen - BOX_W/2, boxY, BOX_W, BOX_H);
+
+    // --- Collisions with the box (screen space) ---
+    const charX = getCharacterScreenX();
+
     if (atLeftEdge || atRightEdge) {
       // ✅ Side collision (Prevent moving through blocks)
       if (character.y + character.height > boxY + 5 &&
-          character.y < boxY + 25) {
-        if (character.x + character.width > boxX - 25 &&
-            character.x < boxX &&
+          character.y < boxY + BOX_H/2) {
+        if (charX + character.width > boxX_screen - BOX_W/2 &&
+            charX < boxX_screen &&
             keys['ArrowRight']) {
-          character.x = boxX - character.width - 25;
+          character.x = boxX_screen - character.width - BOX_W/2;
         }
 
-        if (character.x < boxX + 25 &&
-            character.x + character.width > boxX &&
+        if (charX < boxX_screen + BOX_W/2 &&
+            charX + character.width > boxX_screen &&
             keys['ArrowLeft']) {
-
-          character.x = boxX + 25;
+          character.x = boxX_screen + BOX_W/2;
         }
       }
 
       // ✅ Bottom collision (Hitting from below)
-      if (character.y < boxY + 50 &&
-          character.y + character.height > boxY + 50 &&
-          character.x + character.width > boxX - 25 &&
-          character.x < boxX + 25 &&
+      if (character.y < boxY + BOX_H &&
+          character.y + character.height > boxY + BOX_H &&
+          charX + character.width > boxX_screen - BOX_W/2 &&
+          charX < boxX_screen + BOX_W/2 &&
           character.velocityY < 0) {
         mushroom.isVisible = true;
         if (mushroomDecisionStartTime === null) {
@@ -386,8 +384,8 @@ function drawMysBox() {
       if (character.velocityY >= 0 &&
           character.y + character.height <= boxY + 5 &&
           character.y + character.height + character.velocityY >= boxY &&
-          character.x + character.width > boxX - 25 &&
-          character.x < boxX + 25) {
+          charX + character.width > boxX_screen - BOX_W/2 &&
+          charX < boxX_screen + BOX_W/2) {
 
         character.y = boxY - character.height;
         character.velocityY = 0;
@@ -395,12 +393,13 @@ function drawMysBox() {
         canJump = true;
       }
     } else {
+      // centered camera
       if (
         character.velocityY >= 0 &&
         character.y + character.height <= boxY + 5 &&
         character.y + character.height + character.velocityY >= boxY &&
-        (canvas.width / 2) + character.width > boxX &&
-        (canvas.width / 2) < boxX + 25
+        (canvas.width / 2) + character.width > boxX_screen &&
+        (canvas.width / 2) < boxX_screen + BOX_W/2
       ) {
         character.y = boxY - character.height;
         character.velocityY = 0;
@@ -409,8 +408,8 @@ function drawMysBox() {
       }
 
       if (
-        (character.x + character.width > boxX - 25 && character.x < boxX + 25) &&
-        (character.y + character.height > boxY + 20 && character.y < boxY)
+        (charX + character.width > boxX_screen - BOX_W/2 && charX < boxX_screen + BOX_W/2) &&
+        (character.y + character.height > boxY + BOX_H*0.4 && character.y < boxY)
       ) {
         // Handle horizontal collision by stopping movement or pushing back
         if (character.speed > 0) {
@@ -424,10 +423,10 @@ function drawMysBox() {
 
       if (
         character.velocityY <= 0 &&
-        character.y - character.height <= boxY + 25 &&
-        character.y - character.height >= boxY + 20 &&
-        (canvas.width / 2) + character.width > boxX - 25 &&
-        (canvas.width / 2) < boxX + 25
+        character.y - character.height <= boxY + BOX_H/2 &&
+        character.y - character.height >= boxY + BOX_H*0.4 &&
+        (canvas.width / 2) + character.width > boxX_screen - BOX_W/2 &&
+        (canvas.width / 2) < boxX_screen + BOX_W/2
       ) {
         // Hit head
         mushroom.isVisible = true;
@@ -450,9 +449,7 @@ function removeActiveMushroom() {
   freezeState = false;
 }
 
-async function handleMushroomCollision_canvas4(atLeftEdge, atRightEdge) {
-  let offset = cameraOffset;
-
+async function handleMushroomCollision_canvas4() {
   // Iterate through each mushroom
   mushrooms.forEach((mushroom, index) => {
     // If the mushroom is not visible, skip drawing
@@ -474,33 +471,33 @@ async function handleMushroomCollision_canvas4(atLeftEdge, atRightEdge) {
       }
     }
 
-    let mushroomX = atLeftEdge ? mushroom.x : atRightEdge ? mushroom.x - offset : mushroom.x - offset;
-    let mushroomY = mushroom.y;
+    const mushroomScreenX = worldToScreenX(mushroom.x);
+    const mushroomY = mushroom.y;
 
     // **Size based on growth factor**
-    let mushroomWidth = 30 + 20 * mushroom.growthFactor;   // 30px → 50px
-    let mushroomHeight = 30 + 20 * mushroom.growthFactor;  // 30px → 50px
+    const mushroomWidth = 30 + 20 * mushroom.growthFactor;   // 30px → 50px
+    const mushroomHeight = 30 + 20 * mushroom.growthFactor;  // 30px → 50px
 
     // ✅ Reuse preloaded image from generateMushroom
     const mushroomImage = mushroom.image;
 
     ctx.drawImage(
       mushroomImage,
-      mushroomX - mushroomWidth / 2, mushroomY - mushroomHeight,
+      mushroomScreenX - mushroomWidth / 2, mushroomY - mushroomHeight,
       mushroomWidth, mushroomHeight
     );
 
-    let characterScreenX = atLeftEdge ? character.x : atRightEdge ? character.x : canvas.width / 2;
+    // Interaction logic (e.g., pressing 'E' to eat the mushroom) — screen space
+    const charScreenX = getCharacterScreenX();
 
-    // Interaction logic (e.g., pressing 'E' to eat the mushroom)
     if (
-      Math.abs(characterScreenX - mushroomX) <= 30 &&
+      Math.abs(charScreenX - mushroomScreenX) <= 30 &&
       Math.abs(character.y + character.height - mushroomY) <= 30
     ) {
       showPrompt = true;
       ctx.fillStyle = '#000';
       ctx.font = '16px Arial';
-      ctx.fillText('Press E to eat', mushroomX - 40, mushroomY - 50);
+      ctx.fillText('Press E to eat', mushroomScreenX - 40, mushroomY - 50);
 
       if (keys['e']) {
         let staminaChange = 0;
@@ -527,9 +524,7 @@ async function handleMushroomCollision_canvas4(atLeftEdge, atRightEdge) {
           heartMessage.innerText = '❤️ + ' + staminaChange;
           heartMessage.style.zIndex = '1000';
           document.body.appendChild(heartMessage);
-          setTimeout(() => {
-            document.body.removeChild(heartMessage);
-          }, 2000);
+          setTimeout(() => { document.body.removeChild(heartMessage); }, 2000);
         } else if (staminaChange < 0) {
           // Display floating heart message
           const heartMessage = document.createElement('div');
@@ -543,9 +538,7 @@ async function handleMushroomCollision_canvas4(atLeftEdge, atRightEdge) {
           heartMessage.innerText = '❤️ ' + staminaChange;
           heartMessage.style.zIndex = '1000';
           document.body.appendChild(heartMessage);
-          setTimeout(() => {
-            document.body.removeChild(heartMessage);
-          }, 2000);
+          setTimeout(() => { document.body.removeChild(heartMessage); }, 2000);
         } else if (staminaChange == 'reset') {
           // Display floating "Toxic!"
           const heartMessage = document.createElement('div');
@@ -559,9 +552,7 @@ async function handleMushroomCollision_canvas4(atLeftEdge, atRightEdge) {
           heartMessage.innerText = 'Toxic!';
           heartMessage.style.zIndex = '1000';
           document.body.appendChild(heartMessage);
-          setTimeout(() => {
-            document.body.removeChild(heartMessage);
-          }, 2000);
+          setTimeout(() => { document.body.removeChild(heartMessage); }, 2000);
         }
         mushrooms.splice(index, 1);  // Remove the mushroom after eating it
       }
@@ -570,12 +561,6 @@ async function handleMushroomCollision_canvas4(atLeftEdge, atRightEdge) {
 }
 
 function handleBlockCollision_canvas4() {
-  let floatingBlocks = [
-    { x: worldWidth - 400, y: canvas.height * 0.3 + 80, type: OBJECT_TYPES.OBSTACLE },
-    { x: worldWidth - 350, y: canvas.height * 0.3 + 50, type: OBJECT_TYPES.OBSTACLE },
-    { x: worldWidth - 300, y: canvas.height * 0.3 + 20, type: OBJECT_TYPES.OBSTACLE }
-  ];
-
   // (Drawing disabled)
 }
 
@@ -594,7 +579,7 @@ let freezeTime = 0; // Variable to track freeze time
 async function checkHP_canvas4() {
   if (character.hp <= 0 && freezeTime === 0) {
     // Start freezing when hp <= 0
-    freezeTime = 1000;  // (comment says 3s previously; using 1000ms here)
+    freezeTime = 1000;
     currentCanvas = 4;
     character.hp = 2;
     const respawn = getRespawnSpot();
@@ -612,13 +597,13 @@ function handleMovement_canvas4() {
   atRightEdge = cameraOffset >= worldWidth - canvas.width;
 
   // **Determine character's world position considering camera offset**
-  let characterWorldX = character.x + cameraOffset;
+  let characterWorldX = getCharacterWorldX();
 
   // **Check for collisions with ground platforms, preventing entry from sides**
-  function isCollidingWithWall(x, y) {
+  function isCollidingWithWall(xWorld, y) {
     return groundPlatforms.some(platform =>
-      ((x + character.width > platform.startX && x < platform.startX) ||
-       (x < platform.endX && x + character.width > platform.endX)) &&
+      ((xWorld + character.width > platform.startX && xWorld < platform.startX) ||
+       (xWorld < platform.endX && xWorld + character.width > platform.endX)) &&
       y + character.height > platform.y // Ensure entry is blocked if below platform
     );
   }
@@ -688,7 +673,7 @@ function handleMovement_canvas4() {
   }
 
   // **Calculate proper ground position using world coordinates**
-  let characterGroundY = getGroundY(characterWorldX + character.width / 2);
+  let characterGroundY = getGroundY(newWorldX + character.width / 2);
   let onGround = character.y + character.height >= characterGroundY;
 
   // **Jumping Logic**
@@ -706,9 +691,9 @@ function handleMovement_canvas4() {
   let newY = character.y + character.velocityY;
 
   // Try fuzzy ground detection
-  let leftFootX = characterWorldX + 2;
-  let rightFootX = characterWorldX + character.width - 2;
-  let fuzzyGroundY = Math.min(getGroundY(leftFootX), getGroundY(rightFootX));
+  let leftFootXWorld = newWorldX + 2;
+  let rightFootXWorld = newWorldX + character.width - 2;
+  let fuzzyGroundY = Math.min(getGroundY(leftFootXWorld), getGroundY(rightFootXWorld));
 
   // Only land if character is above the ground
   if (
@@ -723,7 +708,7 @@ function handleMovement_canvas4() {
   }
 
   // handleCollisions_canvas4();
-  handleMushroomCollision_canvas4(atLeftEdge, atRightEdge);
+  handleMushroomCollision_canvas4();
 }
 
 function drawMushroomQuestionBox() {
