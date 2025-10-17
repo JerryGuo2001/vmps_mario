@@ -22,6 +22,9 @@ let mushroomDecisionStartTime = null;
 const BOX_W = 50;
 const BOX_H = 50;
 
+// --- Generated platform layer settings (for mushrooms only) ---
+const MUSHROOM_PLATFORM_OFFSET = 120; // how far ABOVE ground the generated platform sits
+
 // Define object properties
 const OBJECT_TYPES = {
   OBSTACLE: 'obstacle',
@@ -43,7 +46,7 @@ let forestImage = new Image(); forestImage.src = 'TexturePack/forest.png';
 let caveImage = new Image();   caveImage.src = 'TexturePack/cave.png';
 let lavaImage = new Image();   lavaImage.src = 'TexturePack/lava.png';
 
-// ------- Small helpers your code referenced elsewhere -------
+// ------- Small helpers -------
 
 // Are platforms ready?
 function platformsReady() {
@@ -54,6 +57,25 @@ function platformsReady() {
 function groundAtX(x) {
   if (!Array.isArray(window.groundPlatforms)) return null;
   return window.groundPlatforms.find(p => x >= p.startX && x <= p.endX) || null;
+}
+
+// Build a "generated" mushroom platform layer ABOVE the ground
+function buildMushroomPlatformsFromGround(offsetPx = MUSHROOM_PLATFORM_OFFSET) {
+  if (!Array.isArray(window.groundPlatforms)) return [];
+  // Copy geometry (x ranges) from ground but lift y by offset
+  return window.groundPlatforms.map(p => ({
+    startX: p.startX,
+    endX: p.endX,
+    y: Math.max(0, p.y - offsetPx), // lift up, clamp to 0 minimum
+    type: OBJECT_TYPES.OBSTACLE,
+    display: true
+  }));
+}
+
+// Find the generated mushroom platform under a world-X
+function mushroomPlatformAtX(x) {
+  if (!Array.isArray(window.mushroomPlatforms)) return null;
+  return window.mushroomPlatforms.find(p => x >= p.startX && x <= p.endX) || null;
 }
 
 // Pick a world-X inside a platform keeping gaps from prior picks
@@ -160,11 +182,10 @@ async function generateMushroom(count = 5, colorWhitelist = null) {
     return filename;
   };
 
-  // Platform list (fallback if not ready)
-  const flatY = (canvas?.height ? Math.floor(canvas.height * 0.8) : 400);
-  const platforms = platformsReady()
-    ? window.groundPlatforms
-    : [{ startX: 0, endX: (typeof worldWidth === 'number' ? worldWidth : 2000), y: flatY }];
+  // Platform list for placement is the **generated mushroom platform** layer
+  const platforms = (Array.isArray(window.mushroomPlatforms) && window.mushroomPlatforms.length)
+    ? window.mushroomPlatforms
+    : [{ startX: 0, endX: (typeof worldWidth === 'number' ? worldWidth : 2000), y: Math.floor(canvas.height * 0.55) }];
 
   // Distribute across platforms
   const platOrder = [];
@@ -199,9 +220,10 @@ async function generateMushroom(count = 5, colorWhitelist = null) {
       if (xWorld == null) xWorld = Math.round((plat.startX + plat.endX) / 2);
       pickedXs.push(xWorld);
 
-      // lock to the *actual* platform under xWorld and put the box just above it
-      const under = groundAtX(xWorld) || plat;
-      const boxTopY = under.y - BOX_H; // TOP of the box aligned to platform
+      // lock to the *generated* mushroom platform under xWorld (NOT ground)
+      const under = mushroomPlatformAtX(xWorld) || plat;
+
+      const boxTopY = under.y - BOX_H; // put the box directly ON the generated platform
 
       items.push({
         x: xWorld,                 // WORLD coordinate
@@ -226,6 +248,9 @@ async function generateMushroom(count = 5, colorWhitelist = null) {
 
 // Generate new platforms each time with varied height
 let groundPlatforms = generateGroundPlatforms(worldWidth, 200, 400);
+
+// Build the generated mushroom platform layer ABOVE ground
+let mushroomPlatforms = buildMushroomPlatformsFromGround(MUSHROOM_PLATFORM_OFFSET);
 
 // ❌ FIXED: no top-level await. Start with empty array and populate asynchronously.
 let mushrooms = [];
@@ -272,6 +297,14 @@ function drawBackground_canvas4() {
       groundImage.onload = () => drawBackground_canvas4();
     }
   });
+
+  // (Optional) draw mushroomPlatforms visibly (commented out; enable if you want to see them)
+  // ctx.fillStyle = 'rgba(0,0,0,0.15)';
+  // mushroomPlatforms.forEach(p => {
+  //   const x1 = worldToScreenX(p.startX);
+  //   const x2 = worldToScreenX(p.endX);
+  //   ctx.fillRect(x1, p.y - 6, x2 - x1, 6);
+  // });
 }
 
 // Updated collision detection
@@ -326,7 +359,11 @@ async function handleTextInteraction_canvas4() {
       currentCanvas = 1;
       character.hp = 2;
       currentQuestion += 1;  // Increment the question number when the player presses 'P' and HP > 5
+
+      // Regenerate ground + mushroom platform layer
       groundPlatforms = generateGroundPlatforms(worldWidth, 200, 400);
+      mushroomPlatforms = buildMushroomPlatformsFromGround(MUSHROOM_PLATFORM_OFFSET);
+
       mushrooms = await generateMushroom(5);
       console.log("Proceeding to next question: " + currentQuestion);
       roomChoiceStartTime = performance.now();
@@ -340,7 +377,6 @@ boxImage.src = 'TexturePack/box.jpg'; // Replace with the correct path to your b
 
 function drawMysBox() {
   let canJump;
-  const offset = cameraOffset;
 
   mushrooms.forEach(mushroom => {
     const boxX_screen = worldToScreenX(mushroom.x);
@@ -586,6 +622,9 @@ async function checkHP_canvas4() {
     character.x = respawn.x;
     character.y = respawn.y;
     cameraOffset = 0;
+
+    // Rebuild mushroom platforms because ground is the basis
+    mushroomPlatforms = buildMushroomPlatformsFromGround(MUSHROOM_PLATFORM_OFFSET);
     mushrooms = await generateMushroom(5);
   }
 }
