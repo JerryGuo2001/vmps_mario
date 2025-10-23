@@ -251,7 +251,7 @@ async function generateMushroom(count = 5, colorWhitelist = null) {
       if (xWorld == null) xWorld = Math.round((plat.startX + plat.endX) / 2);
       pickedXs.push(xWorld);
 
-      // 👇 Per-mushroom Y from the *actual ground platform* under xWorld (box bottom 50px above platform)
+      // 👇 Mys-box Y from the *actual ground platform* under xWorld (box bottom 50px above platform)
       const gPlat = groundAtX(xWorld);
       const platformY = gPlat ? gPlat.y : Math.floor(canvas.height * 0.55);
       const boxBottomY = platformY - 50;
@@ -285,7 +285,7 @@ let groundPlatforms = generateGroundPlatforms(worldWidth, 200, 400);
 // Build the generated mushroom platform layer ABOVE ground
 let mushroomPlatforms = buildMushroomPlatformsFromGround(MUSHROOM_PLATFORM_OFFSET);
 
-// Initial spawn (will be empty if catalog isn't ready yet; later spawns happen after P/respawn)
+// Initial spawn
 let mushrooms = [];
 generateMushroom(5).then(ms => { mushrooms = ms; }).catch(err => console.warn('[init mushrooms]', err));
 
@@ -395,7 +395,7 @@ boxImage.src = 'TexturePack/box.jpg'; // Replace with the correct path to your b
 function drawMysBox() {
   ensureWorldPosInit();
   let canJump = false;
-  const prevRect = charRectWorld();
+  const prev = charRectWorld();
 
   mushrooms.forEach(mushroom => {
     // draw box
@@ -415,16 +415,17 @@ function drawMysBox() {
       ctx.strokeRect(boxX_screen - BOX_W/2, boxY_top, BOX_W, BOX_H);
     }
 
-    const now = charRectWorld();
+    // projected sweep for this frame
+    const now = charRectWorld(); // current rect
+    const nextBottom = character.y + character.height + character.velocityY;
+    const nextTop    = character.y + character.velocityY;
+
     const hOver = horizOverlap(now.left, now.right, boxLeft, boxRight);
 
-    // Proposed sweep endpoints
-    const proposedBottom = character.y + character.height + character.velocityY;
-    const proposedTop    = character.y + character.velocityY;
-
     // 1) LAND ON TOP (priority)
+    //   previous bottom above/top edge, next bottom crosses top edge
     if (character.velocityY >= 0 && hOver &&
-        prevRect.bottom <= boxY_top && proposedBottom >= boxY_top) {
+        prev.bottom <= boxY_top && nextBottom >= boxY_top) {
       character.y = boxY_top - character.height;
       character.velocityY = 0;
       canJump = true;
@@ -433,31 +434,30 @@ function drawMysBox() {
 
     // 2) HEAD-HIT FROM BELOW
     if (character.velocityY < 0 && hOver &&
-        prevRect.top >= boxBottom && proposedTop <= boxBottom) {
+        prev.top >= boxBottom && nextTop <= boxBottom) {
       mushroom.isVisible = true;
       if (mushroomDecisionStartTime === null) mushroomDecisionStartTime = performance.now();
-      character.y = boxBottom;  // push just below
+      character.y = boxBottom;
       character.velocityY = 0;
       return;
     }
 
-    // 3) SIDE COLLISIONS (robust): only when clearly in the side band, not near top/bottom
-    const EDGE_PAD = 8; // increase padding to avoid side resolution near edges
-    const verticalOverlap = (now.bottom > boxY_top + EDGE_PAD) && (now.top < boxBottom - EDGE_PAD);
-    if (verticalOverlap && hOver) {
-      // Compute penetration depths
-      const penLeft   = now.right - boxLeft;   // if >0, we crossed into left wall
-      const penRight  = boxRight - now.left;   // if >0, we crossed into right wall
+    // 3) SIDE COLLISIONS (only when clearly in the side band)
+    const EDGE_PAD = 10;
+    const inSideBand = (now.bottom > boxY_top + EDGE_PAD) && (now.top < boxBottom - EDGE_PAD);
+    if (inSideBand && hOver) {
+      const penLeft   = now.right - boxLeft;
+      const penRight  = boxRight - now.left;
       const penTop    = now.bottom - boxY_top;
       const penBottom = boxBottom - now.top;
 
       const minPenX = Math.min(penLeft, penRight);
       const minPenY = Math.min(penTop, penBottom);
 
-      // Only resolve horizontally if it's the smaller penetration axis
+      // Horizontal resolve only if that's the smaller axis
       if (minPenX < minPenY - 1) {
-        const movingRightIntoLeft = character.speed > 0 && prevRect.right <= boxLeft && now.right > boxLeft;
-        const movingLeftIntoRight = character.speed < 0 && prevRect.left  >= boxRight && now.left  < boxRight;
+        const movingRightIntoLeft = character.speed > 0 && prev.right <= boxLeft && now.right > boxLeft;
+        const movingLeftIntoRight = character.speed < 0 && prev.left  >= boxRight && now.left  < boxRight;
 
         if (movingRightIntoLeft || (!movingLeftIntoRight && penLeft < penRight)) {
           character.worldX = boxLeft - character.width;
@@ -467,11 +467,9 @@ function drawMysBox() {
           character.speed = 0;
         }
       }
-      // If vertical penetration is smaller (or similar), do nothing here:
-      // landing/head-hit were already handled above. This prevents jitter when close to edges.
     }
 
-    // ---------- draw mushroom & prompt ONLY IF VISIBLE ----------
+    // draw mushroom ONLY IF revealed by head-hit
     if (mushroom.isVisible) {
       if (!mushroom.growthComplete) {
         mushroom.growthFactor = Math.min(mushroom.growthFactor + mushroom.growthSpeed, 1);
@@ -543,7 +541,6 @@ function removeActiveMushroom() {
 }
 
 async function handleMushroomCollision_canvas4() {
-  // Only handle visible mushrooms (drawMysBox reveals them)
   mushrooms.forEach((mushroom, index) => {
     if (!mushroom.isVisible) return;
 
@@ -674,6 +671,7 @@ function handleMovement_canvas4() {
   atLeftEdge = cameraOffset <= 0;
   atRightEdge = cameraOffset >= worldWidth - canvas.width;
 
+  // Horizontal speed
   if (keys['ArrowLeft'] && keys['ArrowRight']) {
     if (character.speed > 0) character.speed = Math.max(0, character.speed - character.deceleration);
     else if (character.speed < 0) character.speed = Math.min(0, character.speed + character.deceleration);
@@ -701,37 +699,38 @@ function handleMovement_canvas4() {
     character.worldX = Math.max(0, Math.min(proposedWorldX, worldWidth - character.width));
   }
 
+  // ---- Gravity & vertical resolution order ----
   const leftFootXWorld  = character.worldX + 2;
   const rightFootXWorld = character.worldX + character.width - 2;
   const groundYLeft  = getGroundY(leftFootXWorld);
   const groundYRight = getGroundY(rightFootXWorld);
   const groundY = Math.min(groundYLeft, groundYRight);
 
+  // apply gravity first
+  character.velocityY += gravity;
+
+  // resolve mys-box first (landing/head-hit/side may set y/velY)
   const _boxCanJump = (typeof drawMysBox === 'function') ? drawMysBox() : false;
 
-  let canJump = false;
-  if ((character.y + character.height) >= groundY - 0.01) {
-    canJump = true;
-  }
-  if (_boxCanJump) canJump = true;
-  if (keys['ArrowUp'] && canJump) {
-    character.velocityY = -13;
-    canJump = false;
-  }
-
-  character.velocityY += gravity;
+  // integrate Y, then clamp to ground if crossing it
   let newY = character.y + character.velocityY;
-
   if (character.y + character.height <= groundY && newY + character.height >= groundY) {
     character.y = groundY - character.height;
     character.velocityY = 0;
-    canJump = true;
   } else {
     character.y = newY;
   }
 
+  // Jumping allowed if grounded or on box
+  const onGround = (character.y + character.height) >= groundY - 0.01;
+  if (keys['ArrowUp'] && (onGround || _boxCanJump)) {
+    character.velocityY = -13;
+  }
+
+  // Camera follow
   cameraOffset = Math.max(0, Math.min(worldWidth - canvas.width, character.worldX + character.width/2 - canvas.width/2));
 
+  // Legacy screen x cache
   character.x = getCharacterScreenX();
 
   handleMushroomCollision_canvas4();
