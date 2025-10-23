@@ -79,15 +79,56 @@ function mushroomPlatformAtX(x) {
 }
 // Wait until catalog and platforms ready (with timeout)
 async function waitForMushroomReady(timeoutMs = 6000) {
-  const t0 = performance.now();
+  const start = performance.now();
+
+  // helper: timeout promise
+  const timeout = ms => new Promise(res => setTimeout(res, ms));
+
+  // If mushroom.js exposes a Promise (CATALOG_READY), await it (with timeout fallback)
+  if (window.CATALOG_READY && typeof window.CATALOG_READY.then === 'function') {
+    let settled = false;
+    await Promise.race([
+      window.CATALOG_READY.then(() => { settled = true; }),
+      timeout(timeoutMs)
+    ]);
+    if (!settled) console.warn('[mushrooms] CATALOG_READY timeout');
+  } else {
+    // If mushroom.js dispatches a DOM event, wait for it or fall back to polling
+    let eventResolved = false;
+    const eventPromise = new Promise(resolve => {
+      const onReady = () => { eventResolved = true; resolve(); };
+      window.addEventListener('mushroomCatalogReady', onReady, { once: true });
+    });
+
+    // Polling for rows
+    const pollPromise = (async () => {
+      while (performance.now() - start < timeoutMs) {
+        const catReady = Array.isArray(window.mushroomCatalogRows) && window.mushroomCatalogRows.length > 0;
+        if (catReady) break;
+        await timeout(50);
+      }
+    })();
+
+    // Wait whichever comes first (event or poll or timeout)
+    await Promise.race([eventPromise, pollPromise, timeout(timeoutMs)]);
+    if (!eventResolved) {
+      // Cleanup listener if event didn't occur
+      try { window.removeEventListener('mushroomCatalogReady', ()=>{}); } catch {}
+    }
+  }
+
+  // Ensure platforms exist too
   while (true) {
     const catReady = Array.isArray(window.mushroomCatalogRows) && window.mushroomCatalogRows.length > 0;
     const platReady = Array.isArray(window.mushroomPlatforms) && window.mushroomPlatforms.length > 0;
     if (catReady && platReady) return true;
-    if (performance.now() - t0 > timeoutMs) {
+    if (performance.now() - start > timeoutMs) {
       console.warn('[mushrooms] ready-timeout; cat?', catReady, 'plat?', platReady);
-      return catReady; // proceed if catalog exists at least
+      return catReady;
     }
+    await new Promise(r => setTimeout(r, 50));
+  }
+}
     await new Promise(r => setTimeout(r, 50));
   }
 }
