@@ -130,9 +130,6 @@ async function waitForMushroomReady(timeoutMs = 6000) {
   }
 }
 
-  }
-}
-
 
 // Pick a world-X inside a platform keeping gaps from prior picks
 function pickXInPlatform(plat, pickedXs, minGap = 35, maxGap = 120) {

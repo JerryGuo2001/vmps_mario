@@ -108,6 +108,8 @@ async function initGame() {
 
   /* FREEZE STATE SAFETY */
   if (typeof window.freezeState === 'undefined') window.freezeState = false;
+  /* FREEZE TIME SAFETY */
+  if (typeof window.freezeTime === 'undefined') window.freezeTime = 0;
 
 
   showPrompt = false;
