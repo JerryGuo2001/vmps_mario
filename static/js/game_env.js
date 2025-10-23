@@ -302,11 +302,9 @@ async function generateMushroom(count = 5, colorWhitelist = null) {
       if (xWorld == null) xWorld = Math.round((plat.startX + plat.endX) / 2);
       pickedXs.push(xWorld);
 
-      // 🔧 Compute box Y using a specific groundPlatform for THIS mushroom,
-      //     positioning the box 50px above that platform (per-mushroom).
+      // Per-mushroom groundPlatform + 50px gap (box bottom sits 50 above platform)
       const groundPlatform = groundAtX(xWorld);
       const platformY = groundPlatform ? groundPlatform.y : Math.floor(canvas.height * 0.55);
-      // place the bottom of the box 50px above the platform
       const boxBottomY = platformY - 50;
       const boxTopY = boxBottomY - BOX_H;
 
@@ -485,9 +483,13 @@ function drawMysBox() {
     const now = charRectWorld();
     const hOver = horizOverlap(now.left, now.right, boxLeft, boxRight);
 
-    // LAND ON TOP (falling across top edge)
+    // Compute proposed vertical sweep endpoints for robust edge detection
+    const proposedBottom = character.y + character.height + character.velocityY;
+    const proposedTop    = character.y + character.velocityY;
+
+    // LAND ON TOP (falling across top edge) - priority over side collisions
     if (character.velocityY >= 0 && hOver &&
-        prevRect.bottom <= boxY_top && (now.bottom + character.velocityY) >= boxY_top) {
+        prevRect.bottom <= boxY_top && proposedBottom >= boxY_top) {
       character.y = boxY_top - character.height;
       character.velocityY = 0;
       canJump = true;
@@ -496,31 +498,31 @@ function drawMysBox() {
 
     // HEAD-HIT FROM BELOW (jump up into box)
     if (character.velocityY < 0 && hOver &&
-        prevRect.top >= boxBottom && (now.top + character.velocityY) <= boxBottom) {
+        prevRect.top >= boxBottom && proposedTop <= boxBottom) {
       // Reveal mushroom only on head-hit
       mushroom.isVisible = true;
       if (mushroomDecisionStartTime === null) mushroomDecisionStartTime = performance.now();
       character.y = boxBottom;       // push character just below the box
       character.velocityY = 0;
+      return;
     }
 
-    // SIDE COLLISIONS (when vertically overlapping)
-    const vOver = !(now.bottom <= boxY_top || now.top >= boxBottom);
-    if (vOver) {
-      // Resolve to the nearest non-overlapping position based on movement
-      const overlapLeft  = now.right - boxLeft;   // how far we penetrated into left side
-      const overlapRight = boxRight - now.left;   // how far we penetrated into right side
-
-      if (character.speed > 0 && now.right > boxLeft && prevRect.right <= boxLeft) {
-        // moving right into the box's left wall
+    // SIDE COLLISIONS (when meaningfully vertically overlapping)
+    // add small cushion so edges don't trigger side resolution
+    const vOver = (now.bottom > boxY_top + 2) && (now.top < boxBottom - 2);
+    if (vOver && hOver) {
+      const overlapLeft  = now.right - boxLeft;
+      const overlapRight = boxRight - now.left;
+      if (character.speed > 0 && prevRect.right <= boxLeft) {
+        // moving right into left wall
         character.worldX = boxLeft - character.width;
         character.speed = 0;
-      } else if (character.speed < 0 && now.left < boxRight && prevRect.left >= boxRight) {
-        // moving left into the box's right wall
+      } else if (character.speed < 0 && prevRect.left >= boxRight) {
+        // moving left into right wall
         character.worldX = boxRight;
         character.speed = 0;
-      } else if (hOver) {
-        // Already overlapping due to spawn/teleport/small time-step: push out by minimal axis
+      } else {
+        // If already overlapping (teleport / lag), push out minimally
         if (overlapLeft < overlapRight) {
           character.worldX = boxLeft - character.width;
         } else {
