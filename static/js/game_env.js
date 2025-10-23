@@ -251,10 +251,11 @@ async function generateMushroom(count = 5, colorWhitelist = null) {
       if (xWorld == null) xWorld = Math.round((plat.startX + plat.endX) / 2);
       pickedXs.push(xWorld);
 
-      // 👇 Per-mushroom Y from the *generated mushroom platform* under xWorld
-      const mPlat = mushroomPlatformAtX(xWorld) || plat; // fallback to chosen plat if needed
-      const platformY = mPlat ? mPlat.y : Math.floor(canvas.height * 0.55);
-      const boxTopY = platformY - BOX_H; // box sits directly on the generated platform
+      // 👇 Per-mushroom Y from the *actual ground platform* under xWorld (box bottom 50px above platform)
+      const gPlat = groundAtX(xWorld);
+      const platformY = gPlat ? gPlat.y : Math.floor(canvas.height * 0.55);
+      const boxBottomY = platformY - 50;
+      const boxTopY = boxBottomY - BOX_H;
 
       items.push({
         x: xWorld,                 // WORLD coordinate
@@ -268,7 +269,7 @@ async function generateMushroom(count = 5, colorWhitelist = null) {
         color: r.color,
         imagefilename: filename,
         image: img,
-        mushroomPlatformY: platformY
+        groundPlatformIndex: gPlat ? window.groundPlatforms.indexOf(gPlat) : -1
       });
     } catch (e) {
       console.warn('[generateMushroom] Failed image', r.filename, e.message);
