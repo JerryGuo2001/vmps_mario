@@ -217,6 +217,14 @@ function generateGroundPlatforms(worldWidth, minHeight, maxHeight, numSections =
 }
 
 async function generateMushroom(count = 5, colorWhitelist = null) {
+  // Ensure platforms exist before we choose any positions
+  if (!Array.isArray(window.groundPlatforms) || !window.groundPlatforms.length) {
+    window.groundPlatforms = generateGroundPlatforms(worldWidth, 200, 400);
+  }
+  if (!Array.isArray(window.mushroomPlatforms) || !window.mushroomPlatforms.length) {
+    window.mushroomPlatforms = buildMushroomPlatformsFromGround(MUSHROOM_PLATFORM_OFFSET);
+  }
+
   // Guard: catalog ready?
   if (!Array.isArray(window.mushroomCatalogRows) || window.mushroomCatalogRows.length === 0) {
     console.warn('[generateMushroom] Catalog is empty. Did mushroom.js finish building?');
@@ -258,9 +266,7 @@ async function generateMushroom(count = 5, colorWhitelist = null) {
   };
 
   // Platform list for placement is the **generated mushroom platform** layer
-  const platforms = (Array.isArray(window.mushroomPlatforms) && window.mushroomPlatforms.length)
-    ? window.mushroomPlatforms
-    : [{ startX: 0, endX: (typeof worldWidth === 'number' ? worldWidth : 2000), y: Math.floor(canvas.height * 0.55) }];
+  const platforms = window.mushroomPlatforms;
 
   // Distribute across platforms
   const platOrder = [];
@@ -284,12 +290,23 @@ async function generateMushroom(count = 5, colorWhitelist = null) {
       }
 
       // choose X inside platform, avoid overlap
-      let xWorld = pickXInPlatform(plat, pickedXs, 35, 120);
+      // Prefer a position within current viewport for first few items
+      let xWorld;
+      if (i < 3 && typeof character !== 'undefined' && typeof character.worldX === 'number') {
+        const viewLeft  = Math.max(0, cameraOffset);
+        const viewRight = Math.min(worldWidth, cameraOffset + canvas.width);
+        const clampedLeft  = Math.max(plat.startX, viewLeft + 40);
+        const clampedRight = Math.min(plat.endX,   viewRight - 40);
+        if (clampedRight - clampedLeft >= 80) {
+          // pick inside current screen region
+          xWorld = Math.floor(clampedLeft + Math.random() * (clampedRight - clampedLeft));
+        }
+      }
+      if (xWorld == null) xWorld = pickXInPlatform(plat, pickedXs, 35, 120);
       if (xWorld == null) {
-        // last resort: search any platform
-        for (const p of platforms) {
-          xWorld = pickXInPlatform(p, pickedXs, 35, 120);
-          if (xWorld != null) { plat = p; break; }
+        for (const p2 of platforms) {
+          xWorld = pickXInPlatform(p2, pickedXs, 35, 120);
+          if (xWorld != null) { plat = p2; break; }
         }
       }
       if (xWorld == null) xWorld = Math.round((plat.startX + plat.endX) / 2);
@@ -465,8 +482,15 @@ function drawMysBox() {
     const boxBottom  = boxY_top + BOX_H;
 
     const boxX_screen = worldToScreenX(boxX_world);
-    ctx.drawImage(boxImage, boxX_screen - BOX_W/2, boxY_top, BOX_W, BOX_H);
-
+    if (boxImage && boxImage.complete) {
+      ctx.drawImage(boxImage, boxX_screen - BOX_W/2, boxY_top, BOX_W, BOX_H);
+    } else {
+      // fallback placeholder
+      ctx.fillStyle = 'rgba(0,0,0,0.2)';
+      ctx.fillRect(boxX_screen - BOX_W/2, boxY_top, BOX_W, BOX_H);
+      ctx.strokeStyle = '#333';
+      ctx.strokeRect(boxX_screen - BOX_W/2, boxY_top, BOX_W, BOX_H);
+    }
     // world rect now
     const now = charRectWorld();
     const hOver = horizOverlap(now.left, now.right, boxLeft, boxRight);
@@ -759,11 +783,17 @@ function handleMovement_canvas4() {
   const groundYRight = getGroundY(rightFootXWorld);
   const groundY = Math.min(groundYLeft, groundYRight);
 
+  // Check box collisions & allow landing/jump from mys box
+  const _boxCanJump = (typeof drawMysBox === 'function') ? drawMysBox() : false;
+
+
   // Jumping
-  let canJump = false; // drawMysBox may set this too
+  let canJump = false; // may be set by ground or mys box
   if ((character.y + character.height) >= groundY - 0.01) {
     canJump = true;
   }
+  // Include mys box landing permission
+  if (_boxCanJump) canJump = true;
   if (keys['ArrowUp'] && canJump) {
     character.velocityY = -13;
     canJump = false;
