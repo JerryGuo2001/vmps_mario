@@ -302,10 +302,13 @@ async function generateMushroom(count = 5, colorWhitelist = null) {
       if (xWorld == null) xWorld = Math.round((plat.startX + plat.endX) / 2);
       pickedXs.push(xWorld);
 
-      // 🔧 Compute box Y from the **actual ground** under xWorld, then lift by offset
-      const ground = groundAtX(xWorld);
-      const liftedY = ground ? Math.max(0, ground.y - MUSHROOM_PLATFORM_OFFSET) : Math.floor(canvas.height * 0.55);
-      const boxTopY = liftedY - BOX_H;
+      // 🔧 Compute box Y using a specific groundPlatform for THIS mushroom,
+      //     positioning the box 50px above that platform (per-mushroom).
+      const groundPlatform = groundAtX(xWorld);
+      const platformY = groundPlatform ? groundPlatform.y : Math.floor(canvas.height * 0.55);
+      // place the bottom of the box 50px above the platform
+      const boxBottomY = platformY - 50;
+      const boxTopY = boxBottomY - BOX_H;
 
       items.push({
         x: xWorld,                 // WORLD coordinate
@@ -318,7 +321,8 @@ async function generateMushroom(count = 5, colorWhitelist = null) {
         growthComplete: false,
         color: r.color,
         imagefilename: filename,
-        image: img
+        image: img,
+        groundPlatformIndex: groundPlatform ? window.groundPlatforms.indexOf(groundPlatform) : -1
       });
     } catch (e) {
       console.warn('[generateMushroom] Failed image', r.filename, e.message);
@@ -503,14 +507,25 @@ function drawMysBox() {
     // SIDE COLLISIONS (when vertically overlapping)
     const vOver = !(now.bottom <= boxY_top || now.top >= boxBottom);
     if (vOver) {
-      // right movement into left wall
+      // Resolve to the nearest non-overlapping position based on movement
+      const overlapLeft  = now.right - boxLeft;   // how far we penetrated into left side
+      const overlapRight = boxRight - now.left;   // how far we penetrated into right side
+
       if (character.speed > 0 && now.right > boxLeft && prevRect.right <= boxLeft) {
+        // moving right into the box's left wall
         character.worldX = boxLeft - character.width;
         character.speed = 0;
-      }
-      // left movement into right wall
-      if (character.speed < 0 && now.left < boxRight && prevRect.left >= boxRight) {
+      } else if (character.speed < 0 && now.left < boxRight && prevRect.left >= boxRight) {
+        // moving left into the box's right wall
         character.worldX = boxRight;
+        character.speed = 0;
+      } else if (hOver) {
+        // Already overlapping due to spawn/teleport/small time-step: push out by minimal axis
+        if (overlapLeft < overlapRight) {
+          character.worldX = boxLeft - character.width;
+        } else {
+          character.worldX = boxRight;
+        }
         character.speed = 0;
       }
     }
