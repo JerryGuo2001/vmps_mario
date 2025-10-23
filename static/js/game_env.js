@@ -658,7 +658,7 @@ async function handleMushroomCollision_canvas4() {
           heartMessage.style.top = '50%';
           heartMessage.style.left = '50%';
           heartMessage.style.transform = 'translate(-50%, -50%)';
-          heartMessage.style	fontSize = '50px';
+          heartMessage.style.fontSize = '50px';
           heartMessage.style.fontWeight = 'bold';
           heartMessage.style.color = 'green';
           heartMessage.innerText = '❤️ ' + staminaChange;
