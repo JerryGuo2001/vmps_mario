@@ -77,14 +77,13 @@ function mushroomPlatformAtX(x) {
   if (!Array.isArray(window.mushroomPlatforms)) return null;
   return window.mushroomPlatforms.find(p => x >= p.startX && x <= p.endX) || null;
 }
+
 // Wait until catalog and platforms ready (with timeout)
 async function waitForMushroomReady(timeoutMs = 6000) {
   const start = performance.now();
 
-  // helper: timeout promise
   const timeout = ms => new Promise(res => setTimeout(res, ms));
 
-  // If mushroom.js exposes a Promise (CATALOG_READY), await it (with timeout fallback)
   if (window.CATALOG_READY && typeof window.CATALOG_READY.then === 'function') {
     let settled = false;
     await Promise.race([
@@ -93,14 +92,12 @@ async function waitForMushroomReady(timeoutMs = 6000) {
     ]);
     if (!settled) console.warn('[mushrooms] CATALOG_READY timeout');
   } else {
-    // If mushroom.js dispatches a DOM event, wait for it or fall back to polling
     let eventResolved = false;
     const eventPromise = new Promise(resolve => {
       const onReady = () => { eventResolved = true; resolve(); };
       window.addEventListener('mushroomCatalogReady', onReady, { once: true });
     });
 
-    // Polling for rows
     const pollPromise = (async () => {
       while (performance.now() - start < timeoutMs) {
         const catReady = Array.isArray(window.mushroomCatalogRows) && window.mushroomCatalogRows.length > 0;
@@ -109,12 +106,7 @@ async function waitForMushroomReady(timeoutMs = 6000) {
       }
     })();
 
-    // Wait whichever comes first (event or poll or timeout)
     await Promise.race([eventPromise, pollPromise, timeout(timeoutMs)]);
-    if (!eventResolved) {
-      // Cleanup listener if event didn't occur
-      try { window.removeEventListener('mushroomCatalogReady', ()=>{}); } catch {}
-    }
   }
 
   // Ensure platforms exist too
@@ -129,7 +121,6 @@ async function waitForMushroomReady(timeoutMs = 6000) {
     await new Promise(r => setTimeout(r, 50));
   }
 }
-
 
 // Pick a world-X inside a platform keeping gaps from prior picks
 function pickXInPlatform(plat, pickedXs, minGap = 35, maxGap = 120) {
@@ -176,7 +167,6 @@ function charRectWorld() {
 function horizOverlap(aLeft, aRight, bLeft, bRight) {
   return aLeft < bRight && aRight > bLeft;
 }
-
 
 function worldToScreenX(xWorld) { return xWorld - cameraOffset; }
 function getCharacterScreenX() { return getCharacterScreenXFromWorld(); }
@@ -322,7 +312,7 @@ async function generateMushroom(count = 5, colorWhitelist = null) {
         y: boxTopY,                // TOP of box; mushroom draws above it
         type: 0,
         value: r.value,
-        isVisible: false,
+        isVisible: false,          // <- hidden until head-bump
         growthFactor: 0,
         growthSpeed: 0.05,
         growthComplete: false,
@@ -344,7 +334,7 @@ let groundPlatforms = generateGroundPlatforms(worldWidth, 200, 400);
 // Build the generated mushroom platform layer ABOVE ground
 let mushroomPlatforms = buildMushroomPlatformsFromGround(MUSHROOM_PLATFORM_OFFSET);
 
-// ❌ FIXED: no top-level await. Start with empty array and populate asynchronously.
+// Initial spawn (will be empty if catalog isn't ready yet; later spawns happen after P/respawn)
 let mushrooms = [];
 generateMushroom(5).then(ms => { mushrooms = ms; }).catch(err => console.warn('[init mushrooms]', err));
 
@@ -390,23 +380,22 @@ function drawBackground_canvas4() {
     }
   });
 
-  // (Optional) draw mushroomPlatforms visibly (commented out; enable if you want to see them)
-  // ctx.fillStyle = 'rgba(0,0,0,0.15)';
-  // mushroomPlatforms.forEach(p => {
-  //   const x1 = worldToScreenX(p.startX);
-  //   const x2 = worldToScreenX(p.endX);
-  //   ctx.fillRect(x1, p.y - 6, x2 - x1, 6);
-  // });
+  // (Optional) draw mushroomPlatforms visibly (debug)
+//   ctx.fillStyle = 'rgba(0,0,0,0.15)';
+//   mushroomPlatforms.forEach(p => {
+//     const x1 = worldToScreenX(p.startX);
+//     const x2 = worldToScreenX(p.endX);
+//     ctx.fillRect(x1, p.y - 6, x2 - x1, 6);
+//   });
 }
 
-// Updated collision detection
+// Updated collision detection (legacy; box collisions handled in drawMysBox)
 function handleCollisions_canvas4() {
   groundPlatforms.forEach(platform => {
     const epsilon = 0.5;
     const stuckLeft = Math.abs(character.x + character.width - worldToScreenX(platform.startX)) < epsilon;
     const stuckRight = Math.abs(character.x - worldToScreenX(platform.endX)) < epsilon;
 
-    // vertical overlap in screen space
     if (character.y + character.height > platform.y) {
       if (character.y + character.height > platform.y &&
           character.y < platform.y + 10 ){
@@ -428,29 +417,26 @@ function handleCollisions_canvas4() {
 async function handleTextInteraction_canvas4() {
   // Check if the character's HP is less than 5
   if (character.hp <= 5) {
-    // Display the message to collect half of stamina to proceed
     ctx.fillStyle = '#000';
     ctx.font = '16px Arial';
     const text = 'Collect Half of Stamina to Proceed';
     const textWidth = ctx.measureText(text).width;
-    const xPos = (canvas.width - textWidth) / 2;  // Center the text horizontally
-    const yPos = canvas.height / 4;  // Position the text at the top of the center vertically
+    const xPos = (canvas.width - textWidth) / 2;
+    const yPos = canvas.height / 4;
     ctx.fillText(text, xPos, yPos);
   } else {
-    // If HP is greater than 5, show "Press E to proceed"
     ctx.fillStyle = '#000';
     ctx.font = '16px Arial';
     const text = 'Press P to Proceed';
     const textWidth = ctx.measureText(text).width;
-    const xPos = (canvas.width - textWidth) / 2;  // Center the text horizontally
-    const yPos = canvas.height / 4;  // Position the text at the top of the center vertically
+    const xPos = (canvas.width - textWidth) / 2;
+    const yPos = canvas.height / 4;
     ctx.fillText(text, xPos, yPos);
 
-    // Check for player pressing 'P' and if their HP is greater than 5 to proceed to the next question
     if (keys['p'] && character.hp > 5) {
       currentCanvas = 1;
       character.hp = 2;
-      currentQuestion += 1;  // Increment the question number when the player presses 'P' and HP > 5
+      currentQuestion += 1;
 
       // Regenerate ground + mushroom platform layer
       groundPlatforms = generateGroundPlatforms(worldWidth, 200, 400);
@@ -467,14 +453,13 @@ async function handleTextInteraction_canvas4() {
 const boxImage = new Image();
 boxImage.src = 'TexturePack/box.jpg'; // Replace with the correct path to your box image
 
-
 function drawMysBox() {
   ensureWorldPosInit();
   let canJump = false;
   const prevRect = charRectWorld();
 
   mushrooms.forEach(mushroom => {
-    // draw (screen)
+    // draw box (always visible)
     const boxX_world = mushroom.x;
     const boxY_top   = mushroom.y;
     const boxLeft    = boxX_world - BOX_W/2;
@@ -485,17 +470,18 @@ function drawMysBox() {
     if (boxImage && boxImage.complete) {
       ctx.drawImage(boxImage, boxX_screen - BOX_W/2, boxY_top, BOX_W, BOX_H);
     } else {
-      // fallback placeholder
+      // fallback placeholder so you can see the box immediately
       ctx.fillStyle = 'rgba(0,0,0,0.2)';
       ctx.fillRect(boxX_screen - BOX_W/2, boxY_top, BOX_W, BOX_H);
       ctx.strokeStyle = '#333';
       ctx.strokeRect(boxX_screen - BOX_W/2, boxY_top, BOX_W, BOX_H);
     }
-    // world rect now
+
+    // Character rect now (world)
     const now = charRectWorld();
     const hOver = horizOverlap(now.left, now.right, boxLeft, boxRight);
 
-    // Land on top
+    // LAND ON TOP (falling across top edge)
     if (character.velocityY >= 0 && hOver &&
         prevRect.bottom <= boxY_top && (now.bottom + character.velocityY) >= boxY_top) {
       character.y = boxY_top - character.height;
@@ -504,85 +490,91 @@ function drawMysBox() {
       return;
     }
 
-    // Head-hit
+    // HEAD-HIT FROM BELOW (jump up into box)
     if (character.velocityY < 0 && hOver &&
         prevRect.top >= boxBottom && (now.top + character.velocityY) <= boxBottom) {
+      // Reveal mushroom only on head-hit
       mushroom.isVisible = true;
       if (mushroomDecisionStartTime === null) mushroomDecisionStartTime = performance.now();
-      character.y = boxBottom;
+      character.y = boxBottom;       // push character just below the box
       character.velocityY = 0;
     }
 
-    // Side collisions (when overlapping vertically)
+    // SIDE COLLISIONS (when vertically overlapping)
     const vOver = !(now.bottom <= boxY_top || now.top >= boxBottom);
     if (vOver) {
+      // right movement into left wall
       if (character.speed > 0 && now.right > boxLeft && prevRect.right <= boxLeft) {
         character.worldX = boxLeft - character.width;
         character.speed = 0;
       }
+      // left movement into right wall
       if (character.speed < 0 && now.left < boxRight && prevRect.left >= boxRight) {
         character.worldX = boxRight;
         character.speed = 0;
       }
     }
 
-    // draw mushroom img & prompt
-    if (!mushroom.growthComplete) {
-      mushroom.growthFactor = Math.min(mushroom.growthFactor + mushroom.growthSpeed, 1);
-      if (mushroom.growthFactor === 1) {
-        mushroom.growthComplete = true;
-        freezeState = true;
-        activeMushroom = mushroom;
-        mushroomDecisionTimer = 0;
+    // ---------- draw mushroom & prompt ONLY IF VISIBLE ----------
+    if (mushroom.isVisible) {
+      if (!mushroom.growthComplete) {
+        mushroom.growthFactor = Math.min(mushroom.growthFactor + mushroom.growthSpeed, 1);
+        if (mushroom.growthFactor === 1) {
+          mushroom.growthComplete = true;
+          freezeState = true;
+          activeMushroom = mushroom;
+          mushroomDecisionTimer = 0;
+        }
+      }
+      const mW = 30 + 20 * mushroom.growthFactor;
+      const mH = 30 + 20 * mushroom.growthFactor;
+      const mScreenX = worldToScreenX(mushroom.x);
+      ctx.drawImage(mushroom.image, mScreenX - mW/2, mushroom.y - mH, mW, mH);
+
+      const charCenterXWorld = character.worldX + character.width/2;
+      if (Math.abs(charCenterXWorld - mushroom.x) <= 30 &&
+          Math.abs(character.y + character.height - mushroom.y) <= 30) {
+        showPrompt = true;
+        ctx.fillStyle = '#000';
+        ctx.font = '16px Arial';
+        ctx.fillText('Press E to eat', mScreenX - 40, mushroom.y - 50);
+
+        if (keys['e']) {
+          let staminaChange = 0;
+          if (mushroom.value === 'reset') {
+            staminaChange = 'reset';
+            character.hp = 0;
+          } else {
+            character.hp += mushroom.value;
+            staminaChange = mushroom.value;
+          }
+          const heartMessage = document.createElement('div');
+          heartMessage.style.position = 'fixed';
+          heartMessage.style.top = '50%';
+          heartMessage.style.left = '50%';
+          heartMessage.style.transform = 'translate(-50%, -50%)';
+          heartMessage.style.fontSize = '50px';
+          heartMessage.style.fontWeight = 'bold';
+          heartMessage.style.zIndex = '1000';
+          if (staminaChange === 'reset') {
+            heartMessage.style.color = 'green';
+            heartMessage.innerText = 'Toxic!';
+          } else if (staminaChange > 0) {
+            heartMessage.style.color = 'red';
+            heartMessage.innerText = '❤️ + ' + staminaChange;
+          } else {
+            heartMessage.style.color = 'green';
+            heartMessage.innerText = '❤️ ' + staminaChange;
+          }
+          document.body.appendChild(heartMessage);
+          setTimeout(() => { document.body.removeChild(heartMessage); }, 2000);
+
+          const idx = mushrooms.indexOf(mushroom);
+          if (idx !== -1) mushrooms.splice(idx, 1);
+        }
       }
     }
-    const mW = 30 + 20 * mushroom.growthFactor;
-    const mH = 30 + 20 * mushroom.growthFactor;
-    const mScreenX = worldToScreenX(mushroom.x);
-    ctx.drawImage(mushroom.image, mScreenX - mW/2, mushroom.y - mH, mW, mH);
-
-    const charCenterXWorld = character.worldX + character.width/2;
-    if (Math.abs(charCenterXWorld - mushroom.x) <= 30 &&
-        Math.abs(character.y + character.height - mushroom.y) <= 30) {
-      showPrompt = true;
-      ctx.fillStyle = '#000';
-      ctx.font = '16px Arial';
-      ctx.fillText('Press E to eat', mScreenX - 40, mushroom.y - 50);
-
-      if (keys['e']) {
-        let staminaChange = 0;
-        if (mushroom.value === 'reset') {
-          staminaChange = 'reset';
-          character.hp = 0;
-        } else {
-          character.hp += mushroom.value;
-          staminaChange = mushroom.value;
-        }
-        const heartMessage = document.createElement('div');
-        heartMessage.style.position = 'fixed';
-        heartMessage.style.top = '50%';
-        heartMessage.style.left = '50%';
-        heartMessage.style.transform = 'translate(-50%, -50%)';
-        heartMessage.style.fontSize = '50px';
-        heartMessage.style.fontWeight = 'bold';
-        heartMessage.style.zIndex = '1000';
-        if (staminaChange === 'reset') {
-          heartMessage.style.color = 'green';
-          heartMessage.innerText = 'Toxic!';
-        } else if (staminaChange > 0) {
-          heartMessage.style.color = 'red';
-          heartMessage.innerText = '❤️ + ' + staminaChange;
-        } else {
-          heartMessage.style.color = 'green';
-          heartMessage.innerText = '❤️ ' + staminaChange;
-        }
-        document.body.appendChild(heartMessage);
-        setTimeout(() => { document.body.removeChild(heartMessage); }, 2000);
-
-        const idx = mushrooms.indexOf(mushroom);
-        if (idx !== -1) mushrooms.splice(idx, 1);
-      }
-    }
+    // ---------- end "if (mushroom.isVisible)" ----------
   });
 
   return canJump;
@@ -596,35 +588,27 @@ function removeActiveMushroom() {
 }
 
 async function handleMushroomCollision_canvas4() {
-  // Iterate through each mushroom
+  // Only handle visible mushrooms (drawMysBox reveals them)
   mushrooms.forEach((mushroom, index) => {
-    // If the mushroom is not visible, skip drawing
-    if (!mushroom.isVisible) {
-      return;
-    }
+    if (!mushroom.isVisible) return;
 
     // Animate growth only once
     if (!mushroom.growthComplete) {
-      // Increase the growth factor over time (animation)
-      mushroom.growthFactor = Math.min(mushroom.growthFactor + mushroom.growthSpeed, 1);  // Ensure it stops growing at 1 (full size)
-
+      mushroom.growthFactor = Math.min(mushroom.growthFactor + mushroom.growthSpeed, 1);
       if (mushroom.growthFactor === 1) {
-        mushroom.growthComplete = true;  // Mark the growth as complete
-        // Trigger freeze phase and question
+        mushroom.growthComplete = true;
         freezeState = true;
         activeMushroom = mushroom;
-        mushroomDecisionTimer = 0; // Reset decision timer
+        mushroomDecisionTimer = 0;
       }
     }
 
     const mushroomScreenX = worldToScreenX(mushroom.x);
     const mushroomY = mushroom.y;
 
-    // **Size based on growth factor**
-    const mushroomWidth = 30 + 20 * mushroom.growthFactor;   // 30px → 50px
-    const mushroomHeight = 30 + 20 * mushroom.growthFactor;  // 30px → 50px
+    const mushroomWidth = 30 + 20 * mushroom.growthFactor;
+    const mushroomHeight = 30 + 20 * mushroom.growthFactor;
 
-    // ✅ Reuse preloaded image from generateMushroom
     const mushroomImage = mushroom.image;
 
     ctx.drawImage(
@@ -633,7 +617,6 @@ async function handleMushroomCollision_canvas4() {
       mushroomWidth, mushroomHeight
     );
 
-    // Interaction logic (e.g., pressing 'E' to eat the mushroom) — screen space
     const charScreenX = getCharacterScreenX();
 
     if (
@@ -650,15 +633,13 @@ async function handleMushroomCollision_canvas4() {
         if (mushroom.value === 'reset') {
           staminaChange = 'reset';
           character.hp = 0;
-          // Display "Toxic!" text
           ctx.font = '20px Arial';
           ctx.fillStyle = 'red';
         } else {
           character.hp += mushroom.value;
-          staminaChange = mushroom.value;  // Increase stamina (up arrows)
+          staminaChange = mushroom.value;
         }
         if (staminaChange > 0) {
-          // Display floating heart message
           const heartMessage = document.createElement('div');
           heartMessage.style.position = 'fixed';
           heartMessage.style.top = '50%';
@@ -672,7 +653,6 @@ async function handleMushroomCollision_canvas4() {
           document.body.appendChild(heartMessage);
           setTimeout(() => { document.body.removeChild(heartMessage); }, 2000);
         } else if (staminaChange < 0) {
-          // Display floating heart message
           const heartMessage = document.createElement('div');
           heartMessage.style.position = 'fixed';
           heartMessage.style.top = '50%';
@@ -686,7 +666,6 @@ async function handleMushroomCollision_canvas4() {
           document.body.appendChild(heartMessage);
           setTimeout(() => { document.body.removeChild(heartMessage); }, 2000);
         } else if (staminaChange == 'reset') {
-          // Display floating "Toxic!"
           const heartMessage = document.createElement('div');
           heartMessage.style.position = 'fixed';
           heartMessage.style.top = '50%';
@@ -700,7 +679,7 @@ async function handleMushroomCollision_canvas4() {
           document.body.appendChild(heartMessage);
           setTimeout(() => { document.body.removeChild(heartMessage); }, 2000);
         }
-        mushrooms.splice(index, 1);  // Remove the mushroom after eating it
+        mushrooms.splice(index, 1);
       }
     }
   });
@@ -714,8 +693,8 @@ function getRespawnSpot() {
   const platform = groundPlatforms[0];
 
   // Use the left corner of the first platform
-  const x = platform.startX + 5;  // small buffer to avoid clipping the edge
-  const y = platform.y - character.height - 5;  // slightly above the platform
+  const x = platform.startX + 5;
+  const y = platform.y - character.height - 5;
 
   return { x, y };
 }
@@ -724,7 +703,6 @@ let freezeTime = 0; // Variable to track freeze time
 
 async function checkHP_canvas4() {
   if (character.hp <= 0 && freezeTime === 0) {
-    // Start freezing when hp <= 0
     freezeTime = 1000;
     currentCanvas = 4;
     character.hp = 2;
@@ -738,7 +716,6 @@ async function checkHP_canvas4() {
     mushrooms = await generateMushroom(5);
   }
 }
-
 
 function handleMovement_canvas4() {
   ensureWorldPosInit();
@@ -783,16 +760,14 @@ function handleMovement_canvas4() {
   const groundYRight = getGroundY(rightFootXWorld);
   const groundY = Math.min(groundYLeft, groundYRight);
 
-  // Check box collisions & allow landing/jump from mys box
+  // Check mys-box collisions & allow landing/jump from mys box
   const _boxCanJump = (typeof drawMysBox === 'function') ? drawMysBox() : false;
 
-
   // Jumping
-  let canJump = false; // may be set by ground or mys box
+  let canJump = false;
   if ((character.y + character.height) >= groundY - 0.01) {
     canJump = true;
   }
-  // Include mys box landing permission
   if (_boxCanJump) canJump = true;
   if (keys['ArrowUp'] && canJump) {
     character.velocityY = -13;
@@ -818,10 +793,9 @@ function handleMovement_canvas4() {
   // For legacy reads elsewhere this frame
   character.x = getCharacterScreenX();
 
-  // Handle mushroom interactions after movement
+  // Handle visible mushroom interactions after movement (eating/prompt)
   handleMushroomCollision_canvas4();
 }
-
 
 function drawMushroomQuestionBox() {
   if (!activeMushroom) return;
@@ -835,7 +809,6 @@ function drawMushroomQuestionBox() {
 
   // Conditionally display image or value
   if (revealOnlyValue == true) {
-    // Just show the value
     ctx.fillStyle = '#000';
     ctx.font = '20px Arial';
     let valueText = activeMushroom.value === 'reset'
@@ -843,7 +816,6 @@ function drawMushroomQuestionBox() {
       : `${activeMushroom.value > 0 ? '+' : ''}${activeMushroom.value}`;
     ctx.fillText(valueText, canvas.width / 2 - ctx.measureText(valueText).width / 2, 180);
   } else {
-    // Show mushroom image (already preloaded)
     ctx.drawImage(activeMushroom.image, canvas.width / 2 - 25, 140, 50, 50);
   }
 
@@ -883,7 +855,6 @@ function getMarioFrame() {
   return marioAnimations.idle; // Idle frame
 }
 
-
 function drawCharacter_canvas4() {
   ensureWorldPosInit();
   const characterX = getCharacterScreenX(); // derived from worldX
@@ -912,33 +883,26 @@ function drawCharacter_canvas4() {
   ctx.restore();
 }
 
-
 function drawHP_canvas4() {
   // Maximum HP (stamina bar max length)
   const maxHP = 10;
 
-  // Calculate the width of the stamina bar based on current HP
-  const barWidth = 200;  // Total width of the stamina bar
-  const barHeight = 20;  // Height of the stamina bar
+  const barWidth = 200;
+  const barHeight = 20;
 
-  // Determine the current width of the stamina bar
   const currentWidth = (character.hp / maxHP) * barWidth;
 
-  // Set the outer background color first
-  ctx.fillStyle = '#ddd';  // Light grey background for the bar
-  ctx.fillRect(canvas.width - barWidth - 20, 20, barWidth, barHeight);  // Position the bar
+  ctx.fillStyle = '#ddd';
+  ctx.fillRect(canvas.width - barWidth - 20, 20, barWidth, barHeight);
 
-  // Set color based on HP (blue for high, orange for low)
   if (character.hp >= 5) {
-    ctx.fillStyle = 'blue';  // Blue for high HP
+    ctx.fillStyle = 'blue';
   } else {
-    ctx.fillStyle = 'orange';  // Orange for low HP
+    ctx.fillStyle = 'orange';
   }
 
-  // Draw the current stamina (HP)
-  ctx.fillRect(canvas.width - barWidth - 20, 20, currentWidth, barHeight);  // Draw filled portion
+  ctx.fillRect(canvas.width - barWidth - 20, 20, currentWidth, barHeight);
 
-  // Border
   ctx.strokeStyle = '#000';
   ctx.lineWidth = 2;
   ctx.strokeRect(canvas.width - barWidth - 20, 20, barWidth, barHeight);
