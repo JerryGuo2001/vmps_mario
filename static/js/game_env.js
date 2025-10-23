@@ -302,17 +302,17 @@ async function generateMushroom(count = 5, colorWhitelist = null) {
       if (xWorld == null) xWorld = Math.round((plat.startX + plat.endX) / 2);
       pickedXs.push(xWorld);
 
-      // lock to the *generated* mushroom platform under xWorld (NOT ground)
-      const under = mushroomPlatformAtX(xWorld) || plat;
-
-      const boxTopY = under.y - BOX_H; // put the box directly ON the generated platform
+      // 🔧 Compute box Y from the **actual ground** under xWorld, then lift by offset
+      const ground = groundAtX(xWorld);
+      const liftedY = ground ? Math.max(0, ground.y - MUSHROOM_PLATFORM_OFFSET) : Math.floor(canvas.height * 0.55);
+      const boxTopY = liftedY - BOX_H;
 
       items.push({
         x: xWorld,                 // WORLD coordinate
         y: boxTopY,                // TOP of box; mushroom draws above it
         type: 0,
         value: r.value,
-        isVisible: false,          // <- hidden until head-bump
+        isVisible: false,          // hidden until head-bump
         growthFactor: 0,
         growthSpeed: 0.05,
         growthComplete: false,
@@ -381,12 +381,12 @@ function drawBackground_canvas4() {
   });
 
   // (Optional) draw mushroomPlatforms visibly (debug)
-//   ctx.fillStyle = 'rgba(0,0,0,0.15)';
-//   mushroomPlatforms.forEach(p => {
-//     const x1 = worldToScreenX(p.startX);
-//     const x2 = worldToScreenX(p.endX);
-//     ctx.fillRect(x1, p.y - 6, x2 - x1, 6);
-//   });
+  // ctx.fillStyle = 'rgba(0,0,0,0.15)';
+  // mushroomPlatforms.forEach(p => {
+  //   const x1 = worldToScreenX(p.startX);
+  //   const x2 = worldToScreenX(p.endX);
+  //   ctx.fillRect(x1, p.y - 6, x2 - x1, 6);
+  // });
 }
 
 // Updated collision detection (legacy; box collisions handled in drawMysBox)
@@ -658,7 +658,7 @@ async function handleMushroomCollision_canvas4() {
           heartMessage.style.top = '50%';
           heartMessage.style.left = '50%';
           heartMessage.style.transform = 'translate(-50%, -50%)';
-          heartMessage.style.fontSize = '50px';
+          heartMessage.style	fontSize = '50px';
           heartMessage.style.fontWeight = 'bold';
           heartMessage.style.color = 'green';
           heartMessage.innerText = '❤️ ' + staminaChange;
