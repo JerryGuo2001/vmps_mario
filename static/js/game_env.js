@@ -77,6 +77,21 @@ function mushroomPlatformAtX(x) {
   if (!Array.isArray(window.mushroomPlatforms)) return null;
   return window.mushroomPlatforms.find(p => x >= p.startX && x <= p.endX) || null;
 }
+// Wait until catalog and platforms ready (with timeout)
+async function waitForMushroomReady(timeoutMs = 6000) {
+  const t0 = performance.now();
+  while (true) {
+    const catReady = Array.isArray(window.mushroomCatalogRows) && window.mushroomCatalogRows.length > 0;
+    const platReady = Array.isArray(window.mushroomPlatforms) && window.mushroomPlatforms.length > 0;
+    if (catReady && platReady) return true;
+    if (performance.now() - t0 > timeoutMs) {
+      console.warn('[mushrooms] ready-timeout; cat?', catReady, 'plat?', platReady);
+      return catReady; // proceed if catalog exists at least
+    }
+    await new Promise(r => setTimeout(r, 50));
+  }
+}
+
 
 // Pick a world-X inside a platform keeping gaps from prior picks
 function pickXInPlatform(plat, pickedXs, minGap = 35, maxGap = 120) {
