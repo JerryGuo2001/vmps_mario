@@ -106,6 +106,10 @@ async function initGame() {
   currentQuestion = 1; // Initialize here
   currentCanvas = 4;
 
+  /* FREEZE STATE SAFETY */
+  if (typeof window.freezeState === 'undefined') window.freezeState = false;
+
+
   showPrompt = false;
 
   totalMushrooms = 3;

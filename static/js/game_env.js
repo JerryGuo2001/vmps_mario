@@ -129,7 +129,7 @@ async function waitForMushroomReady(timeoutMs = 6000) {
     await new Promise(r => setTimeout(r, 50));
   }
 }
-    await new Promise(r => setTimeout(r, 50));
+
   }
 }
 
