@@ -111,7 +111,7 @@ async function initGame() {
   totalMushrooms = 3;
   collectedMushrooms = [];
 
-  if (typeof character.worldX !== 'number') character.worldX = cameraOffset + 30; else character.worldX = 30;
+  character.x = 30;
   character.y = 10;
 
   window.addEventListener('keydown', handleKeyDown);
@@ -240,7 +240,7 @@ function updateGame(currentTime) {
 
     if (currentCanvas == 1) {
       if (init_position === true) {
-        if (typeof character.worldX !== 'number') character.worldX = cameraOffset + character.x; character.worldX = cameraOffset + canvas.width / 2;
+        character.x = canvas.width / 2;
       }
       drawBackground();
       handleMovement();
@@ -252,7 +252,7 @@ function updateGame(currentTime) {
       if (init_position === false) {
         cameraOffset = 0;
         const respawn = getRespawnSpot();
-        if (typeof character.worldX !== 'number') character.worldX = cameraOffset + character.x; character.worldX = respawn.x;
+        character.x = respawn.x;
         character.y = respawn.y;
       }
       drawBackground_canvas4();

@@ -195,7 +195,6 @@ function createCharacter() {
         lastDirection:'right',
         x: canvas.width / 2,
         y: canvas.height * 0.8 - 20,
-        worldX: (typeof cameraOffset === 'number' ? cameraOffset : 0) + (canvas ? canvas.width/2 : 0),
         width: 40,
         height: 40,
         color: 'red',

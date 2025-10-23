@@ -97,37 +97,15 @@ function pickXInPlatform(plat, pickedXs, minGap = 35, maxGap = 120) {
 }
 
 // --- camera/coord helpers ---
-
-// ---- WORLD-POSITION SINGLE SOURCE OF TRUTH (Canvas 4) ----
-function ensureWorldPosInit() {
-  if (!character) return;
-  if (typeof character.worldX !== 'number') {
-    // initialize worldX from current screen x (assume cameraOffset already valid)
-    character.worldX = (typeof character.x === 'number' ? (cameraOffset + character.x) : (cameraOffset + 0));
-  }
-}
-// map world->screen for character drawing
-function getCharacterScreenXFromWorld() {
-  ensureWorldPosInit();
-  return worldToScreenX(character.worldX);
-}
-function charRectWorld() {
-  ensureWorldPosInit();
-  return {
-    left: character.worldX,
-    right: character.worldX + character.width,
-    top: character.y,
-    bottom: character.y + character.height
-  };
-}
-function horizOverlap(aLeft, aRight, bLeft, bRight) {
-  return aLeft < bRight && aRight > bLeft;
-}
-
-
 function worldToScreenX(xWorld) { return xWorld - cameraOffset; }
-function getCharacterScreenX() { return getCharacterScreenXFromWorld(); }
-function getCharacterWorldX() { ensureWorldPosInit(); return character.worldX; }
+function getCharacterScreenX() {
+  // When camera is centered, we render the character at canvas center
+  return (cameraOffset > 0 && cameraOffset < worldWidth - canvas.width) ? (canvas.width / 2) : character.x;
+}
+function getCharacterWorldX() {
+  // World-X of character regardless of camera mode
+  return cameraOffset + getCharacterScreenX();
+}
 
 // -----------------------------------------------------------
 
@@ -397,117 +375,106 @@ async function handleTextInteraction_canvas4() {
 const boxImage = new Image();
 boxImage.src = 'TexturePack/box.jpg'; // Replace with the correct path to your box image
 
-
 function drawMysBox() {
-  ensureWorldPosInit();
-  let canJump = false;
-  const prevRect = charRectWorld();
+  let canJump;
 
   mushrooms.forEach(mushroom => {
-    // draw (screen)
-    const boxX_world = mushroom.x;
-    const boxY_top   = mushroom.y;
-    const boxLeft    = boxX_world - BOX_W/2;
-    const boxRight   = boxX_world + BOX_W/2;
-    const boxBottom  = boxY_top + BOX_H;
+    const boxX_screen = worldToScreenX(mushroom.x);
+    const boxY = mushroom.y;
 
-    const boxX_screen = worldToScreenX(boxX_world);
-    ctx.drawImage(boxImage, boxX_screen - BOX_W/2, boxY_top, BOX_W, BOX_H);
+    // Draw the box image below the mushroom
+    ctx.drawImage(boxImage, boxX_screen - BOX_W/2, boxY, BOX_W, BOX_H);
 
-    // world rect now
-    const now = charRectWorld();
-    const hOver = horizOverlap(now.left, now.right, boxLeft, boxRight);
+    // --- Collisions with the box (screen space) ---
+    const charX = getCharacterScreenX();
 
-    // Land on top
-    if (character.velocityY >= 0 && hOver &&
-        prevRect.bottom <= boxY_top && (now.bottom + character.velocityY) >= boxY_top) {
-      character.y = boxY_top - character.height;
-      character.velocityY = 0;
-      canJump = true;
-      return;
-    }
-
-    // Head-hit
-    if (character.velocityY < 0 && hOver &&
-        prevRect.top >= boxBottom && (now.top + character.velocityY) <= boxBottom) {
-      mushroom.isVisible = true;
-      if (mushroomDecisionStartTime === null) mushroomDecisionStartTime = performance.now();
-      character.y = boxBottom;
-      character.velocityY = 0;
-    }
-
-    // Side collisions (when overlapping vertically)
-    const vOver = !(now.bottom <= boxY_top || now.top >= boxBottom);
-    if (vOver) {
-      if (character.speed > 0 && now.right > boxLeft && prevRect.right <= boxLeft) {
-        character.worldX = boxLeft - character.width;
-        character.speed = 0;
-      }
-      if (character.speed < 0 && now.left < boxRight && prevRect.left >= boxRight) {
-        character.worldX = boxRight;
-        character.speed = 0;
-      }
-    }
-
-    // draw mushroom img & prompt
-    if (!mushroom.growthComplete) {
-      mushroom.growthFactor = Math.min(mushroom.growthFactor + mushroom.growthSpeed, 1);
-      if (mushroom.growthFactor === 1) {
-        mushroom.growthComplete = true;
-        freezeState = true;
-        activeMushroom = mushroom;
-        mushroomDecisionTimer = 0;
-      }
-    }
-    const mW = 30 + 20 * mushroom.growthFactor;
-    const mH = 30 + 20 * mushroom.growthFactor;
-    const mScreenX = worldToScreenX(mushroom.x);
-    ctx.drawImage(mushroom.image, mScreenX - mW/2, mushroom.y - mH, mW, mH);
-
-    const charCenterXWorld = character.worldX + character.width/2;
-    if (Math.abs(charCenterXWorld - mushroom.x) <= 30 &&
-        Math.abs(character.y + character.height - mushroom.y) <= 30) {
-      showPrompt = true;
-      ctx.fillStyle = '#000';
-      ctx.font = '16px Arial';
-      ctx.fillText('Press E to eat', mScreenX - 40, mushroom.y - 50);
-
-      if (keys['e']) {
-        let staminaChange = 0;
-        if (mushroom.value === 'reset') {
-          staminaChange = 'reset';
-          character.hp = 0;
-        } else {
-          character.hp += mushroom.value;
-          staminaChange = mushroom.value;
+    if (atLeftEdge || atRightEdge) {
+      // ✅ Side collision (Prevent moving through blocks)
+      if (character.y + character.height > boxY + 5 &&
+          character.y < boxY + BOX_H/2) {
+        if (charX + character.width > boxX_screen - BOX_W/2 &&
+            charX < boxX_screen &&
+            keys['ArrowRight']) {
+          character.x = boxX_screen - character.width - BOX_W/2;
         }
-        const heartMessage = document.createElement('div');
-        heartMessage.style.position = 'fixed';
-        heartMessage.style.top = '50%';
-        heartMessage.style.left = '50%';
-        heartMessage.style.transform = 'translate(-50%, -50%)';
-        heartMessage.style.fontSize = '50px';
-        heartMessage.style.fontWeight = 'bold';
-        heartMessage.style.zIndex = '1000';
-        if (staminaChange === 'reset') {
-          heartMessage.style.color = 'green';
-          heartMessage.innerText = 'Toxic!';
-        } else if (staminaChange > 0) {
-          heartMessage.style.color = 'red';
-          heartMessage.innerText = '❤️ + ' + staminaChange;
-        } else {
-          heartMessage.style.color = 'green';
-          heartMessage.innerText = '❤️ ' + staminaChange;
-        }
-        document.body.appendChild(heartMessage);
-        setTimeout(() => { document.body.removeChild(heartMessage); }, 2000);
 
-        const idx = mushrooms.indexOf(mushroom);
-        if (idx !== -1) mushrooms.splice(idx, 1);
+        if (charX < boxX_screen + BOX_W/2 &&
+            charX + character.width > boxX_screen &&
+            keys['ArrowLeft']) {
+          character.x = boxX_screen + BOX_W/2;
+        }
+      }
+
+      // ✅ Bottom collision (Hitting from below)
+      if (character.y < boxY + BOX_H &&
+          character.y + character.height > boxY + BOX_H &&
+          charX + character.width > boxX_screen - BOX_W/2 &&
+          charX < boxX_screen + BOX_W/2 &&
+          character.velocityY < 0) {
+        mushroom.isVisible = true;
+        if (mushroomDecisionStartTime === null) {
+          mushroomDecisionStartTime = performance.now();
+        }
+        character.velocityY = 0;
+      }
+      if (character.velocityY >= 0 &&
+          character.y + character.height <= boxY + 5 &&
+          character.y + character.height + character.velocityY >= boxY &&
+          charX + character.width > boxX_screen - BOX_W/2 &&
+          charX < boxX_screen + BOX_W/2) {
+
+        character.y = boxY - character.height;
+        character.velocityY = 0;
+        isOnBlock = true;
+        canJump = true;
+      }
+    } else {
+      // centered camera
+      if (
+        character.velocityY >= 0 &&
+        character.y + character.height <= boxY + 5 &&
+        character.y + character.height + character.velocityY >= boxY &&
+        (canvas.width / 2) + character.width > boxX_screen &&
+        (canvas.width / 2) < boxX_screen + BOX_W/2
+      ) {
+        character.y = boxY - character.height;
+        character.velocityY = 0;
+        isOnBlock = true;
+        canJump = true;
+      }
+
+      if (
+        (charX + character.width > boxX_screen - BOX_W/2 && charX < boxX_screen + BOX_W/2) &&
+        (character.y + character.height > boxY + BOX_H*0.4 && character.y < boxY)
+      ) {
+        // Handle horizontal collision by stopping movement or pushing back
+        if (character.speed > 0) {
+          cameraOffset = Math.min(Math.max(cameraOffset - character.speed, 0), worldWidth);
+        } else if (character.speed < 0) {
+          cameraOffset = Math.min(Math.max(cameraOffset + character.speed, 0), worldWidth);
+        }
+        character.speed = 0;  // Stop horizontal movement
+        isOnBlock = true;     // Side collision impacts block state
+      }
+
+      if (
+        character.velocityY <= 0 &&
+        character.y - character.height <= boxY + BOX_H/2 &&
+        character.y - character.height >= boxY + BOX_H*0.4 &&
+        (canvas.width / 2) + character.width > boxX_screen - BOX_W/2 &&
+        (canvas.width / 2) < boxX_screen + BOX_W/2
+      ) {
+        // Hit head
+        mushroom.isVisible = true;
+        character.y = boxY + character.height;
+        character.velocityY = 0;
+        isOnBlock = true;
+        if (mushroomDecisionStartTime === null) {
+          mushroomDecisionStartTime = performance.now();
+        }
       }
     }
   });
-
   return canJump;
 }
 
@@ -652,7 +619,7 @@ async function checkHP_canvas4() {
     currentCanvas = 4;
     character.hp = 2;
     const respawn = getRespawnSpot();
-    ensureWorldPosInit(); character.worldX = respawn.x;
+    character.x = respawn.x;
     character.y = respawn.y;
     cameraOffset = 0;
 
@@ -662,83 +629,126 @@ async function checkHP_canvas4() {
   }
 }
 
-
 function handleMovement_canvas4() {
-  ensureWorldPosInit();
-  // Update edge flags based on camera
+  let canJump;
+  // **Check if Character is at World Edges**
   atLeftEdge = cameraOffset <= 0;
   atRightEdge = cameraOffset >= worldWidth - canvas.width;
 
-  // ---- Horizontal speed update (unchanged logic) ----
-  if (keys['ArrowLeft'] && keys['ArrowRight']) {
-    if (character.speed > 0) character.speed = Math.max(0, character.speed - character.deceleration);
-    else if (character.speed < 0) character.speed = Math.min(0, character.speed + character.deceleration);
-  } else if (keys['ArrowRight']) {
-    character.speed = Math.min(character.max_speed, character.speed + character.acceleration);
-  } else if (keys['ArrowLeft']) {
-    character.speed = Math.max(-character.max_speed, character.speed - character.acceleration);
-  } else {
-    if (character.speed > 0) character.speed = Math.max(0, character.speed - character.deceleration);
-    else if (character.speed < 0) character.speed = Math.min(0, character.speed + character.deceleration);
-  }
+  // **Determine character's world position considering camera offset**
+  let characterWorldX = getCharacterWorldX();
 
-  // ---- Candidate new worldX ----
-  const proposedWorldX = character.worldX + character.speed;
-
-  // Prevent entering platform walls from sides (WORLD space)
-  function hitsGroundWall(xWorld, yTop) {
-    return groundPlatforms.some(p =>
-      (
-        (xWorld + character.width > p.startX && character.worldX + character.width <= p.startX) ||
-        (xWorld < p.endX && character.worldX >= p.endX)
-      ) && (yTop + character.height > p.y)
+  // **Check for collisions with ground platforms, preventing entry from sides**
+  function isCollidingWithWall(xWorld, y) {
+    return groundPlatforms.some(platform =>
+      ((xWorld + character.width > platform.startX && xWorld < platform.startX) ||
+       (xWorld < platform.endX && xWorld + character.width > platform.endX)) &&
+      y + character.height > platform.y // Ensure entry is blocked if below platform
     );
   }
 
-  if (!hitsGroundWall(proposedWorldX, character.y)) {
-    character.worldX = Math.max(0, Math.min(proposedWorldX, worldWidth - character.width));
+  let newX = character.x;
+  let newWorldX = characterWorldX;
+
+  // Horizontal movement with acceleration/deceleration
+  if (keys['ArrowLeft'] && keys['ArrowRight']) {
+    if (character.speed > 0) {
+      character.speed -= character.deceleration;
+      if (character.speed < 0) character.speed = 0;
+    } else if (character.speed < 0) {
+      character.speed += character.deceleration;
+      if (character.speed > 0) character.speed = 0;
+    }
+    newX = character.x + character.speed;
+    newWorldX = characterWorldX + character.speed;
+  }
+  else if (keys['ArrowRight']) {
+    character.speed += character.acceleration;
+    if (character.speed > character.max_speed) {
+      character.speed = character.max_speed;  // Cap max speed
+    }
+    newX = character.x + character.speed;
+    newWorldX = characterWorldX + character.speed;
+  } else if (keys['ArrowLeft']) {
+    character.speed -= character.acceleration;
+    if (character.speed < -character.max_speed) {
+      character.speed = -character.max_speed;  // Cap max speed
+    }
+    newX = character.x + character.speed;
+    newWorldX = characterWorldX + character.speed;
+  } else if (!keys['ArrowLeft'] && !keys['ArrowRight']) {
+    if (character.speed > 0) {
+      character.speed -= character.deceleration;
+      if (character.speed < 0) character.speed = 0;
+    } else if (character.speed < 0) {
+      character.speed += character.deceleration;
+      if (character.speed > 0) character.speed = 0;
+    }
+    newX = character.x + character.speed;
+    newWorldX = characterWorldX + character.speed;
   }
 
-  // ---- Gravity & Landing (use worldX to sample ground) ----
-  const leftFootXWorld  = character.worldX + 2;
-  const rightFootXWorld = character.worldX + character.width - 2;
-  const groundYLeft  = getGroundY(leftFootXWorld);
-  const groundYRight = getGroundY(rightFootXWorld);
-  const groundY = Math.min(groundYLeft, groundYRight);
+  if (!isCollidingWithWall(newWorldX, character.y)) {
+    if (change_detect_right == false) {
+      if (change_detect_right != atRightEdge) {
+        character.x = (canvas.width / 2) + 20;
+      }
+    }
+    if (change_detect_left == false) {
+      if (change_detect_left != atLeftEdge) {
+        character.x = (canvas.width / 2) - 20;
+      }
+    }
 
-  // Jumping
-  let canJump = false; // drawMysBox may set this too
-  if ((character.y + character.height) >= groundY - 0.01) {
+    if (atRightEdge && character.x > (canvas.width / 2)) {
+      character.x = Math.min(newX, 570);
+    } else if (atLeftEdge && character.x < (canvas.width / 2)) {
+      character.x = Math.max(newX, 0);
+    } else if (character.x > (canvas.width / 2) - 10 && character.x < (canvas.width / 2) + 10) {
+      cameraOffset = Math.min(Math.max(cameraOffset + character.speed, 0), worldWidth);
+    }
+    change_detect_right = atRightEdge,
+    change_detect_left = atLeftEdge
+  }
+
+  // **Calculate proper ground position using world coordinates**
+  let characterGroundY = getGroundY(newWorldX + character.width / 2);
+  let onGround = character.y + character.height >= characterGroundY;
+
+  // **Jumping Logic**
+  canJump = drawMysBox();
+  if (onGround) {
     canJump = true;
   }
   if (keys['ArrowUp'] && canJump) {
-    character.velocityY = -13;
-    canJump = false;
+    character.velocityY = -13; // Jump force
+    canJump = false; // Prevent multiple jumps
   }
 
-  // Gravity
+  // **Gravity**
   character.velocityY += gravity;
   let newY = character.y + character.velocityY;
 
-  // Land on ground if crossing it
-  if (character.y + character.height <= groundY && newY + character.height >= groundY) {
-    character.y = groundY - character.height;
+  // Try fuzzy ground detection
+  let leftFootXWorld = newWorldX + 2;
+  let rightFootXWorld = newWorldX + character.width - 2;
+  let fuzzyGroundY = Math.min(getGroundY(leftFootXWorld), getGroundY(rightFootXWorld));
+
+  // Only land if character is above the ground
+  if (
+    character.y + character.height <= fuzzyGroundY &&
+    character.y + character.height + character.velocityY >= fuzzyGroundY
+  ) {
+    character.y = fuzzyGroundY - character.height;
     character.velocityY = 0;
     canJump = true;
   } else {
     character.y = newY;
   }
 
-  // ---- Camera follow: keep centered when possible ----
-  cameraOffset = Math.max(0, Math.min(worldWidth - canvas.width, character.worldX + character.width/2 - canvas.width/2));
-
-  // For legacy reads elsewhere this frame
-  character.x = getCharacterScreenX();
-
-  // Handle mushroom interactions after movement
+  // handleCollisions_canvas4();
   handleMushroomCollision_canvas4();
 }
-
 
 function drawMushroomQuestionBox() {
   if (!activeMushroom) return;
@@ -800,35 +810,47 @@ function getMarioFrame() {
   return marioAnimations.idle; // Idle frame
 }
 
-
 function drawCharacter_canvas4() {
-  ensureWorldPosInit();
-  const characterX = getCharacterScreenX(); // derived from worldX
+  let characterX;
+
+  // **Check if the Camera is at the World Edges**
+  let atLeftEdge = cameraOffset === 0;
+  let atRightEdge = cameraOffset >= worldWidth - canvas.width;
+
+  if (atLeftEdge || atRightEdge) {
+    characterX = character.x;
+  } else {
+    characterX = canvas.width / 2;
+  }
+
   let frame = getMarioFrame();
 
-  if (keys['ArrowLeft'])  character.lastDirection = "left";
-  if (keys['ArrowRight']) character.lastDirection = "right";
-  const flip = (character.lastDirection === "left");
+  // **Check if moving left or right**
+  if (keys['ArrowLeft']) {
+    character.lastDirection = "left";
+  } else if (keys['ArrowRight']) {
+    character.lastDirection = "right";
+  }
 
-  // Keep a compatibility mirror for legacy reads
-  character.x = characterX;
+  let flip = (character.lastDirection === "left"); // Use last movement direction
 
   ctx.save();
   if (flip) {
     ctx.scale(-1, 1);
     ctx.drawImage(
-      marioSprite, frame.x, frame.y, frameWidth, frameHeight,
-      -(characterX + character.width), character.y, character.width, character.height
+      marioSprite,
+      frame.x, frame.y, frameWidth, frameHeight,  // Extract sprite from sheet
+      -characterX - character.width, character.y, character.width, character.height
     );
   } else {
     ctx.drawImage(
-      marioSprite, frame.x, frame.y, frameWidth, frameHeight,
+      marioSprite,
+      frame.x, frame.y, frameWidth, frameHeight,  // Extract sprite from sheet
       characterX, character.y, character.width, character.height
     );
   }
   ctx.restore();
 }
-
 
 function drawHP_canvas4() {
   // Maximum HP (stamina bar max length)
