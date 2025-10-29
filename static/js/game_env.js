@@ -59,7 +59,6 @@ function groundAtX(x) {
   return window.groundPlatforms.find(p => x >= p.startX && x <= p.endX) || null;
 }
 
-  if (!Array.isArray(window.mushroomPlatforms)) return null;
 // Pick a world-X inside a platform keeping gaps from prior picks
 function pickXInPlatform(plat, pickedXs, minGap = 35, maxGap = 120) {
   if (!plat) return null;
