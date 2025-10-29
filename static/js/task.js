@@ -39,7 +39,7 @@ function completeExplore() {
 }
 
 /* =======================================================================
-   Wait helpers to ensure platforms exist before we place mushrooms
+  Wait helpers to ensure platforms exist before we place mushrooms
    ======================================================================= */
 
 function platformsReady() {
