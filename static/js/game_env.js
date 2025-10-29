@@ -59,25 +59,7 @@ function groundAtX(x) {
   return window.groundPlatforms.find(p => x >= p.startX && x <= p.endX) || null;
 }
 
-// Build a "generated" mushroom platform layer ABOVE the ground
-function buildMushroomPlatformsFromGround(offsetPx = MUSHROOM_PLATFORM_OFFSET) {
-  if (!Array.isArray(window.groundPlatforms)) return [];
-  // Copy geometry (x ranges) from ground but lift y by offset
-  return window.groundPlatforms.map(p => ({
-    startX: p.startX,
-    endX: p.endX,
-    y: Math.max(0, p.y - offsetPx), // lift up, clamp to 0 minimum
-    type: OBJECT_TYPES.OBSTACLE,
-    display: true
-  }));
-}
-
-// Find the generated mushroom platform under a world-X
-function mushroomPlatformAtX(x) {
   if (!Array.isArray(window.mushroomPlatforms)) return null;
-  return window.mushroomPlatforms.find(p => x >= p.startX && x <= p.endX) || null;
-}
-
 // Pick a world-X inside a platform keeping gaps from prior picks
 function pickXInPlatform(plat, pickedXs, minGap = 35, maxGap = 120) {
   if (!plat) return null;
@@ -193,7 +175,7 @@ async function generateMushroom(count = 5, colorWhitelist = null) {
     return filename;
   };
 
-  const platforms = window.mushroomPlatforms;
+  const platforms = groundPlatforms;
 
   // Distribute across platforms
   const platOrder = [];
@@ -240,7 +222,6 @@ async function generateMushroom(count = 5, colorWhitelist = null) {
       // 👇 Mys-box Y from the *actual ground platform* under xWorld (box bottom 50px above platform)
       const gPlat = groundAtX(xWorld);
       const platformY = gPlat.y
-      console.log(platformY)
       const boxBottomY = platformY + 50;
       const boxTopY = boxBottomY - BOX_H;
 
@@ -268,10 +249,6 @@ async function generateMushroom(count = 5, colorWhitelist = null) {
 
 // Generate new platforms each time with varied height
 let groundPlatforms = generateGroundPlatforms(worldWidth, 200, 400);
-
-// Build the generated mushroom platform layer ABOVE ground
-let mushroomPlatforms = buildMushroomPlatformsFromGround(MUSHROOM_PLATFORM_OFFSET);
-
 // Initial spawn
 let mushrooms = [];
 generateMushroom(5).then(ms => { mushrooms = ms; }).catch(err => console.warn('[init mushrooms]', err));
@@ -366,8 +343,6 @@ async function handleTextInteraction_canvas4() {
       currentQuestion += 1;
 
       groundPlatforms = generateGroundPlatforms(worldWidth, 200, 400);
-      mushroomPlatforms = buildMushroomPlatformsFromGround(MUSHROOM_PLATFORM_OFFSET);
-
       mushrooms = await generateMushroom(5);
       console.log("Proceeding to next question: " + currentQuestion);
       roomChoiceStartTime = performance.now();
@@ -647,8 +622,6 @@ async function checkHP_canvas4() {
     ensureWorldPosInit(); character.worldX = respawn.x;
     character.y = respawn.y;
     cameraOffset = 0;
-
-    mushroomPlatforms = buildMushroomPlatformsFromGround(MUSHROOM_PLATFORM_OFFSET);
     mushrooms = await generateMushroom(5);
   }
 }

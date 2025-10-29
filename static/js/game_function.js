@@ -256,7 +256,7 @@ async function hungry() {
                             roomRepetitionMap[currentRoom] = (roomRepetitionMap[currentRoom] || 1) + 1;
                         }
                     
-                        mushrooms = await generateMushroom(1);
+                        mushrooms = await generateMushroom(5);
                         currentCanvas = 4;
                         character.hp = 1;
                         freezeTime = 1000;
