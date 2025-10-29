@@ -159,20 +159,6 @@ function generateGroundPlatforms(worldWidth, minHeight, maxHeight, numSections =
 }
 
 async function generateMushroom(count = 5, colorWhitelist = null) {
-  // Ensure platforms exist before we choose any positions
-  if (!Array.isArray(window.groundPlatforms) || !window.groundPlatforms.length) {
-    window.groundPlatforms = generateGroundPlatforms(worldWidth, 200, 400);
-  }
-  if (!Array.isArray(window.mushroomPlatforms) || !window.mushroomPlatforms.length) {
-    window.mushroomPlatforms = buildMushroomPlatformsFromGround(MUSHROOM_PLATFORM_OFFSET);
-  }
-
-  // Guard: catalog ready?
-  if (!Array.isArray(window.mushroomCatalogRows) || window.mushroomCatalogRows.length === 0) {
-    console.warn('[generateMushroom] Catalog is empty. Did mushroom.js finish building?');
-    return [];
-  }
-
   // Pool
   let pool = window.mushroomCatalogRows;
   if (Array.isArray(colorWhitelist) && colorWhitelist.length > 0) {
