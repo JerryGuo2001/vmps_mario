@@ -254,7 +254,8 @@ async function generateMushroom(count = 5, colorWhitelist = null) {
       // 👇 Mys-box Y from the *actual ground platform* under xWorld (box bottom 50px above platform)
       const gPlat = groundAtX(xWorld);
       const platformY = gPlat.y
-      const boxBottomY = platformY - 50;
+      console.log(platformY)
+      const boxBottomY = platformY + 50;
       const boxTopY = boxBottomY - BOX_H;
 
       items.push({
