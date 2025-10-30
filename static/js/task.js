@@ -3,7 +3,11 @@
 window.onload = () => {
   const w = document.getElementById('welcome');
   if (w) w.style.display = 'block';
+
+  // NEW: preload all instruction slides up-front
+  preloadAllInstructions().catch(() => {/* ignore */});
 };
+
 
 // --- REPLACE startWithID() ---
 function startWithID() {
@@ -41,6 +45,45 @@ const INSTR_FOLDERS = {
 // File naming convention: numbered PNG files "1.png", "2.png", ... "N.png"
 const INSTR_MAX_SLIDES = 50; // safety cap
 const INSTR_EXT = 'png';
+
+// --- NEW: cache and preload ---
+const INSTR_CACHE = Object.create(null); // { phaseKey: { urls: string[], imgs: HTMLImageElement[] } }
+
+function preloadInstructionSlides(phaseKey) {
+  const sub = INSTR_FOLDERS[phaseKey];
+  if (!sub) return Promise.resolve({ urls: [], imgs: [] });
+
+  const folderUrl = `${INSTR_BASE}/${sub}`;
+  const urls = [];
+  const imgs = [];
+
+  // Probe 1..INSTR_MAX_SLIDES, preload any that exist
+  const jobs = [];
+  for (let i = 1; i <= INSTR_MAX_SLIDES; i++) {
+    const url = `${folderUrl}/${i}.${INSTR_EXT}`;
+    jobs.push(
+      new Promise((resolve) => {
+        const img = new Image();
+        img.decoding = 'async';
+        img.loading = 'eager';
+        img.onload = () => { urls.push(url); imgs.push(img); resolve(true); };
+        img.onerror = () => resolve(false);
+        img.src = url + `?v=${Date.now()}`; // cache-bust during dev
+      })
+    );
+  }
+
+  return Promise.all(jobs).then(() => {
+    INSTR_CACHE[phaseKey] = { urls, imgs };
+    return INSTR_CACHE[phaseKey];
+  });
+}
+
+function preloadAllInstructions() {
+  const phases = Object.keys(INSTR_FOLDERS || {});
+  return Promise.all(phases.map(k => preloadInstructionSlides(k)));
+}
+
 
 // Modal styles (inline so you don't need extra CSS files)
 const INSTR_STYLE = `
@@ -84,35 +127,75 @@ const INSTR_STYLE = `
   .instr-counter { opacity: 0.7; font-size: 14px; }
 `;
 
-// Create the overlay root once when needed
-function ensureInstrOverlayRoot() {
-  if (document.getElementById('instr-overlay')) return;
+// Create (or reuse) an inline instruction region (NOT a popout)
+function ensureInstrInlineRoot() {
+  // Add minimal inline styles (reuse your existing theme bits)
+  if (!document.getElementById('instr-inline-style')) {
+    const style = document.createElement('style');
+    style.id = 'instr-inline-style';
+    style.textContent = `
+      #instr-inline {
+        display: none; /* hidden until used */
+        margin: 16px auto;
+        max-width: 900px;
+        background: #121212; color: #EEE;
+        border-radius: 12px; box-shadow: 0 12px 40px rgba(0,0,0,0.15);
+        overflow: hidden; display: flex; flex-direction: column;
+      }
+      #instr-inline-header {
+        padding: 12px 16px; font-weight: 600;
+        border-bottom: 1px solid rgba(255,255,255,0.08);
+        background: #181818;
+      }
+      #instr-inline-body {
+        min-height: 320px; /* shorter than modal */
+        display: flex; align-items: center; justify-content: center;
+        background: #0e0e0e; padding: 8px;
+      }
+      #instr-inline-body img {
+        max-width: 100%; max-height: 65vh; object-fit: contain; display: block;
+      }
+      #instr-inline-default {
+        padding: 24px; text-align: center; line-height: 1.6; font-size: 18px;
+      }
+      #instr-inline-footer {
+        padding: 10px 16px; display: flex; gap: 10px; justify-content: space-between; align-items: center;
+        background: #181818; border-top: 1px solid rgba(255,255,255,0.08);
+      }
+      .instr-btn {
+        appearance: none; border: none; border-radius: 10px; padding: 10px 14px; cursor: pointer;
+        background: #2a2a2a; color: #fff; font-weight: 600;
+      }
+      .instr-btn[disabled] { opacity: 0.4; cursor: default; }
+      .instr-btn.primary { background: #3a6df0; }
+      .instr-counter { opacity: 0.7; font-size: 14px; }
+    `;
+    document.head.appendChild(style);
+  }
 
-  const style = document.createElement('style');
-  style.textContent = INSTR_STYLE;
-  document.head.appendChild(style);
-
-  const overlay = document.createElement('div');
-  overlay.id = 'instr-overlay';
-  overlay.style.display = 'none';
-
-  overlay.innerHTML = `
-    <div id="instr-card">
-      <div id="instr-header">Instructions</div>
-      <div id="instr-body"></div>
-      <div id="instr-footer">
-        <div id="instr-left">
+  if (!document.getElementById('instr-inline')) {
+    const wrap = document.createElement('div');
+    wrap.id = 'instr-inline';
+    wrap.innerHTML = `
+      <div id="instr-inline-header">Instructions</div>
+      <div id="instr-inline-body"></div>
+      <div id="instr-inline-footer">
+        <div>
           <button id="instr-prev" class="instr-btn" aria-label="Previous slide">◀ Prev</button>
           <span id="instr-counter" class="instr-counter"></span>
         </div>
-        <div id="instr-right">
+        <div>
           <button id="instr-next" class="instr-btn primary" aria-label="Next slide">Next ▶</button>
         </div>
       </div>
-    </div>
-  `;
-  document.body.appendChild(overlay);
+    `;
+
+    // Prefer placing inside #main if present; else append to body
+    const main = document.getElementById('main');
+    (main || document.body).prepend(wrap);
+  }
 }
+
 
 // Try loading numbered images 1.png, 2.png, ... until a miss occurs
 function discoverInstructionSlides(folderUrl) {
@@ -131,103 +214,97 @@ function discoverInstructionSlides(folderUrl) {
 }
 
 function showPhaseInstructions(phaseKey, onDone) {
-  const sub = INSTR_FOLDERS[phaseKey];
-  const folderUrl = `${INSTR_BASE}/${sub}`;
-  ensureInstrOverlayRoot();
+  ensureInstrInlineRoot();
 
-  // Lock keys used by the game while overlay is visible
-  let overlayActive = true;
-  const keyBlocker = (e) => {
-    // Prevent arrow keys from scrolling page
-    if (['ArrowLeft','ArrowRight',' '].includes(e.key)) e.preventDefault();
-    // Stop these from reaching any global handlers
-    e.stopImmediatePropagation();
-  };
-
-  const overlay = document.getElementById('instr-overlay');
-  const body = document.getElementById('instr-body');
-  const header = document.getElementById('instr-header');
+  const wrap   = document.getElementById('instr-inline');
+  const body   = document.getElementById('instr-inline-body');
+  const header = document.getElementById('instr-inline-header');
   const prevBtn = document.getElementById('instr-prev');
   const nextBtn = document.getElementById('instr-next');
   const counter = document.getElementById('instr-counter');
 
   header.textContent = 'Instructions';
 
-  let slides = [];
-  let idx = 0;
+  // Use preloaded slides if available; otherwise preload now
+  const useSlides = (cache) => {
+    let slides = cache?.urls || [];
+    let idx = 0;
 
-  function render() {
-    body.innerHTML = '';
-    if (slides.length === 0) {
-      // default page
-      const box = document.createElement('div');
-      box.id = 'instr-default';
-      box.innerHTML = `
-        <p>No slides found in <code>${folderUrl}/</code>.</p>
-        <p>Click “Next” to start the next phase.</p>
-      `;
-      body.appendChild(box);
-      prevBtn.disabled = true;
-      counter.textContent = '';
-      nextBtn.textContent = 'Start';
-      return;
-    }
-
-    const img = document.createElement('img');
-    img.alt = `Instruction slide ${idx + 1}`;
-    img.src = slides[idx];
-    body.appendChild(img);
-
-    prevBtn.disabled = (idx === 0);
-    const isLast = (idx === slides.length - 1);
-    nextBtn.textContent = isLast ? 'Start' : 'Next ▶';
-    counter.textContent = `Slide ${idx + 1} / ${slides.length}`;
-  }
-
-  function closeAndContinue() {
-    overlayActive = false;
-    window.removeEventListener('keydown', keyBlocker, true);
-    window.removeEventListener('keydown', keyNav, true);
-    overlay.style.display = 'none';
-    if (typeof onDone === 'function') onDone();
-  }
-
-  function keyNav(e) {
-    if (!overlayActive) return;
-    if (e.key === 'ArrowLeft') {
-      if (idx > 0) { idx--; render(); }
-      e.preventDefault();
-      e.stopImmediatePropagation();
-    } else if (e.key === 'ArrowRight' || e.key === ' ') {
-      // Next or Start
-      const isLast = (slides.length === 0) || (idx === slides.length - 1);
-      if (isLast) {
-        closeAndContinue();
-      } else {
-        idx++; render();
+    function render() {
+      body.innerHTML = '';
+      if (slides.length === 0) {
+        const box = document.createElement('div');
+        box.id = 'instr-inline-default';
+        const sub = INSTR_FOLDERS[phaseKey];
+        const folderUrl = `${INSTR_BASE}/${sub}`;
+        box.innerHTML = `
+          <p>No slides found in <code>${folderUrl}/</code>.</p>
+          <p>Click “Next” to start the next phase.</p>
+        `;
+        body.appendChild(box);
+        prevBtn.disabled = true;
+        counter.textContent = '';
+        nextBtn.textContent = 'Start';
+        return;
       }
-      e.preventDefault();
-      e.stopImmediatePropagation();
-    }
-  }
 
-  prevBtn.onclick = () => { if (idx > 0) { idx--; render(); } };
-  nextBtn.onclick = () => {
-    const isLast = (slides.length === 0) || (idx === slides.length - 1);
-    if (isLast) closeAndContinue();
-    else { idx++; render(); }
+      const img = new Image();
+      img.decoding = 'async';
+      img.loading = 'eager';
+      img.alt = `Instruction slide ${idx + 1}`;
+      img.src = slides[idx];
+      body.appendChild(img);
+
+      prevBtn.disabled = (idx === 0);
+      const isLast = (idx === slides.length - 1);
+      nextBtn.textContent = isLast ? 'Start' : 'Next ▶';
+      counter.textContent = `Slide ${idx + 1} / ${slides.length}`;
+    }
+
+    function finish() {
+      // Hide inline block and proceed
+      wrap.style.display = 'none';
+      if (typeof onDone === 'function') onDone();
+      // Remove nav handler after done
+      window.removeEventListener('keydown', keyNav, true);
+    }
+
+    function keyNav(e) {
+      if (wrap.style.display === 'none') return;
+      if (e.key === 'ArrowLeft') {
+        if (idx > 0) { idx--; render(); }
+        e.preventDefault();
+        e.stopImmediatePropagation();
+      } else if (e.key === 'ArrowRight' || e.key === ' ') {
+        const isLast = (slides.length === 0) || (idx === slides.length - 1);
+        if (isLast) finish();
+        else { idx++; render(); }
+        e.preventDefault();
+        e.stopImmediatePropagation();
+      }
+    }
+
+    prevBtn.onclick = () => { if (idx > 0) { idx--; render(); } };
+    nextBtn.onclick = () => {
+      const isLast = (slides.length === 0) || (idx === slides.length - 1);
+      if (isLast) finish();
+      else { idx++; render(); }
+    };
+
+    // Show inline region and render
+    wrap.style.display = 'flex';
+    wrap.style.flexDirection = 'column';
+    window.addEventListener('keydown', keyNav, true);
+    render();
   };
 
-  // Show overlay and load slides
-  overlay.style.display = 'flex';
-  window.addEventListener('keydown', keyBlocker, true);
-  window.addEventListener('keydown', keyNav, true);
-
-  discoverInstructionSlides(folderUrl).then(urls => {
-    slides = urls;
-    render();
-  });
+  if (INSTR_CACHE[phaseKey]) {
+    useSlides(INSTR_CACHE[phaseKey]);
+  } else {
+    preloadInstructionSlides(phaseKey).then(useSlides).catch(() => useSlides({ urls: [], imgs: [] }));
+  }
 }
+
 
 // =================== END NEW: Instruction system ===================
 
