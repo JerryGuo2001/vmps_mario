@@ -19,18 +19,24 @@ function _shuffle(arr) {
   return arr;
 }
 
+function memoryImageSrc(imagefilename) {
+  if (!imagefilename) return '';
+  // Always point to images_balanced inside TexturePack/mushroom_pack
+  return `TexturePack/mushroom_pack/images_balanced/${imagefilename}`;
+}
+
+
 // --- Normalize a mushroom row/object to a consistent shape used by memory UI ---
 function _normalizeMush(row) {
   if (!row) return null;
-  // Prefer existing fields; derive name from filename if missing
-  const imagefilename = row.imagefilename || row.filename || row.image || '';
-  let name = row.name || (typeof imagefilename === 'string' ? imagefilename.replace(/^.*[\\/]/, '').replace(/\.[^.]+$/, '') : 'mushroom');
-  return {
-    name,
-    imagefilename,      // Memory UI will do: `TexturePack/mushroom_pack/${imagefilename}`
-    value: row.value ?? 0
-  };
+  // Prefer existing fields; derive basename only.
+  let raw = row.imagefilename || row.filename || row.image || '';
+  // Keep only the filename (drop any path parts, including images_balanced/)
+  const imagefilename = String(raw).replace(/^.*images_balanced\//i, '').replace(/^.*[\\/]/, '');
+  const name = row.name || (imagefilename ? imagefilename.replace(/\.[^.]+$/, '') : 'mushroom');
+  return { name, imagefilename, value: row.value ?? 0 };
 }
+
 
 // --- Get unique learned mushrooms from prior phase (by imagefilename) ---
 function _getLearnedPool() {
@@ -186,13 +192,13 @@ function Memory_startSelectorPhase() {
 }
 
 function showMushrooms() {
-    const a = aMushrooms[memory_currentQuestion];
-    const b = bMushrooms[memory_currentQuestion];
+  const a = aMushrooms[memory_currentQuestion];
+  const b = bMushrooms[memory_currentQuestion];
 
-    document.getElementById('leftMushroomImg').src = `TexturePack/mushroom_pack/images_balanced/${a.imagefilename}`;
-    document.getElementById('rightMushroomImg').src = `TexturePack/mushroom_pack/images_balanced/${b.imagefilename}`;
+  document.getElementById('leftMushroomImg').src  = memoryImageSrc(a.imagefilename);
+  document.getElementById('rightMushroomImg').src = memoryImageSrc(b.imagefilename);
 
-    memory_trialStartTime = performance.now();
+  memory_trialStartTime = performance.now();
 }
 
 function updateSelector() {
@@ -323,7 +329,7 @@ function showMemoryChoicePrompt(mushroom) {
     promptDiv.style.zIndex = '1000';
 
     const img = document.createElement('img');
-    img.src = `TexturePack/mushroom_pack/images_balanced/${mushroom.imagefilename}`;
+    img.src = memoryImageSrc(mushroom.imagefilename);  // <— use helper
     img.style.width = '80px';
     promptDiv.appendChild(img);
 
