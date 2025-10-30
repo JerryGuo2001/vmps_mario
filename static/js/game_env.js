@@ -160,96 +160,59 @@ function generateGroundPlatforms(worldWidth, minHeight, maxHeight, numSections =
 }
 
 // ========== REPLACE YOUR generateMushroom WITH THIS ==========
-
 async function generateMushroom(count = 5, colorWhitelist = null) {
-  // ----- 1) choose rows -----
-  let pool = window.mushroomCatalogRows || [];
+  const plats = groundPlatforms || [];
+  if (!plats.length) return [];
+
+  // 1) sample rows (kept minimal)
+  let pool = (window.mushroomCatalogRows || []).slice();
   if (Array.isArray(colorWhitelist) && colorWhitelist.length > 0) {
     const set = new Set(colorWhitelist.map(c => String(c).toLowerCase()));
     pool = pool.filter(r => set.has(r.color));
   }
-  if (pool.length === 0) return [];
+  if (!pool.length) return [];
+  const chosen = pool.sort(() => Math.random() - 0.5).slice(0, count);
 
-  // sample without replacement
-  const chosen = [];
-  const tmp = pool.slice();
-  for (let i = 0; i < count && tmp.length > 0; i++) {
-    const j = Math.floor(Math.random() * tmp.length);
-    chosen.push(tmp.splice(j, 1)[0]);
+  // 2) platform 0 only (simple like getRespawnSpot)
+  const p = plats[0];
+  const margin = 10;                 // keep away from edges a bit
+  const startX = p.startX + margin + BOX_W/2;
+  const endX   = p.endX   - margin - BOX_W/2;
+  const span   = Math.max(0, endX - startX);
+
+  // even spacing across platform 0
+  const xs = [];
+  for (let i = 0; i < chosen.length; i++) {
+    const t = (chosen.length === 1) ? 0.5 : (i / (chosen.length - 1));
+    xs.push(Math.round(startX + t * span));
   }
 
-  // ----- 2) simple path normalizer & loader -----
-  const fixPath = (filename) => {
-    if (!filename) return '';
-    if (/^https?:\/\//i.test(filename) || /^texturepack\/mushroom_pack\//i.test(filename)) return filename;
-    if (/^images_balanced\//i.test(filename)) return `TexturePack/mushroom_pack/${filename}`;
-    if (!filename.includes('/')) return `TexturePack/mushroom_pack/${filename}`;
-    return filename;
-  };
+  const BOX_CLEARANCE = 0;          // 0 = box sits on the platform top
+  const boxTopY = (p.y - BOX_CLEARANCE) - BOX_H;
 
-  const loadImageOnce = (filename) => new Promise((resolve, reject) => {
-    const img = new Image();
-    const timer = setTimeout(() => { img.src = ''; reject(new Error('timeout')); }, 5000);
-    img.onload = () => { clearTimeout(timer); resolve(img); };
-    img.onerror = () => { clearTimeout(timer); reject(new Error('load error')); };
-    img.src = encodeURI(filename);
-  });
-
-  // ----- 3) platform-relative layout (ONLY depends on groundPlatforms) -----
-  const plats = usablePlatforms(groundPlatforms, BOX_W, 30);
-  if (!plats.length) return [];
-
-  // Distribute counts over platforms
-  const perPlat = allocateCountsOverPlatforms(chosen.length, plats);
-
-  // Precompute X slots per platform
-  const platXs = plats.map((p, idx) => sampleXsForPlatform(p, perPlat[idx], BOX_W, 30));
-
-  // Optional vertical clearance above the ground surface (0 = touching ground)
-  const BOX_CLEARANCE = 0;
-
+  // 3) build items (no fancy loader—optional)
   const items = [];
-  let rowIdx = 0;
-
-  for (let pi = 0; pi < plats.length; pi++) {
-    const p = plats[pi];
-    const xs = platXs[pi];
-
-    for (let xi = 0; xi < xs.length; xi++) {
-      if (rowIdx >= chosen.length) break;
-
-      const r = chosen[rowIdx++];
-      const filename = fixPath(r.filename);
-
-      // Load image (allow failure to skip this row cleanly)
-      let img = null;
-      try { img = await loadImageOnce(filename); }
-      catch (e) { console.warn('[generateMushroom] image load failed:', filename, e.message); continue; }
-
-      // Y is strictly relative to this platform's top (p.y)
-      const platformTopY = p.y;                // platform top surface in canvas coords
-      const boxBottomY   = platformTopY - BOX_CLEARANCE;
-      const boxTopY      = boxBottomY - BOX_H; // box sits on/above the platform
-
-      items.push({
-        x: xs[xi],                  // WORLD X (center of the box)
-        y: boxTopY,                 // TOP of the box
-        type: 0,
-        value: r.value,
-        isVisible: false,
-        growthFactor: 0,
-        growthSpeed: 0.05,
-        growthComplete: false,
-        color: r.color,
-        imagefilename: filename,
-        image: img,
-        groundPlatformIndex: groundPlatforms.indexOf(p)
-      });
-    }
+  for (let i = 0; i < chosen.length; i++) {
+    const r = chosen[i];
+    items.push({
+      x: xs[i],                // WORLD X (center)
+      y: boxTopY,              // TOP of the box
+      type: 0,
+      value: r.value,
+      isVisible: false,
+      growthFactor: 0,
+      growthSpeed: 0.05,
+      growthComplete: false,
+      color: r.color,
+      imagefilename: r.filename,
+      image: new Image(),      // if you need the image, set .src below
+      groundPlatformIndex: 0
+    });
+    items[i].image.src = r.filename; // minimal load; remove if you load elsewhere
   }
-
   return items;
 }
+
 
 
 // Generate new platforms each time with varied height
