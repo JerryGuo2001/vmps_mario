@@ -155,7 +155,7 @@ async function generateMushroom(count = 5, colorWhitelist = null) {
   const plats = groundPlatforms || [];
   if (!plats.length) return [];
 
-  // 1) sample rows (kept minimal)
+  // ---- sample rows (minimal) ----
   let pool = (window.mushroomCatalogRows || []).slice();
   if (Array.isArray(colorWhitelist) && colorWhitelist.length > 0) {
     const set = new Set(colorWhitelist.map(c => String(c).toLowerCase()));
@@ -164,30 +164,110 @@ async function generateMushroom(count = 5, colorWhitelist = null) {
   if (!pool.length) return [];
   const chosen = pool.sort(() => Math.random() - 0.5).slice(0, count);
 
-  // 2) platform 0 only (simple like getRespawnSpot)
-  const p = plats[0];
-  const margin = 10;                 // keep away from edges a bit
-  const startX = p.startX + margin + BOX_W/2;
-  const endX   = p.endX   - margin - BOX_W/2;
-  const span   = Math.max(0, endX - startX);
+  // ---- helper: even X positions on a platform with margins ----
+  function xsOnPlatform(p, k, margin = 10) {
+    const startX = p.startX + margin + BOX_W / 2;
+    const endX   = p.endX   - margin - BOX_W / 2;
+    const span   = Math.max(0, endX - startX);
 
-  // even spacing across platform 0
-  const xs = [];
-  for (let i = 0; i < chosen.length; i++) {
-    const t = (chosen.length === 1) ? 0.5 : (i / (chosen.length - 1));
-    xs.push(Math.round(startX + t * span));
+    if (k <= 0) return [];
+    if (span <= 0) {
+      // platform too narrow; stack all at the center
+      return new Array(k).fill(Math.round((p.startX + p.endX) / 2));
+    }
+    if (k === 1) return [Math.round((startX + endX) / 2)];
+
+    const xs = [];
+    for (let i = 0; i < k; i++) {
+      const t = i / (k - 1); // 0..1
+      xs.push(Math.round(startX + t * span));
+    }
+    return xs;
   }
 
-  const BOX_CLEARANCE = 0;          // 0 = box sits on the platform top
-  const boxTopY = (p.y - BOX_CLEARANCE) - BOX_H-50;
+  // ---- helper: your specified 5-mushroom distribution patterns ----
+  function allocationForFivePlatforms(nPlats) {
+    switch (nPlats) {
+      case 5: return [1,1,1,1,1];
+      case 4: return [2,1,1,1];
+      case 3: return [2,2,1];
+      case 2: return [3,2];
+      case 1: return [5];
+      default: {
+        // If more than 5 platforms exist, use first 5 with 1 each.
+        // If 0, handled above. This keeps it deterministic & simple.
+        return new Array(Math.max(1, Math.min(5, nPlats))).fill(1);
+      }
+    }
+  }
 
-  // 3) build items (no fancy loader—optional)
+  // If count != 5, fall back to a simple round-robin spread (keeps function robust)
+  function genericAllocation(nPlats, k) {
+    const arr = new Array(nPlats).fill(0);
+    for (let i = 0; i < k; i++) arr[i % nPlats]++;
+    return arr;
+  }
+
+  // ---- decide per-platform counts ----
+  let perPlat;
+  if (count === 5) {
+    perPlat = allocationForFivePlatforms(plats.length);
+    // If there are more platforms than entries in the pattern, pad with zeros
+    if (perPlat.length < plats.length) {
+      perPlat = perPlat.concat(new Array(plats.length - perPlat.length).fill(0));
+    }
+  } else {
+    perPlat = genericAllocation(plats.length, count);
+  }
+
+  // ---- build items by platform ----
+  const BOX_CLEARANCE = 0;                 // keep your behavior
   const items = [];
-  for (let i = 0; i < chosen.length; i++) {
-    const r = chosen[i];
+  let rowIdx = 0;
+
+  for (let pi = 0; pi < plats.length && rowIdx < chosen.length; pi++) {
+    const p = plats[pi];
+    const k = perPlat[pi] || 0;
+    if (k <= 0) continue;
+
+    const xs = xsOnPlatform(p, k, 10);
+    const boxTopY = (p.y - BOX_CLEARANCE) - BOX_H - 75; // ← preserve your offset
+
+    for (let j = 0; j < xs.length && rowIdx < chosen.length; j++) {
+      const r = chosen[rowIdx++];
+      const img = new Image();
+      img.src = r.filename;
+
+      items.push({
+        x: xs[j],               // WORLD X (center)
+        y: boxTopY,             // TOP of the box, from this platform p
+        type: 0,
+        value: r.value,
+        isVisible: false,
+        growthFactor: 0,
+        growthSpeed: 0.05,
+        growthComplete: false,
+        color: r.color,
+        imagefilename: r.filename,
+        image: img,
+        groundPlatformIndex: pi // platform index
+      });
+    }
+  }
+
+  // If somehow not all assigned (e.g., fewer platforms than needed), place the rest on platform 0
+  while (rowIdx < chosen.length && plats.length > 0) {
+    const p0 = plats[0];
+    const x0 = Math.round((p0.startX + p0.endX) / 2);
+    const y0 = (p0.y - BOX_CLEARANCE) - BOX_H - 75;
+
+    const r = chosen[rowIdx++];
+    const img = new Image();
+    img.src = r.filename;
+
     items.push({
-      x: xs[i],                // WORLD X (center)
-      y: boxTopY,              // TOP of the box
+      x: x0,
+      y: y0,
       type: 0,
       value: r.value,
       isVisible: false,
@@ -196,13 +276,14 @@ async function generateMushroom(count = 5, colorWhitelist = null) {
       growthComplete: false,
       color: r.color,
       imagefilename: r.filename,
-      image: new Image(),      // if you need the image, set .src below
+      image: img,
       groundPlatformIndex: 0
     });
-    items[i].image.src = r.filename; // minimal load; remove if you load elsewhere
   }
+
   return items;
 }
+
 
 
 // Generate new platforms each time with varied height
