@@ -46,55 +46,6 @@ let forestImage = new Image(); forestImage.src = 'TexturePack/forest.png';
 let caveImage = new Image();   caveImage.src = 'TexturePack/cave.png';
 let lavaImage = new Image();   lavaImage.src = 'TexturePack/lava.png';
 
-// ========== SIMPLE, PLATFORM-RELATIVE PLACEMENT HELPERS ==========
-
-// Filter to usable platforms (wide enough to hold a box with margins)
-function usablePlatforms(platforms, boxWidth = 50, margin = 30) {
-  const minWidth = boxWidth + margin * 2;
-  const list = (Array.isArray(platforms) ? platforms : []).filter(p => (p.endX - p.startX) >= minWidth);
-  return (list.length > 0 ? list : (platforms || [])); // fallback to all if none pass width check
-}
-
-// Spread 'count' mushrooms across platforms roughly proportionally to width
-function allocateCountsOverPlatforms(count, platforms) {
-  if (!Array.isArray(platforms) || platforms.length === 0) return [];
-  const widths = platforms.map(p => Math.max(0, p.endX - p.startX));
-  const total = widths.reduce((a, b) => a + b, 0) || 1;
-
-  const raw = widths.map(w => (w / total) * count);
-  const base = raw.map(Math.floor);
-  let remaining = count - base.reduce((a, b) => a + b, 0);
-
-  // Give the remainder to platforms with largest fractional parts
-  const fracIdx = raw
-    .map((v, i) => ({ i, frac: v - Math.floor(v) }))
-    .sort((a, b) => b.frac - a.frac);
-
-  for (let k = 0; k < remaining; k++) base[fracIdx[k % fracIdx.length].i]++;
-
-  return base;
-}
-
-// Evenly space k X-positions on a platform with a touch of jitter (no overlap)
-function sampleXsForPlatform(plat, k, boxWidth = 50, margin = 30) {
-  const start = plat.startX + margin + boxWidth / 2;
-  const end   = plat.endX   - margin - boxWidth / 2;
-  const span  = Math.max(0, end - start);
-  if (k <= 0 || span <= 0) return [];
-
-  // Even spacing (k points) with small jitter (±boxWidth/4) clamped inside [start, end]
-  const xs = [];
-  for (let i = 0; i < k; i++) {
-    const t = (k === 1) ? 0.5 : (i / (k - 1)); // 0..1
-    const base = start + t * span;
-    const jitter = (Math.random() - 0.5) * (boxWidth / 2);
-    const x = Math.min(end, Math.max(start, Math.round(base + jitter)));
-    xs.push(x);
-  }
-  return xs;
-}
-
-
 // --- camera/coord helpers ---
 
 // ---- WORLD-POSITION SINGLE SOURCE OF TRUTH (Canvas 4) ----
@@ -159,7 +110,47 @@ function generateGroundPlatforms(worldWidth, minHeight, maxHeight, numSections =
   return platforms;
 }
 
-// ========== REPLACE YOUR generateMushroom WITH THIS ==========
+// ------- Small helpers (fixed) -------
+
+// Are platforms ready?
+function platformsReady() {
+  return Array.isArray(groundPlatforms) && groundPlatforms.length > 0;
+}
+
+// Find the ground platform under a world-X  (stop using window.*)
+function groundAtX(x) {
+  if (!Array.isArray(groundPlatforms)) return null;
+  return groundPlatforms.find(p => x >= p.startX && x <= p.endX) || null;
+}
+
+// Pick a world-X inside a platform keeping gaps from prior picks
+function pickXInPlatform(plat, pickedXs, minGap = 35, maxGap = Infinity) {
+  if (!plat) return null;
+  const span = Math.max(plat.endX - plat.startX, 0);
+  if (span < 60) return null;
+
+  for (let t = 0; t < 20; t++) {
+    const margin = 30;
+    const x = Math.floor(plat.startX + margin + Math.random() * Math.max(1, span - 2 * margin));
+    // require only minimum gap (the <= maxGap condition was over-restrictive)
+    if (pickedXs.every(px => Math.abs(px - x) >= minGap)) {
+      return x;
+    }
+  }
+  return Math.floor((plat.startX + plat.endX) / 2);
+}
+
+// Get ground Y at character position (world-X)  (stop using window.*)
+function getGroundY(xPosition) {
+  if (!Array.isArray(groundPlatforms)) return canvas.height;
+  for (let platform of groundPlatforms) {
+    if (xPosition >= platform.startX && xPosition <= platform.endX) {
+      return platform.y; // platform.y is the TOP surface
+    }
+  }
+  return canvas.height;
+}
+
 async function generateMushroom(count = 5, colorWhitelist = null) {
   const plats = groundPlatforms || [];
   if (!plats.length) return [];
@@ -212,7 +203,6 @@ async function generateMushroom(count = 5, colorWhitelist = null) {
   }
   return items;
 }
-
 
 
 // Generate new platforms each time with varied height
