@@ -46,46 +46,54 @@ let forestImage = new Image(); forestImage.src = 'TexturePack/forest.png';
 let caveImage = new Image();   caveImage.src = 'TexturePack/cave.png';
 let lavaImage = new Image();   lavaImage.src = 'TexturePack/lava.png';
 
-// ------- Small helpers (fixed) -------
+// ========== SIMPLE, PLATFORM-RELATIVE PLACEMENT HELPERS ==========
 
-// Are platforms ready?
-function platformsReady() {
-  return Array.isArray(groundPlatforms) && groundPlatforms.length > 0;
+// Filter to usable platforms (wide enough to hold a box with margins)
+function usablePlatforms(platforms, boxWidth = 50, margin = 30) {
+  const minWidth = boxWidth + margin * 2;
+  const list = (Array.isArray(platforms) ? platforms : []).filter(p => (p.endX - p.startX) >= minWidth);
+  return (list.length > 0 ? list : (platforms || [])); // fallback to all if none pass width check
 }
 
-// Find the ground platform under a world-X  (stop using window.*)
-function groundAtX(x) {
-  if (!Array.isArray(groundPlatforms)) return null;
-  return groundPlatforms.find(p => x >= p.startX && x <= p.endX) || null;
+// Spread 'count' mushrooms across platforms roughly proportionally to width
+function allocateCountsOverPlatforms(count, platforms) {
+  if (!Array.isArray(platforms) || platforms.length === 0) return [];
+  const widths = platforms.map(p => Math.max(0, p.endX - p.startX));
+  const total = widths.reduce((a, b) => a + b, 0) || 1;
+
+  const raw = widths.map(w => (w / total) * count);
+  const base = raw.map(Math.floor);
+  let remaining = count - base.reduce((a, b) => a + b, 0);
+
+  // Give the remainder to platforms with largest fractional parts
+  const fracIdx = raw
+    .map((v, i) => ({ i, frac: v - Math.floor(v) }))
+    .sort((a, b) => b.frac - a.frac);
+
+  for (let k = 0; k < remaining; k++) base[fracIdx[k % fracIdx.length].i]++;
+
+  return base;
 }
 
-// Pick a world-X inside a platform keeping gaps from prior picks
-function pickXInPlatform(plat, pickedXs, minGap = 35, maxGap = Infinity) {
-  if (!plat) return null;
-  const span = Math.max(plat.endX - plat.startX, 0);
-  if (span < 60) return null;
+// Evenly space k X-positions on a platform with a touch of jitter (no overlap)
+function sampleXsForPlatform(plat, k, boxWidth = 50, margin = 30) {
+  const start = plat.startX + margin + boxWidth / 2;
+  const end   = plat.endX   - margin - boxWidth / 2;
+  const span  = Math.max(0, end - start);
+  if (k <= 0 || span <= 0) return [];
 
-  for (let t = 0; t < 20; t++) {
-    const margin = 30;
-    const x = Math.floor(plat.startX + margin + Math.random() * Math.max(1, span - 2 * margin));
-    // require only minimum gap (the <= maxGap condition was over-restrictive)
-    if (pickedXs.every(px => Math.abs(px - x) >= minGap)) {
-      return x;
-    }
+  // Even spacing (k points) with small jitter (±boxWidth/4) clamped inside [start, end]
+  const xs = [];
+  for (let i = 0; i < k; i++) {
+    const t = (k === 1) ? 0.5 : (i / (k - 1)); // 0..1
+    const base = start + t * span;
+    const jitter = (Math.random() - 0.5) * (boxWidth / 2);
+    const x = Math.min(end, Math.max(start, Math.round(base + jitter)));
+    xs.push(x);
   }
-  return Math.floor((plat.startX + plat.endX) / 2);
+  return xs;
 }
 
-// Get ground Y at character position (world-X)  (stop using window.*)
-function getGroundY(xPosition) {
-  if (!Array.isArray(groundPlatforms)) return canvas.height;
-  for (let platform of groundPlatforms) {
-    if (xPosition >= platform.startX && xPosition <= platform.endX) {
-      return platform.y; // platform.y is the TOP surface
-    }
-  }
-  return canvas.height;
-}
 
 // --- camera/coord helpers ---
 
@@ -151,16 +159,18 @@ function generateGroundPlatforms(worldWidth, minHeight, maxHeight, numSections =
   return platforms;
 }
 
+// ========== REPLACE YOUR generateMushroom WITH THIS ==========
+
 async function generateMushroom(count = 5, colorWhitelist = null) {
-  // Pool
-  let pool = window.mushroomCatalogRows;
+  // ----- 1) choose rows -----
+  let pool = window.mushroomCatalogRows || [];
   if (Array.isArray(colorWhitelist) && colorWhitelist.length > 0) {
     const set = new Set(colorWhitelist.map(c => String(c).toLowerCase()));
     pool = pool.filter(r => set.has(r.color));
   }
   if (pool.length === 0) return [];
 
-  // Sample without replacement
+  // sample without replacement
   const chosen = [];
   const tmp = pool.slice();
   for (let i = 0; i < count && tmp.length > 0; i++) {
@@ -168,16 +178,7 @@ async function generateMushroom(count = 5, colorWhitelist = null) {
     chosen.push(tmp.splice(j, 1)[0]);
   }
 
-  // Loader (only what we need)
-  const loadImageOnce = (filename) => new Promise((resolve, reject) => {
-    const img = new Image();
-    const timer = setTimeout(() => { img.src = ''; reject(new Error('timeout')); }, 5000);
-    img.onload = () => { clearTimeout(timer); resolve(img); };
-    img.onerror = () => { clearTimeout(timer); reject(new Error('load error')); };
-    img.src = encodeURI(filename);
-  });
-
-  // Normalize path
+  // ----- 2) simple path normalizer & loader -----
   const fixPath = (filename) => {
     if (!filename) return '';
     if (/^https?:\/\//i.test(filename) || /^texturepack\/mushroom_pack\//i.test(filename)) return filename;
@@ -186,66 +187,53 @@ async function generateMushroom(count = 5, colorWhitelist = null) {
     return filename;
   };
 
-  const platforms = groundPlatforms;
+  const loadImageOnce = (filename) => new Promise((resolve, reject) => {
+    const img = new Image();
+    const timer = setTimeout(() => { img.src = ''; reject(new Error('timeout')); }, 5000);
+    img.onload = () => { clearTimeout(timer); resolve(img); };
+    img.onerror = () => { clearTimeout(timer); reject(new Error('load error')); };
+    img.src = encodeURI(filename);
+  });
 
-  // Distribute across platforms
-  const platOrder = [];
-  for (let i = 0; i < count; i++) {
-    const idx = Math.floor(i * platforms.length / count);
-    platOrder.push(platforms[Math.min(idx, platforms.length - 1)]);
-  }
+  // ----- 3) platform-relative layout (ONLY depends on groundPlatforms) -----
+  const plats = usablePlatforms(groundPlatforms, BOX_W, 30);
+  if (!plats.length) return [];
 
-  const pickedXs = [];
+  // Distribute counts over platforms
+  const perPlat = allocateCountsOverPlatforms(chosen.length, plats);
+
+  // Precompute X slots per platform
+  const platXs = plats.map((p, idx) => sampleXsForPlatform(p, perPlat[idx], BOX_W, 30));
+
+  // Optional vertical clearance above the ground surface (0 = touching ground)
+  const BOX_CLEARANCE = 0;
+
   const items = [];
+  let rowIdx = 0;
 
-  await Promise.all(chosen.map(async (r, i) => {
-    try {
+  for (let pi = 0; pi < plats.length; pi++) {
+    const p = plats[pi];
+    const xs = platXs[pi];
+
+    for (let xi = 0; xi < xs.length; xi++) {
+      if (rowIdx >= chosen.length) break;
+
+      const r = chosen[rowIdx++];
       const filename = fixPath(r.filename);
-      const img = await loadImageOnce(filename);
 
-      // choose usable platform
-      let plat = platOrder[i];
-      if (!plat || (plat.endX - plat.startX) < 80) {
-        plat = platforms.find(p => (p.endX - p.startX) >= 80) || platforms[0];
-      }
+      // Load image (allow failure to skip this row cleanly)
+      let img = null;
+      try { img = await loadImageOnce(filename); }
+      catch (e) { console.warn('[generateMushroom] image load failed:', filename, e.message); continue; }
 
-      // choose X inside platform, avoid overlap
-      let xWorld;
-      if (i < 3 && typeof character !== 'undefined' && typeof character.worldX === 'number') {
-        const viewLeft  = Math.max(0, cameraOffset);
-        const viewRight = Math.min(worldWidth, cameraOffset + canvas.width);
-        const clampedLeft  = Math.max(plat.startX, viewLeft + 40);
-        const clampedRight = Math.min(plat.endX,   viewRight - 40);
-        if (clampedRight - clampedLeft >= 80) {
-          xWorld = Math.floor(clampedLeft + Math.random() * (clampedRight - clampedLeft));
-        }
-      }
-      if (xWorld == null) xWorld = pickXInPlatform(plat, pickedXs, 35, 120);
-      if (xWorld == null) {
-        for (const p2 of platforms) {
-          xWorld = pickXInPlatform(p2, pickedXs, 35, 120);
-          if (xWorld != null) { plat = p2; break; }
-        }
-      }
-      if (xWorld == null) xWorld = Math.round((plat.startX + plat.endX) / 2);
-      pickedXs.push(xWorld);
-
-      // 👇 Mys-box Y from the *actual ground platform* under xWorld
-      const gPlat = groundAtX(xWorld);
-      console.log(gPlat)
-      const platformY = gPlat ? gPlat.y : canvas.height;
-
-      // Choose how high the box should float above the ground.
-      // 0   => sits on ground (touching)
-      // 50  => floats 50px above ground
-      const BOX_CLEARANCE = 0;  // tweak to 50 if you want floating boxes
-
-      const boxBottomY = platformY - BOX_CLEARANCE;   // ABOVE ground => subtract
-      const boxTopY    = boxBottomY - BOX_H;
+      // Y is strictly relative to this platform's top (p.y)
+      const platformTopY = p.y;                // platform top surface in canvas coords
+      const boxBottomY   = platformTopY - BOX_CLEARANCE;
+      const boxTopY      = boxBottomY - BOX_H; // box sits on/above the platform
 
       items.push({
-        x: xWorld,                 // WORLD coordinate
-        y: boxTopY,                // TOP of box
+        x: xs[xi],                  // WORLD X (center of the box)
+        y: boxTopY,                 // TOP of the box
         type: 0,
         value: r.value,
         isVisible: false,
@@ -255,16 +243,14 @@ async function generateMushroom(count = 5, colorWhitelist = null) {
         color: r.color,
         imagefilename: filename,
         image: img,
-        groundPlatformIndex: gPlat ? groundPlatforms.indexOf(gPlat) : -1
+        groundPlatformIndex: groundPlatforms.indexOf(p)
       });
-
-    } catch (e) {
-      console.warn('[generateMushroom] Failed image', r.filename, e.message);
     }
-  }));
+  }
 
   return items;
 }
+
 
 // Generate new platforms each time with varied height
 let groundPlatforms = generateGroundPlatforms(worldWidth, 200, 400);
