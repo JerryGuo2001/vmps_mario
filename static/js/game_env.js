@@ -46,21 +46,21 @@ let forestImage = new Image(); forestImage.src = 'TexturePack/forest.png';
 let caveImage = new Image();   caveImage.src = 'TexturePack/cave.png';
 let lavaImage = new Image();   lavaImage.src = 'TexturePack/lava.png';
 
-// ------- Small helpers -------
+// ------- Small helpers (fixed) -------
 
 // Are platforms ready?
 function platformsReady() {
-  return Array.isArray(window.groundPlatforms) && window.groundPlatforms.length > 0;
+  return Array.isArray(groundPlatforms) && groundPlatforms.length > 0;
 }
 
-// Find the ground platform under a world-X
+// Find the ground platform under a world-X  (stop using window.*)
 function groundAtX(x) {
-  if (!Array.isArray(window.groundPlatforms)) return null;
-  return window.groundPlatforms.find(p => x >= p.startX && x <= p.endX) || null;
+  if (!Array.isArray(groundPlatforms)) return null;
+  return groundPlatforms.find(p => x >= p.startX && x <= p.endX) || null;
 }
 
 // Pick a world-X inside a platform keeping gaps from prior picks
-function pickXInPlatform(plat, pickedXs, minGap = 35, maxGap = 120) {
+function pickXInPlatform(plat, pickedXs, minGap = 35, maxGap = Infinity) {
   if (!plat) return null;
   const span = Math.max(plat.endX - plat.startX, 0);
   if (span < 60) return null;
@@ -68,11 +68,23 @@ function pickXInPlatform(plat, pickedXs, minGap = 35, maxGap = 120) {
   for (let t = 0; t < 20; t++) {
     const margin = 30;
     const x = Math.floor(plat.startX + margin + Math.random() * Math.max(1, span - 2 * margin));
-    if (pickedXs.every(px => Math.abs(px - x) >= minGap && Math.abs(px - x) <= (maxGap || Infinity))) {
+    // require only minimum gap (the <= maxGap condition was over-restrictive)
+    if (pickedXs.every(px => Math.abs(px - x) >= minGap)) {
       return x;
     }
   }
   return Math.floor((plat.startX + plat.endX) / 2);
+}
+
+// Get ground Y at character position (world-X)  (stop using window.*)
+function getGroundY(xPosition) {
+  if (!Array.isArray(groundPlatforms)) return canvas.height;
+  for (let platform of groundPlatforms) {
+    if (xPosition >= platform.startX && xPosition <= platform.endX) {
+      return platform.y; // platform.y is the TOP surface
+    }
+  }
+  return canvas.height;
 }
 
 // --- camera/coord helpers ---
@@ -218,26 +230,33 @@ async function generateMushroom(count = 5, colorWhitelist = null) {
       if (xWorld == null) xWorld = Math.round((plat.startX + plat.endX) / 2);
       pickedXs.push(xWorld);
 
-      // 👇 Mys-box Y from the *actual ground platform* under xWorld (box bottom 50px above platform)
+      // 👇 Mys-box Y from the *actual ground platform* under xWorld
       const gPlat = groundAtX(xWorld);
-      const platformY = gPlat.y
-      const boxBottomY = platformY + 50;
-      const boxTopY = boxBottomY - BOX_H;
+      const platformY = gPlat ? gPlat.y : canvas.height;
+
+      // Choose how high the box should float above the ground.
+      // 0   => sits on ground (touching)
+      // 50  => floats 50px above ground
+      const BOX_CLEARANCE = 0;  // tweak to 50 if you want floating boxes
+
+      const boxBottomY = platformY - BOX_CLEARANCE;   // ABOVE ground => subtract
+      const boxTopY    = boxBottomY - BOX_H;
 
       items.push({
         x: xWorld,                 // WORLD coordinate
-        y: boxTopY,                // TOP of box; mushroom draws above it
+        y: boxTopY,                // TOP of box
         type: 0,
         value: r.value,
-        isVisible: false,          // hidden until head-bump
+        isVisible: false,
         growthFactor: 0,
         growthSpeed: 0.05,
         growthComplete: false,
         color: r.color,
         imagefilename: filename,
         image: img,
-        groundPlatformIndex: gPlat ? window.groundPlatforms.indexOf(gPlat) : -1
+        groundPlatformIndex: gPlat ? groundPlatforms.indexOf(gPlat) : -1
       });
+
     } catch (e) {
       console.warn('[generateMushroom] Failed image', r.filename, e.message);
     }
@@ -251,16 +270,6 @@ let groundPlatforms = generateGroundPlatforms(worldWidth, 200, 400);
 // Initial spawn
 let mushrooms = [];
 generateMushroom(5).then(ms => { mushrooms = ms; }).catch(err => console.warn('[init mushrooms]', err));
-
-// Get ground Y at character position (world-X)
-function getGroundY(xPosition) {
-  for (let platform of groundPlatforms) {
-    if (xPosition >= platform.startX && xPosition <= platform.endX) {
-      return platform.y;
-    }
-  }
-  return canvas.height;
-}
 
 function drawBackground_canvas4() {
   let Imagetouse;
