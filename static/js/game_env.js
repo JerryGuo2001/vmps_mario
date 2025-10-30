@@ -232,6 +232,7 @@ async function generateMushroom(count = 5, colorWhitelist = null) {
 
       // 👇 Mys-box Y from the *actual ground platform* under xWorld
       const gPlat = groundAtX(xWorld);
+      console.log(gPlat)
       const platformY = gPlat ? gPlat.y : canvas.height;
 
       // Choose how high the box should float above the ground.
