@@ -5,6 +5,151 @@ let memory_awaitingAnswer = false;
 let memory_chosenMushroom = null;
 let memory_totalQuestions = 5;
 
+//Preload mushroom pairs, get the mushroom that the participant actually saw in the last phase
+// Globals the memory phase expects
+let aMushrooms = [];
+let bMushrooms = [];
+
+// --- Utility: simple shuffle ---
+function _shuffle(arr) {
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = (Math.random() * (i + 1)) | 0;
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+  return arr;
+}
+
+// --- Normalize a mushroom row/object to a consistent shape used by memory UI ---
+function _normalizeMush(row) {
+  if (!row) return null;
+  // Prefer existing fields; derive name from filename if missing
+  const imagefilename = row.imagefilename || row.filename || row.image || '';
+  let name = row.name || (typeof imagefilename === 'string' ? imagefilename.replace(/^.*[\\/]/, '').replace(/\.[^.]+$/, '') : 'mushroom');
+  return {
+    name,
+    imagefilename,      // Memory UI will do: `TexturePack/mushroom_pack/${imagefilename}`
+    value: row.value ?? 0
+  };
+}
+
+// --- Get unique learned mushrooms from prior phase (by imagefilename) ---
+function _getLearnedPool() {
+  const seen = Array.isArray(window.learnedMushrooms) ? window.learnedMushrooms : [];
+  const uniq = [];
+  const seenFilenames = new Set();
+  for (const r of seen) {
+    const n = _normalizeMush(r);
+    if (!n || !n.imagefilename) continue;
+    const key = String(n.imagefilename);
+    if (!seenFilenames.has(key)) {
+      seenFilenames.add(key);
+      uniq.push(n);
+    }
+  }
+  return uniq;
+}
+
+// --- Fallback pool from catalog, excluding already chosen filenames ---
+function _getFallbackPool(excludeSet) {
+  const pool = Array.isArray(window.mushroomCatalogRows) ? window.mushroomCatalogRows : [];
+  const out = [];
+  for (const r of pool) {
+    const n = _normalizeMush(r);
+    if (!n || !n.imagefilename) continue;
+    const key = String(n.imagefilename);
+    if (excludeSet && excludeSet.has(key)) continue;
+    out.push(n);
+  }
+  return out;
+}
+
+// --- Build N pairs (a[i], b[i]) from a pool; reuse items if pool is small ---
+function _buildPairs(pool, nPairs) {
+  const pairs = [];
+  // If we have plenty, avoid reuse within a pair set; else allow reuse across trials
+  if (pool.length >= 2 * nPairs) {
+    const copy = _shuffle(pool.slice());
+    for (let i = 0; i < nPairs; i++) {
+      const left  = copy[i * 2];
+      const right = copy[i * 2 + 1];
+      pairs.push([left, right]);
+    }
+  } else if (pool.length >= 2) {
+    for (let i = 0; i < nPairs; i++) {
+      const a = pool[(Math.random() * pool.length) | 0];
+      let b = pool[(Math.random() * pool.length) | 0];
+      // Ensure left != right; retry a few times
+      let guard = 10;
+      while (guard-- > 0 && b.imagefilename === a.imagefilename) {
+        b = pool[(Math.random() * pool.length) | 0];
+      }
+      // If still same (tiny chance), just pick next index cyclically
+      if (b.imagefilename === a.imagefilename) {
+        const idx = pool.findIndex(x => x.imagefilename !== a.imagefilename);
+        if (idx >= 0) b = pool[idx];
+      }
+      pairs.push([a, b]);
+    }
+  } else {
+    // pool too small (0 or 1) — caller must pad
+  }
+  return pairs;
+}
+
+// =============== MAIN: preload pairs for memory ===============
+async function preloadMushroomPairs() {
+  const N = memory_totalQuestions || 5;
+
+  // 1) Start from learned pool
+  const learned = _getLearnedPool();
+
+  // 2) If learned < 2, pad with catalog (exclude duplicates)
+  const exclude = new Set(learned.map(m => String(m.imagefilename)));
+  const fallback = _getFallbackPool(exclude);
+
+  let pool = learned.slice();
+  // Ensure we have at least 2 items
+  while (pool.length < 2 && fallback.length > 0) {
+    pool.push(fallback.pop());
+  }
+
+  // 3) Build pairs; if still short, draw more from fallback
+  let pairs = _buildPairs(pool, N);
+
+  // If we failed to make N pairs (e.g., pool too tiny), pad using fallback
+  for (let i = pairs.length; i < N; i++) {
+    // need two distinct
+    if (fallback.length < 2) {
+      // refill fallback (avoid infinite loop; just reuse full catalog if needed)
+      const more = _getFallbackPool();
+      _shuffle(more);
+      fallback.push(...more);
+    }
+    // draw two distinct from fallback
+    const a = fallback.pop();
+    // find b != a
+    let b = null, guard = 50;
+    while (guard-- > 0 && fallback.length > 0) {
+      const cand = fallback.pop();
+      if (cand.imagefilename !== a.imagefilename) { b = cand; break; }
+    }
+    if (!b) {
+      // emergency: use 'a' and any from catalog with different filename
+      const alt = _getFallbackPool(new Set([a.imagefilename]));
+      b = alt.length ? alt[(Math.random()*alt.length)|0] : a;
+    }
+    pairs.push([a, b]);
+  }
+
+  // 4) Write to globals the memory phase uses
+  aMushrooms = [];
+  bMushrooms = [];
+  for (let i = 0; i < N; i++) {
+    const [a, b] = pairs[i];
+    aMushrooms.push(a);
+    bMushrooms.push(b);
+  }
+}
 
 
 async function Memory_initGame() {
