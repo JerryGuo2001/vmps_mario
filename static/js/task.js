@@ -5,6 +5,7 @@ window.onload = () => {
   if (w) w.style.display = 'block';
 };
 
+// --- REPLACE startWithID() ---
 function startWithID() {
   const idInput = document.getElementById('participantIdInput').value.trim();
   if (!idInput) {
@@ -13,21 +14,242 @@ function startWithID() {
   }
   participantData.id = idInput;
   participantData.startTime = performance.now(); // ✅ set here
-  initTaskOOO(); // start OOO first
+
+  // Show OOO instructions first (if configured); otherwise start OOO immediately.
+  if (typeof showPhaseInstructions === 'function' && INSTR_FOLDERS && INSTR_FOLDERS.ooo) {
+    showPhaseInstructions('ooo', () => {
+      initTaskOOO(); // start OOO after instructions
+    });
+  } else {
+    initTaskOOO(); // fallback
+  }
 }
 
+
+// ===================== NEW: Instruction system config =====================
+// Base folder that contains per-phase subfolders.
+const INSTR_BASE = 'TexturePack/instructions';
+
+// Subfolder names per phase (relative to INSTR_BASE)
+const INSTR_FOLDERS = {
+  explore: 'explore_phase',
+  memory: 'memory_phase',
+  ooo: 'ooo_phase', 
+  // You can add more, e.g. ooo: 'ooo_phase'
+};
+
+// File naming convention: numbered PNG files "1.png", "2.png", ... "N.png"
+const INSTR_MAX_SLIDES = 50; // safety cap
+const INSTR_EXT = 'png';
+
+// Modal styles (inline so you don't need extra CSS files)
+const INSTR_STYLE = `
+  #instr-overlay {
+    position: fixed; inset: 0; background: rgba(0,0,0,0.65);
+    display: flex; align-items: center; justify-content: center; z-index: 99999;
+  }
+  #instr-card {
+    width: min(900px, 92vw);
+    background: #121212; color: #EEE;
+    border-radius: 12px; box-shadow: 0 12px 40px rgba(0,0,0,0.35);
+    overflow: hidden; display: flex; flex-direction: column;
+  }
+  #instr-header {
+    padding: 12px 16px; font-weight: 600; border-bottom: 1px solid rgba(255,255,255,0.08);
+    background: #181818;
+  }
+  #instr-body {
+    min-height: 420px; max-height: 70vh; display: flex; align-items: center; justify-content: center;
+    background: #0e0e0e;
+  }
+  #instr-body img {
+    max-width: 100%; max-height: 70vh; object-fit: contain; display: block;
+  }
+  #instr-default {
+    padding: 28px; text-align: center; line-height: 1.6; font-size: 18px;
+  }
+  #instr-footer {
+    padding: 12px 16px; display: flex; gap: 10px; justify-content: space-between; align-items: center;
+    background: #181818; border-top: 1px solid rgba(255,255,255,0.08);
+  }
+  #instr-left, #instr-right {
+    display: flex; gap: 10px; align-items: center;
+  }
+  .instr-btn {
+    appearance: none; border: none; border-radius: 10px; padding: 10px 14px; cursor: pointer;
+    background: #2a2a2a; color: #fff; font-weight: 600;
+  }
+  .instr-btn[disabled] { opacity: 0.4; cursor: default; }
+  .instr-btn.primary { background: #3a6df0; }
+  .instr-counter { opacity: 0.7; font-size: 14px; }
+`;
+
+// Create the overlay root once when needed
+function ensureInstrOverlayRoot() {
+  if (document.getElementById('instr-overlay')) return;
+
+  const style = document.createElement('style');
+  style.textContent = INSTR_STYLE;
+  document.head.appendChild(style);
+
+  const overlay = document.createElement('div');
+  overlay.id = 'instr-overlay';
+  overlay.style.display = 'none';
+
+  overlay.innerHTML = `
+    <div id="instr-card">
+      <div id="instr-header">Instructions</div>
+      <div id="instr-body"></div>
+      <div id="instr-footer">
+        <div id="instr-left">
+          <button id="instr-prev" class="instr-btn" aria-label="Previous slide">◀ Prev</button>
+          <span id="instr-counter" class="instr-counter"></span>
+        </div>
+        <div id="instr-right">
+          <button id="instr-next" class="instr-btn primary" aria-label="Next slide">Next ▶</button>
+        </div>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+}
+
+// Try loading numbered images 1.png, 2.png, ... until a miss occurs
+function discoverInstructionSlides(folderUrl) {
+  // Returns a Promise that resolves to an array of URLs (may be empty)
+  const tries = [];
+  for (let i = 1; i <= INSTR_MAX_SLIDES; i++) {
+    const url = `${folderUrl}/${i}.${INSTR_EXT}`;
+    tries.push(new Promise((resolve) => {
+      const img = new Image();
+      img.onload = () => resolve(url);
+      img.onerror = () => resolve(null);
+      img.src = url + `?v=${Date.now()}`; // cache-bust to avoid stale 404s while iterating dev
+    }));
+  }
+  return Promise.all(tries).then(results => results.filter(Boolean));
+}
+
+function showPhaseInstructions(phaseKey, onDone) {
+  const sub = INSTR_FOLDERS[phaseKey];
+  const folderUrl = `${INSTR_BASE}/${sub}`;
+  ensureInstrOverlayRoot();
+
+  // Lock keys used by the game while overlay is visible
+  let overlayActive = true;
+  const keyBlocker = (e) => {
+    // Prevent arrow keys from scrolling page
+    if (['ArrowLeft','ArrowRight',' '].includes(e.key)) e.preventDefault();
+    // Stop these from reaching any global handlers
+    e.stopImmediatePropagation();
+  };
+
+  const overlay = document.getElementById('instr-overlay');
+  const body = document.getElementById('instr-body');
+  const header = document.getElementById('instr-header');
+  const prevBtn = document.getElementById('instr-prev');
+  const nextBtn = document.getElementById('instr-next');
+  const counter = document.getElementById('instr-counter');
+
+  header.textContent = 'Instructions';
+
+  let slides = [];
+  let idx = 0;
+
+  function render() {
+    body.innerHTML = '';
+    if (slides.length === 0) {
+      // default page
+      const box = document.createElement('div');
+      box.id = 'instr-default';
+      box.innerHTML = `
+        <p>No slides found in <code>${folderUrl}/</code>.</p>
+        <p>Click “Next” to start the next phase.</p>
+      `;
+      body.appendChild(box);
+      prevBtn.disabled = true;
+      counter.textContent = '';
+      nextBtn.textContent = 'Start';
+      return;
+    }
+
+    const img = document.createElement('img');
+    img.alt = `Instruction slide ${idx + 1}`;
+    img.src = slides[idx];
+    body.appendChild(img);
+
+    prevBtn.disabled = (idx === 0);
+    const isLast = (idx === slides.length - 1);
+    nextBtn.textContent = isLast ? 'Start' : 'Next ▶';
+    counter.textContent = `Slide ${idx + 1} / ${slides.length}`;
+  }
+
+  function closeAndContinue() {
+    overlayActive = false;
+    window.removeEventListener('keydown', keyBlocker, true);
+    window.removeEventListener('keydown', keyNav, true);
+    overlay.style.display = 'none';
+    if (typeof onDone === 'function') onDone();
+  }
+
+  function keyNav(e) {
+    if (!overlayActive) return;
+    if (e.key === 'ArrowLeft') {
+      if (idx > 0) { idx--; render(); }
+      e.preventDefault();
+      e.stopImmediatePropagation();
+    } else if (e.key === 'ArrowRight' || e.key === ' ') {
+      // Next or Start
+      const isLast = (slides.length === 0) || (idx === slides.length - 1);
+      if (isLast) {
+        closeAndContinue();
+      } else {
+        idx++; render();
+      }
+      e.preventDefault();
+      e.stopImmediatePropagation();
+    }
+  }
+
+  prevBtn.onclick = () => { if (idx > 0) { idx--; render(); } };
+  nextBtn.onclick = () => {
+    const isLast = (slides.length === 0) || (idx === slides.length - 1);
+    if (isLast) closeAndContinue();
+    else { idx++; render(); }
+  };
+
+  // Show overlay and load slides
+  overlay.style.display = 'flex';
+  window.addEventListener('keydown', keyBlocker, true);
+  window.addEventListener('keydown', keyNav, true);
+
+  discoverInstructionSlides(folderUrl).then(urls => {
+    slides = urls;
+    render();
+  });
+}
+
+// =================== END NEW: Instruction system ===================
+
 function startExplore() {
-  const e = document.getElementById('explorephase');
-  if (e) e.style.display = 'block';
-  initGame();
+  // Show instructions for the explore phase first, then actually start the phase
+  showPhaseInstructions('explore', () => {
+    const e = document.getElementById('explorephase');
+    if (e) e.style.display = 'block';
+    initGame();
+  });
 }
 
 function startMemorry() {
+  // Hide explore UI first, then show memory instructions
   const e = document.getElementById('explorephase');
   if (e) e.style.display = 'none';
-  const m = document.getElementById('memoryphase');
-  if (m) m.style.display = 'block';
-  Memory_initGame();
+
+  showPhaseInstructions('memory', () => {
+    const m = document.getElementById('memoryphase');
+    if (m) m.style.display = 'block';
+    Memory_initGame();
+  });
 }
 
 // Complete Task
