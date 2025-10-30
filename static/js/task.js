@@ -19,6 +19,10 @@ function startWithID() {
   participantData.id = idInput;
   participantData.startTime = performance.now(); // ✅ set here
 
+  // ✅ Hide welcome immediately so instructions are the only thing visible
+  const w = document.getElementById('welcome');
+  if (w) w.style.display = 'none';
+
   // Show OOO instructions first (if configured); otherwise start OOO immediately.
   if (typeof showPhaseInstructions === 'function' && INSTR_FOLDERS && INSTR_FOLDERS.ooo) {
     showPhaseInstructions('ooo', () => {
