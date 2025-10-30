@@ -155,7 +155,6 @@ async function preloadMushroomPairs() {
 async function Memory_initGame() {
     // Load mushrooms
     await preloadMushroomPairs();
-    mushrooms = await generateMushroom(1);
 
     memory_currentQuestion = 0;
     memory_selectedSide = 'middle';
@@ -190,8 +189,8 @@ function showMushrooms() {
     const a = aMushrooms[memory_currentQuestion];
     const b = bMushrooms[memory_currentQuestion];
 
-    document.getElementById('leftMushroomImg').src = `TexturePack/mushroom_pack/${a.imagefilename}`;
-    document.getElementById('rightMushroomImg').src = `TexturePack/mushroom_pack/${b.imagefilename}`;
+    document.getElementById('leftMushroomImg').src = `TexturePack/mushroom_pack/images_balanced/${a.imagefilename}`;
+    document.getElementById('rightMushroomImg').src = `TexturePack/mushroom_pack/images_balanced/${b.imagefilename}`;
 
     memory_trialStartTime = performance.now();
 }
@@ -324,7 +323,7 @@ function showMemoryChoicePrompt(mushroom) {
     promptDiv.style.zIndex = '1000';
 
     const img = document.createElement('img');
-    img.src = `TexturePack/mushroom_pack/${mushroom.imagefilename}`;
+    img.src = `TexturePack/mushroom_pack/images_balanced/${mushroom.imagefilename}`;
     img.style.width = '80px';
     promptDiv.appendChild(img);
 
