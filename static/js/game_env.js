@@ -179,7 +179,7 @@ async function generateMushroom(count = 5, colorWhitelist = null) {
   }
 
   const BOX_CLEARANCE = 0;          // 0 = box sits on the platform top
-  const boxTopY = (p.y - BOX_CLEARANCE) - BOX_H;
+  const boxTopY = (p.y - BOX_CLEARANCE) - BOX_H-50;
 
   // 3) build items (no fancy loader—optional)
   const items = [];
