@@ -455,7 +455,7 @@ handleTextInteraction_canvas4()
 
 function drawBackground_canvas4() {
   let Imagetouse;
-  if (o == 'sky')       Imagetouse = skyImage;
+  if (env_deter == 'sky')       Imagetouse = skyImage;
   else if (env_deter == 'desert') Imagetouse = desertImage;
   else if (env_deter == 'ocean')  Imagetouse = oceanImage;
   else if (env_deter == 'forest') Imagetouse = forestImage;
