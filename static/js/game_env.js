@@ -18,6 +18,95 @@ let revealOnlyValue;
 let mushroomTrialIndex = 0;
 let mushroomDecisionStartTime = null;
 
+
+// ------------------ ROOM–COLOR STRUCTURE + HP THRESHOLD ------------------
+
+// Non-sky rooms we care about for color structure
+const NON_SKY_ROOMS = ['desert', 'ocean', 'forest', 'cave', 'lava'];
+
+/**
+ * ROOM_COLOR_MAP controls which colors are allowed in which non-sky rooms.
+ * 
+ * Requirements:
+ * - 5 colors belong to exactly one room (unique).
+ * - 1 color belongs to exactly 2 rooms.
+ * - 1 color belongs to exactly 3 rooms.
+ * - 1 color belongs to all 5 rooms.
+ *
+ * You can change this mapping as you like, as long as the pattern holds.
+ */
+const ROOM_COLOR_MAP = {
+  // 5 unique colors (each belongs to 1 room)
+  yellow:  ['desert'],   // only desert
+  cyan:    ['ocean'],    // only ocean
+  green:   ['forest'],   // only forest
+  magenta: ['cave'],     // only cave
+  red:     ['lava'],     // only lava
+
+  // 1 color shared by exactly 2 rooms
+  blue:    ['ocean', 'cave'],
+
+  // 1 color shared by exactly 3 rooms
+  white:   ['desert', 'forest', 'lava'],
+
+  // 1 color shared by all 5 rooms
+  black:   ['desert', 'ocean', 'forest', 'cave', 'lava']
+};
+
+/**
+ * Global per-room HP threshold:
+ * we set this after each generateMushroom call based on the mushrooms in that room.
+ * Used in handleTextInteraction_canvas4.
+ */
+let stageHpThreshold = 5;
+
+// ------------------ value / color helpers ------------------
+
+function getAllowedColorsForEnv(envName) {
+  if (!envName || envName === 'sky') return null; // sky handled separately
+
+  const allowed = [];
+  for (const [color, rooms] of Object.entries(ROOM_COLOR_MAP)) {
+    if (rooms.includes(envName)) {
+      allowed.push(color);
+    }
+  }
+  return allowed;
+}
+
+// parse value (supports 'reset' + numbers)
+function getNumericValue(v) {
+  if (v === 'reset' || v === null || v === undefined) return 0;
+  const n = Number(v);
+  return isNaN(n) ? 0 : n;
+}
+
+function isPositiveValue(v) {
+  const n = getNumericValue(v);
+  return n > 0;
+}
+
+function isToxicValue(v) {
+  if (v === 'reset') return true;
+  const n = getNumericValue(v);
+  return n < 0;
+}
+
+// random helpers
+function randInt(min, max) {
+  if (max < min) return min;
+  return Math.floor(Math.random() * (max - min + 1)) + min;
+}
+
+function pickRandomSubset(arr, k) {
+  const copy = arr.slice();
+  for (let i = copy.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [copy[i], copy[j]] = [copy[j], copy[i]];
+  }
+  return copy.slice(0, Math.min(k, copy.length));
+}
+
 // --- Box (platform block) size used everywhere ---
 const BOX_W = 50;
 const BOX_H = 50;
@@ -151,20 +240,92 @@ function getGroundY(xPosition) {
   return canvas.height;
 }
 
-async function generateMushroom(count = 5, colorWhitelist = null) {
+async function generateMushroom(count = 5) {
   const plats = groundPlatforms || [];
   if (!plats.length) return [];
 
-  // ---- sample rows (minimal) ----
-  let pool = (window.mushroomCatalogRows || []).slice();
-  if (Array.isArray(colorWhitelist) && colorWhitelist.length > 0) {
-    const set = new Set(colorWhitelist.map(c => String(c).toLowerCase()));
-    pool = pool.filter(r => set.has(r.color));
-  }
-  if (!pool.length) return [];
-  const chosen = pool.sort(() => Math.random() - 0.5).slice(0, count);
+  // ---- full catalog ----
+  let allRows = (window.mushroomCatalogRows || []).slice();
+  if (!allRows.length) return [];
 
-  // ---- helper: even X positions on a platform with margins ----
+  const env = (typeof env_deter !== 'undefined') ? env_deter : 'sky';
+
+  let chosenRows = [];
+
+  // -------- SKY ROOM: only positive mushrooms, no color restriction --------
+  if (env === 'sky') {
+    const positivePool = allRows.filter(r => isPositiveValue(r.value));
+    if (!positivePool.length) return [];
+    chosenRows = pickRandomSubset(positivePool, count);
+  } else {
+    // -------- NON-SKY ROOMS: use ROOM_COLOR_MAP structure --------
+    const allowedColors = getAllowedColorsForEnv(env);
+
+    let pool = allRows;
+    if (Array.isArray(allowedColors) && allowedColors.length > 0) {
+      const set = new Set(allowedColors.map(c => String(c).toLowerCase()));
+      pool = pool.filter(r => set.has(String(r.color).toLowerCase()));
+    }
+
+    // If somehow no rows for this env, fall back to full catalog
+    if (!pool.length) pool = allRows.slice();
+
+    const toxicPool    = pool.filter(r => isToxicValue(r.value));
+    const positivePool = pool.filter(r => isPositiveValue(r.value));
+    const neutralPool  = pool.filter(
+      r => !isToxicValue(r.value) && !isPositiveValue(r.value)
+    );
+
+    // At least 1 toxic, at most 3 toxic per round (if possible)
+    if (!toxicPool.length) {
+      // no toxic available → just random sample from pool
+      chosenRows = pickRandomSubset(pool, count);
+    } else {
+      const maxToxicPossible = Math.min(3, toxicPool.length, count);
+      const minToxicPossible = Math.min(1, maxToxicPossible);
+
+      const nToxic = randInt(minToxicPossible, maxToxicPossible);
+      const toxicChosen = pickRandomSubset(toxicPool, nToxic);
+
+      // non-toxic = positive + neutral
+      const nonToxicPool = pool.filter(
+        r => !toxicChosen.includes(r) && !isToxicValue(r.value)
+      );
+      const nNonToxicNeeded = count - toxicChosen.length;
+      const nonToxicChosen = pickRandomSubset(nonToxicPool, nNonToxicNeeded);
+
+      chosenRows = toxicChosen.concat(nonToxicChosen);
+
+      // if still fewer than count (not enough non-toxic), pad from remaining pool
+      if (chosenRows.length < count) {
+        const remaining = pool.filter(r => !chosenRows.includes(r));
+        const extra = pickRandomSubset(remaining, count - chosenRows.length);
+        chosenRows = chosenRows.concat(extra);
+      }
+    }
+  }
+
+  // If we somehow picked nothing, bail
+  if (!chosenRows.length) return [];
+
+  // -------- Compute HP threshold for this room --------
+  // Assume starting HP is current character.hp if available, else default to 2.
+  const baseHP = (typeof character !== 'undefined' && character && typeof character.hp === 'number')
+    ? character.hp
+    : 2;
+
+  const totalPositiveStamina = chosenRows.reduce((sum, r) => {
+    const val = getNumericValue(r.value);
+    return val > 0 ? sum + val : sum;
+  }, 0);
+
+  // Threshold = 50% of (baseHP + total positive stamina for this room)
+  // Example: base 2, positives 10 & 5 → (2 + 15) / 2 = 8.5
+  stageHpThreshold = 0.5 * (baseHP + totalPositiveStamina);
+
+  // -------- Layout logic: same as your original code below --------
+
+  // helper: even X positions on a platform with margins
   function xsOnPlatform(p, k, margin = 10) {
     const startX = p.startX + margin + BOX_W / 2;
     const endX   = p.endX   - margin - BOX_W / 2;
@@ -185,7 +346,7 @@ async function generateMushroom(count = 5, colorWhitelist = null) {
     return xs;
   }
 
-  // ---- helper: your specified 5-mushroom distribution patterns ----
+  // your specified 5-mushroom distribution patterns
   function allocationForFivePlatforms(nPlats) {
     switch (nPlats) {
       case 5: return [1,1,1,1,1];
@@ -195,24 +356,22 @@ async function generateMushroom(count = 5, colorWhitelist = null) {
       case 1: return [5];
       default: {
         // If more than 5 platforms exist, use first 5 with 1 each.
-        // If 0, handled above. This keeps it deterministic & simple.
         return new Array(Math.max(1, Math.min(5, nPlats))).fill(1);
       }
     }
   }
 
-  // If count != 5, fall back to a simple round-robin spread (keeps function robust)
+  // If count != 5, fall back to a simple round-robin spread
   function genericAllocation(nPlats, k) {
     const arr = new Array(nPlats).fill(0);
     for (let i = 0; i < k; i++) arr[i % nPlats]++;
     return arr;
   }
 
-  // ---- decide per-platform counts ----
+  // decide per-platform counts
   let perPlat;
   if (count === 5) {
     perPlat = allocationForFivePlatforms(plats.length);
-    // If there are more platforms than entries in the pattern, pad with zeros
     if (perPlat.length < plats.length) {
       perPlat = perPlat.concat(new Array(plats.length - perPlat.length).fill(0));
     }
@@ -220,23 +379,23 @@ async function generateMushroom(count = 5, colorWhitelist = null) {
     perPlat = genericAllocation(plats.length, count);
   }
 
-  // ---- build items by platform ----
-  const BOX_CLEARANCE = 0;                 // keep your behavior
+  // build items by platform
+  const BOX_CLEARANCE = 0;
   const items = [];
   let rowIdx = 0;
 
-  for (let pi = 0; pi < plats.length && rowIdx < chosen.length; pi++) {
+  for (let pi = 0; pi < plats.length && rowIdx < chosenRows.length; pi++) {
     const p = plats[pi];
     const k = perPlat[pi] || 0;
     if (k <= 0) continue;
 
     const xs = xsOnPlatform(p, k, 10);
-    const boxTopY = (p.y - BOX_CLEARANCE) - BOX_H - 75; // ← preserve your offset
+    const boxTopY = (p.y - BOX_CLEARANCE) - BOX_H - 75;
 
-    for (let j = 0; j < xs.length && rowIdx < chosen.length; j++) {
-      const r = chosen[rowIdx++];
+    for (let j = 0; j < xs.length && rowIdx < chosenRows.length; j++) {
+      const r = chosenRows[rowIdx++];
       const img = new Image();
-      img.src = r.filename;
+      img.src = r.filename;  // assumes your loader sets r.filename
 
       items.push({
         x: xs[j],               // WORLD X (center)
@@ -250,18 +409,18 @@ async function generateMushroom(count = 5, colorWhitelist = null) {
         color: r.color,
         imagefilename: r.filename,
         image: img,
-        groundPlatformIndex: pi // platform index
+        groundPlatformIndex: pi
       });
     }
   }
 
   // If somehow not all assigned (e.g., fewer platforms than needed), place the rest on platform 0
-  while (rowIdx < chosen.length && plats.length > 0) {
+  while (rowIdx < chosenRows.length && plats.length > 0) {
     const p0 = plats[0];
     const x0 = Math.round((p0.startX + p0.endX) / 2);
     const y0 = (p0.y - BOX_CLEARANCE) - BOX_H - 75;
 
-    const r = chosen[rowIdx++];
+    const r = chosenRows[rowIdx++];
     const img = new Image();
     img.src = r.filename;
 
@@ -286,15 +445,17 @@ async function generateMushroom(count = 5, colorWhitelist = null) {
 
 
 
+
 // Generate new platforms each time with varied height
 let groundPlatforms = generateGroundPlatforms(worldWidth, 200, 400);
 // Initial spawn
 let mushrooms = [];
 generateMushroom(5).then(ms => { mushrooms = ms; }).catch(err => console.warn('[init mushrooms]', err));
+handleTextInteraction_canvas4()
 
 function drawBackground_canvas4() {
   let Imagetouse;
-  if (env_deter == 'sky')       Imagetouse = skyImage;
+  if (o == 'sky')       Imagetouse = skyImage;
   else if (env_deter == 'desert') Imagetouse = desertImage;
   else if (env_deter == 'ocean')  Imagetouse = oceanImage;
   else if (env_deter == 'forest') Imagetouse = forestImage;
@@ -349,36 +510,42 @@ function handleCollisions_canvas4() {
 
 // **Handle text interaction logic:**
 async function handleTextInteraction_canvas4() {
-  if (character.hp <= 5) {
-    ctx.fillStyle = '#000';
-    ctx.font = '16px Arial';
-    const text = 'Collect Half of Stamina to Proceed';
+  // fallback to 5 if stageHpThreshold hasn't been set yet
+  const neededHP = (typeof stageHpThreshold === 'number' && !isNaN(stageHpThreshold))
+    ? stageHpThreshold
+    : 5;
+
+  ctx.fillStyle = '#000';
+  ctx.font = '16px Arial';
+
+  if (character.hp < neededHP) {
+    const text = `Collect stamina to reach at least ${neededHP.toFixed(1)} HP to proceed`;
     const textWidth = ctx.measureText(text).width;
     const xPos = (canvas.width - textWidth) / 2;
     const yPos = canvas.height / 4;
     ctx.fillText(text, xPos, yPos);
   } else {
-    ctx.fillStyle = '#000';
-    ctx.font = '16px Arial';
-    const text = 'Press P to Proceed';
+    const text = `Press P to proceed (HP ≥ ${neededHP.toFixed(1)})`;
     const textWidth = ctx.measureText(text).width;
     const xPos = (canvas.width - textWidth) / 2;
     const yPos = canvas.height / 4;
     ctx.fillText(text, xPos, yPos);
 
-    if (keys['p'] && character.hp > 5) {
+    if (keys['p']) {
       currentCanvas = 1;
-      character.hp = 2;
+      character.hp = 2;           // starting HP for next room
       currentQuestion += 1;
 
       groundPlatforms = generateGroundPlatforms(worldWidth, 200, 400);
       mushrooms = await generateMushroom(5);
+      handleTextInteraction_canvas4()
       console.log("Proceeding to next question: " + currentQuestion);
       roomChoiceStartTime = performance.now();
       doorsAssigned = false;
     }
   }
 }
+
 
 const boxImage = new Image();
 boxImage.src = 'TexturePack/box.jpg'; // Replace with the correct path to your box image
@@ -652,6 +819,7 @@ async function checkHP_canvas4() {
     character.y = respawn.y;
     cameraOffset = 0;
     mushrooms = await generateMushroom(5);
+    handleTextInteraction_canvas4()
   }
 }
 
