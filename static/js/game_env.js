@@ -993,9 +993,11 @@ function drawHP_canvas4() {
 // ======================= end game_env.js =======================
 
 
-console.log('Negatives now:',
-  mushroomCatalogRows.filter(r => typeof r.value === 'number' && r.value < 0).length
-);
-console.log('Example negative rows:',
-  mushroomCatalogRows.filter(r => typeof r.value === 'number' && r.value < 0).slice(0, 5)
-);
+const negatives = rows.filter(r => typeof r.value === 'number' && r.value < 0);
+console.log('[catalog value stats]', {
+  total: rows.length,
+  neg: negatives.length,
+  min: Math.min(...rows.map(r => typeof r.value === 'number' ? r.value : Infinity)),
+  max: Math.max(...rows.map(r => typeof r.value === 'number' ? r.value : -Infinity)),
+});
+console.log('[sample negative rows]', negatives.slice(0, 5));

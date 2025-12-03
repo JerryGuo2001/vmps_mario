@@ -69,33 +69,67 @@ function basenameFromPath(p) {
 }
 
 /* ==================== CATALOG LOADING ==================== */
+// Robust CSV line splitter that respects quotes and commas inside quotes
+function splitCSVLine(line, delim = ',') {
+  const out = [];
+  let current = '';
+  let inQuotes = false;
+
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+
+    if (ch === '"') {
+      // handle double-quote escapes: "" -> "
+      if (inQuotes && line[i + 1] === '"') {
+        current += '"';
+        i++;
+      } else {
+        inQuotes = !inQuotes;
+      }
+    } else if (ch === delim && !inQuotes) {
+      out.push(current);
+      current = '';
+    } else {
+      current += ch;
+    }
+  }
+
+  out.push(current);
+  return out.map(s => s.trim());
+}
+
+
 function parseValueCell(raw) {
   if (raw == null) return undefined;
 
   let s = String(raw).trim();
   if (!s) return undefined;
 
-  // Keep "reset" as a special token
   if (/^reset$/i.test(s)) return 'reset';
 
-  // Normalize a whole family of "minus-like" Unicode characters to ASCII '-'
-  // U+2212 (minus), U+2010–U+2015 (various dashes)
-  s = s.replace(/[\u2212\u2010\u2011\u2012\u2013\u2014\u2015]/g, '-');
+  s = s.replace(/\u2212/g, '-');          // normalize minus
+  s = s.replace(/[^0-9+\-\.]/g, '');      // keep only digits, +, -, .
 
-  // Grab the *first* signed number in the string (e.g. "-5", "+10", "HP -5", "−5.0 hearts")
-  const m = s.match(/[-+]?\d*\.?\d+/);
-  if (!m) return undefined;
+  if (!s) return undefined;
 
-  const n = Number(m[0]);
+  const n = Number(s);
   return Number.isFinite(n) ? n : undefined;
 }
+
 
 
 function parseCSVFlexible(text) {
   const lines = text.trim().split(/\r?\n/);
   if (lines.length <= 1) return [];
+
   const delim = lines[0].includes('\t') ? '\t' : ',';
-  const split = (line) => line.split(delim).map(s => s.trim());
+
+  // 🔴 OLD:
+  // const split = (line) => line.split(delim).map(s => s.trim());
+
+  // ✅ NEW (quote-aware):
+  const split = (line) => splitCSVLine(line, delim);
+
   const headerRaw = split(lines[0]);
 
   const alias = {
@@ -130,7 +164,7 @@ function parseCSVFlexible(text) {
     };
 
     if (typeof row.color === 'string') row.color = row.color.toLowerCase();
-    if (row.stem != null && row.stem !== '') row.stem = parseInt(row.stem, 10);
+    if (row.stem != null && row.stem !== '') row.stem = parseFloat(row.stem);
     if (row.cap  != null && row.cap  !== '') row.cap  = parseFloat(row.cap);
 
     rows.push(row);
