@@ -17,6 +17,7 @@ const maxDecisionTime = 5000; // 5 seconds in ms
 let revealOnlyValue;
 let mushroomTrialIndex = 0;
 let mushroomDecisionStartTime = null;
+let regeneratingMushrooms = false;  // NEW: prevent double-regeneration
 
 
 
