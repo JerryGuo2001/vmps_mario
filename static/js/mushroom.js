@@ -69,6 +69,26 @@ function basenameFromPath(p) {
 }
 
 /* ==================== CATALOG LOADING ==================== */
+function parseValueCell(raw) {
+  if (raw == null) return undefined;
+
+  let s = String(raw).trim();
+  if (!s) return undefined;
+
+  // Keep "reset" as a special token
+  if (/^reset$/i.test(s)) return 'reset';
+
+  // Normalize fancy minus signs to ASCII minus
+  s = s.replace(/\u2212/g, '-');  // U+2212 → '-'
+
+  // Remove everything except digits, +, -, decimal point
+  s = s.replace(/[^0-9+\-\.]/g, '');
+
+  if (!s) return undefined;
+
+  const n = Number(s);
+  return Number.isFinite(n) ? n : undefined;
+}
 
 function parseCSVFlexible(text) {
   const lines = text.trim().split(/\r?\n/);
@@ -79,10 +99,10 @@ function parseCSVFlexible(text) {
 
   const alias = {
     filename: ['image_relpath','image_webpath','image_filename_abs','filename','file','image','img','basename','name'],
-    color: ['color_name','color','colour','colour_name'],
-    stem: ['stem_width','stemwidth','stem_w','stem','stem-size','stemsize'],
-    cap: ['cap_roundness','cap','cap_r','caproundness','roundness'],
-    value: ['assigned_value','value','reward','val']
+    color:    ['color_name','color','colour','colour_name'],
+    stem:     ['stem_width','stemwidth','stem_w','stem','stem-size','stemsize'],
+    cap:      ['cap_roundness','cap','cap_r','caproundness','roundness'],
+    value:    ['assigned_value','value','reward','val']
   };
 
   const colIdx = {};
@@ -99,21 +119,24 @@ function parseCSVFlexible(text) {
   for (let li = 1; li < lines.length; li++) {
     const parts = split(lines[li]);
     if (parts.length === 1 && parts[0] === '') continue;
+
     const row = {
       filename: colIdx.filename >= 0 ? parts[colIdx.filename] : undefined,
       color   : colIdx.color    >= 0 ? parts[colIdx.color]    : undefined,
       stem    : colIdx.stem     >= 0 ? parts[colIdx.stem]     : undefined,
       cap     : colIdx.cap      >= 0 ? parts[colIdx.cap]      : undefined,
-      value   : colIdx.value    >= 0 ? parts[colIdx.value]    : undefined,
+      value   : colIdx.value    >= 0 ? parseValueCell(parts[colIdx.value]) : undefined,
     };
+
     if (typeof row.color === 'string') row.color = row.color.toLowerCase();
-    if (row.stem   != null && row.stem   !== '') row.stem  = parseInt(row.stem, 10);
-    if (row.cap    != null && row.cap    !== '') row.cap   = parseFloat(row.cap);
-    if (row.value  != null && row.value  !== '') row.value = parseInt(row.value, 10);
+    if (row.stem != null && row.stem !== '') row.stem = parseInt(row.stem, 10);
+    if (row.cap  != null && row.cap  !== '') row.cap  = parseFloat(row.cap);
+
     rows.push(row);
   }
   return rows;
 }
+
 
 async function loadMushroomCatalogCSV() {
   try {

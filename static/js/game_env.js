@@ -991,3 +991,11 @@ function drawHP_canvas4() {
 }
 
 // ======================= end game_env.js =======================
+
+
+console.log('Negatives now:',
+  mushroomCatalogRows.filter(r => typeof r.value === 'number' && r.value < 0).length
+);
+console.log('Example negative rows:',
+  mushroomCatalogRows.filter(r => typeof r.value === 'number' && r.value < 0).slice(0, 5)
+);
