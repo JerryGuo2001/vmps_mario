@@ -420,7 +420,7 @@ async function initGame() {
 
   showPrompt = false;
 
-  totalMushrooms = 31; /* Total room is totalMushrooms-1 */
+  totalMushrooms = 3; 
   collectedMushrooms = [];
 
   if (typeof character.worldX !== 'number') character.worldX = cameraOffset + 30; else character.worldX = 30;
