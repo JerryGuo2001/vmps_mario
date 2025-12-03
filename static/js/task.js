@@ -1,4 +1,11 @@
 // ========== task.js (platform-locked mushrooms; 5 per room; waits for platforms) ==========
+// Instruction preloads
+const INSTR_SLIDES = {
+  explore: [1, 2, 3, 4, 6, 7],   // only files that really exist
+  memory:  [1, 2, 3],
+  ooo:     [1, 2, 3, 4]
+};
+
 
 window.onload = () => {
   const w = document.getElementById('welcome');
@@ -53,35 +60,31 @@ const INSTR_EXT = 'png';
 // --- NEW: cache and preload ---
 const INSTR_CACHE = Object.create(null); // { phaseKey: { urls: string[], imgs: HTMLImageElement[] } }
 
+
 function preloadInstructionSlides(phaseKey) {
   const sub = INSTR_FOLDERS[phaseKey];
   if (!sub) return Promise.resolve({ urls: [], imgs: [] });
 
   const folderUrl = `${INSTR_BASE}/${sub}`;
+  const slideIds = INSTR_SLIDES[phaseKey] || [];
   const urls = [];
   const imgs = [];
-
-  // Probe 1..INSTR_MAX_SLIDES, preload any that exist
-  const jobs = [];
-  for (let i = 1; i <= INSTR_MAX_SLIDES; i++) {
+  const jobs = slideIds.map(i => {
     const url = `${folderUrl}/${i}.${INSTR_EXT}`;
-    jobs.push(
-      new Promise((resolve) => {
-        const img = new Image();
-        img.decoding = 'async';
-        img.loading = 'eager';
-        img.onload = () => { urls.push(url); imgs.push(img); resolve(true); };
-        img.onerror = () => resolve(false);
-        img.src = url + `?v=${Date.now()}`; // cache-bust during dev
-      })
-    );
-  }
+    return new Promise(resolve => {
+      const img = new Image();
+      img.onload  = () => { urls.push(url); imgs.push(img); resolve(true); };
+      img.onerror = () => resolve(false);
+      img.src = url;
+    });
+  });
 
   return Promise.all(jobs).then(() => {
     INSTR_CACHE[phaseKey] = { urls, imgs };
     return INSTR_CACHE[phaseKey];
   });
 }
+
 
 function preloadAllInstructions() {
   const phases = Object.keys(INSTR_FOLDERS || {});

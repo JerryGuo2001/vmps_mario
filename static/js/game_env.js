@@ -533,7 +533,7 @@ async function handleTextInteraction_canvas4() {
 
     if (keys['p']) {
       currentCanvas = 1;
-      character.hp = 2;           // starting HP for next room
+      character.hp = 3;           // starting HP for next room
       currentQuestion += 1;
 
       groundPlatforms = generateGroundPlatforms(worldWidth, 200, 400);
