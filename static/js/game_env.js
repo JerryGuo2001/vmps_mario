@@ -258,52 +258,60 @@ async function generateMushroom(count = 5) {
     if (!positivePool.length) return [];
     chosenRows = pickRandomSubset(positivePool, count);
   } else {
-    // -------- NON-SKY ROOMS: use ROOM_COLOR_MAP structure --------
-    const allowedColors = getAllowedColorsForEnv(env);
+  // -------- NON-SKY ROOMS: use ROOM_COLOR_MAP structure --------
+  const allowedColors = getAllowedColorsForEnv(env);
 
-    let pool = allRows;
-    if (Array.isArray(allowedColors) && allowedColors.length > 0) {
-      const set = new Set(allowedColors.map(c => String(c).toLowerCase()));
-      pool = pool.filter(r => set.has(String(r.color).toLowerCase()));
+  let pool = allRows;
+  if (Array.isArray(allowedColors) && allowedColors.length > 0) {
+    const set = new Set(allowedColors.map(c => String(c).toLowerCase()));
+    pool = pool.filter(r => set.has(String(r.color).toLowerCase()));
+  }
+
+  // If somehow no rows for this env, fall back to full catalog
+  if (!pool.length) pool = allRows.slice();
+
+  const toxicPool       = pool.filter(r => isToxicValue(r.value));
+  const nonToxicPoolAll = pool.filter(r => !isToxicValue(r.value));
+
+  // ---- CASE 1: no toxic available for this room ----
+  if (!toxicPool.length) {
+    // Option A (strict color structure, may have 0 toxic):
+    // chosenRows = pickRandomSubset(pool, count);
+
+    // Option B (force at least 1 toxic if catalog has any, even if color-constraint breaks):
+    const globalToxic = allRows.filter(r => isToxicValue(r.value));
+    if (globalToxic.length > 0 && count >= 1) {
+      const toxicChosen = pickRandomSubset(globalToxic, 1);   // exactly 1 toxic
+      const nonToxicChosen = pickRandomSubset(nonToxicPoolAll, count - 1);
+      chosenRows = toxicChosen.concat(nonToxicChosen);
+    } else {
+      chosenRows = pickRandomSubset(pool, count);
     }
 
-    // If somehow no rows for this env, fall back to full catalog
-    if (!pool.length) pool = allRows.slice();
+  // ---- CASE 2: we have toxic mushrooms in this room ----
+  } else {
+    const maxToxicPossible = Math.min(3, toxicPool.length, count);
+    const minToxicPossible = 1; // we want at least 1 toxic
+    const nToxic = randInt(minToxicPossible, maxToxicPossible);
 
-    const toxicPool    = pool.filter(r => isToxicValue(r.value));
-    const positivePool = pool.filter(r => isPositiveValue(r.value));
-    const neutralPool  = pool.filter(
-      r => !isToxicValue(r.value) && !isPositiveValue(r.value)
-    );
+    const toxicChosen = pickRandomSubset(toxicPool, nToxic);
 
-    // At least 1 toxic, at most 3 toxic per round (if possible)
-    if (!toxicPool.length) {
-      // no toxic available → just random sample from pool
-      chosenRows = pickRandomSubset(pool, count);
-    } else {
-      const maxToxicPossible = Math.min(3, toxicPool.length, count);
-      const minToxicPossible = Math.min(1, maxToxicPossible);
+    // non-toxic = everything that is not toxic
+    const nonToxicPool = nonToxicPoolAll.filter(r => !toxicChosen.includes(r));
+    const nNonToxicNeeded = count - toxicChosen.length;
+    const nonToxicChosen = pickRandomSubset(nonToxicPool, nNonToxicNeeded);
 
-      const nToxic = randInt(minToxicPossible, maxToxicPossible);
-      const toxicChosen = pickRandomSubset(toxicPool, nToxic);
+    chosenRows = toxicChosen.concat(nonToxicChosen);
 
-      // non-toxic = positive + neutral
-      const nonToxicPool = pool.filter(
-        r => !toxicChosen.includes(r) && !isToxicValue(r.value)
-      );
-      const nNonToxicNeeded = count - toxicChosen.length;
-      const nonToxicChosen = pickRandomSubset(nonToxicPool, nNonToxicNeeded);
-
-      chosenRows = toxicChosen.concat(nonToxicChosen);
-
-      // if still fewer than count (not enough non-toxic), pad from remaining pool
-      if (chosenRows.length < count) {
-        const remaining = pool.filter(r => !chosenRows.includes(r));
-        const extra = pickRandomSubset(remaining, count - chosenRows.length);
-        chosenRows = chosenRows.concat(extra);
-      }
+    // 🔒 padding step: only from non-toxic, so toxics stay in [1, 3]
+    if (chosenRows.length < count) {
+      const remainingNonToxic = nonToxicPool.filter(r => !nonToxicChosen.includes(r));
+      const extra = pickRandomSubset(remainingNonToxic, count - chosenRows.length);
+      chosenRows = chosenRows.concat(extra);
     }
   }
+}
+
 
   // If we somehow picked nothing, bail
   if (!chosenRows.length) return [];
@@ -991,13 +999,3 @@ function drawHP_canvas4() {
 }
 
 // ======================= end game_env.js =======================
-
-
-const negatives = rows.filter(r => typeof r.value === 'number' && r.value < 0);
-console.log('[catalog value stats]', {
-  total: rows.length,
-  neg: negatives.length,
-  min: Math.min(...rows.map(r => typeof r.value === 'number' ? r.value : Infinity)),
-  max: Math.max(...rows.map(r => typeof r.value === 'number' ? r.value : -Infinity)),
-});
-console.log('[sample negative rows]', negatives.slice(0, 5));
