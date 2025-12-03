@@ -973,7 +973,7 @@ function drawMushroomQuestionBox() {
 
   ctx.font = '18px Arial';
   ctx.fillText(
-    "Press E to eat or I to ignore.",
+    "Press E to eat or Q to ignore.",
     canvas.width / 2 - 130,
     boxTop + boxHeight - 25
   );

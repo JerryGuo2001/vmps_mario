@@ -506,7 +506,7 @@ function updateGame(currentTime) {
       character.hp += (activeMushroom.value === 'reset' ? -character.hp : activeMushroom.value);
       mushroomDecisionStartTime = null;
 
-    } else if (keys['i'] || mushroomDecisionTimer >= maxDecisionTime) {
+    } else if (keys['q'] || mushroomDecisionTimer >= maxDecisionTime) {
       if (activeMushroom?.decisionMade) return;
       activeMushroom.decisionMade = true;
 
@@ -519,7 +519,7 @@ function updateGame(currentTime) {
         trial_type: 'explore_decision',
         stimulus: activeMushroom?.imagefilename || 'unknown',
         value: activeMushroom?.value ?? null,
-        decision: (keys['i'] ? 'ignore' : 'timeout'),
+        decision: (keys['q'] ? 'ignore' : 'timeout'),
         rt: rt,
         time_elapsed: timeElapsed,
         room: currentRoom,
