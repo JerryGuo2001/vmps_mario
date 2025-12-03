@@ -579,11 +579,14 @@ function updateGame(currentTime) {
 
       // 🔹 NEW: when all mushrooms on this trial are gone, regenerate 5
       if (!freezeState && !regeneratingMushrooms && (!mushrooms || mushrooms.length === 0)) {
+        // Tell participant + move them back to the start
+        showAreaMessage('The mushrooms in this area have been fully explored. Moving you to the next area...');
         regeneratingMushrooms = true;
         generateMushroom(5)
           .then(ms => { mushrooms = ms || []; })
           .catch(err => console.warn('[regen mushrooms]', err))
           .finally(() => { regeneratingMushrooms = false; });
+        if (typeof character.worldX !== 'number') character.worldX = cameraOffset + character.x; character.worldX = cameraOffset + canvas.width / 2;
       }
 
       init_position = true;
