@@ -451,7 +451,6 @@ let groundPlatforms = generateGroundPlatforms(worldWidth, 200, 400);
 // Initial spawn
 let mushrooms = [];
 generateMushroom(5).then(ms => { mushrooms = ms; }).catch(err => console.warn('[init mushrooms]', err));
-handleTextInteraction_canvas4()
 
 function drawBackground_canvas4() {
   let Imagetouse;
