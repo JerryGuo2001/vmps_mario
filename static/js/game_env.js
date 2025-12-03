@@ -40,17 +40,17 @@ const ROOM_COLOR_MAP = {
   yellow:  ['desert'],   // only desert
   cyan:    ['ocean'],    // only ocean
   green:   ['forest'],   // only forest
-  magenta: ['cave'],     // only cave
+  black: ['cave'],     // only cave
   red:     ['lava'],     // only lava
 
   // 1 color shared by exactly 2 rooms
-  blue:    ['ocean', 'cave'],
+  blue:    ['desert', 'cave'],
 
   // 1 color shared by exactly 3 rooms
-  white:   ['desert', 'forest', 'lava'],
+  white:   ['ocean', 'forest', 'lava'],
 
   // 1 color shared by all 5 rooms
-  black:   ['desert', 'ocean', 'forest', 'cave', 'lava']
+  magenta:   ['desert', 'ocean', 'forest', 'cave', 'lava']
 };
 
 /**
