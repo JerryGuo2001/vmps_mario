@@ -583,9 +583,6 @@ async function handleTextInteraction_canvas4() {
       character.hp = 3;           // starting HP for next room
       currentQuestion += 1;
 
-      groundPlatforms = generateGroundPlatforms(worldWidth, 200, 400);
-      mushrooms = await generateMushroom(5);
-      handleTextInteraction_canvas4()
       console.log("Proceeding to next question: " + currentQuestion);
       roomChoiceStartTime = performance.now();
       doorsAssigned = false;
@@ -1022,7 +1019,7 @@ function drawCharacter_canvas4() {
 }
 
 function drawHP_canvas4() {
-  const maxHP = 10;
+  const maxHP = 100;
   const barWidth = 200;
   const barHeight = 20;
   const currentWidth = (character.hp / maxHP) * barWidth;

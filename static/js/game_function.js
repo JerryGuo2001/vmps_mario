@@ -25,7 +25,7 @@ doorImages.ocean.src = 'TexturePack/oceanDoor.png';
 doorImages.desert.src = 'TexturePack/desertDoor.png';
 doorImages.cave.src = 'TexturePack/caveDoor.png';
 
-function drawObstacles() {
+async function drawObstacles() {
     if (currentCanvas === 1) {
         if (!doorsAssigned) {
             const shuffled = [...doorTypes].sort(() => Math.random() - 0.5);
@@ -59,7 +59,10 @@ function drawObstacles() {
             if (keys['e']) {
                 env_deter = leftDoorType;
                 currentRoom = env_deter;
-            
+
+                groundPlatforms = generateGroundPlatforms(worldWidth, 200, 400);
+                mushrooms = await generateMushroom(5);
+                handleTextInteraction_canvas4()
                 // Log room choice
                 const rt = performance.now() - roomChoiceStartTime;
                 const timeElapsed = performance.now() - participantData.startTime;
@@ -100,7 +103,11 @@ function drawObstacles() {
             if (keys['e']) {
                 env_deter = rightDoorType;
                 currentRoom = env_deter;
-            
+
+                groundPlatforms = generateGroundPlatforms(worldWidth, 200, 400);
+                mushrooms = await generateMushroom(5);
+                handleTextInteraction_canvas4()
+
                 // Log room choice
                 const rt = performance.now() - roomChoiceStartTime;
                 const timeElapsed = performance.now() - participantData.startTime;
