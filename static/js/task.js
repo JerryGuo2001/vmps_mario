@@ -576,10 +576,21 @@ function updateGame(currentTime) {
       drawHungerCountdown();
       hungry();
       checkHP_canvas4();
+
+      // 🔹 NEW: when all mushrooms on this trial are gone, regenerate 5
+      if (!freezeState && !regeneratingMushrooms && (!mushrooms || mushrooms.length === 0)) {
+        regeneratingMushrooms = true;
+        generateMushroom(5)
+          .then(ms => { mushrooms = ms || []; })
+          .catch(err => console.warn('[regen mushrooms]', err))
+          .finally(() => { regeneratingMushrooms = false; });
+      }
+
       init_position = true;
 
       if (character.y > 450) character.hp = 0;
     }
+
 
     accumulatedTime -= targetTimeStep;
   }
