@@ -104,58 +104,101 @@ function _buildPairs(pool, nPairs) {
 
 // =============== MAIN: preload pairs for memory ===============
 async function preloadMushroomPairs() {
-  const N = memory_totalQuestions || 5;
+  // --- 1) Get all unique learned mushrooms ---
+  const learned = _getLearnedPool(); // normalized {name, imagefilename, value}
+  const nOld = learned.length;
 
-  // 1) Start from learned pool
-  const learned = _getLearnedPool();
+  if (nOld === 0) {
+    console.warn('[memory] No learned mushrooms found; falling back to purely new items.');
+  }
 
-  // 2) If learned < 2, pad with catalog (exclude duplicates)
+  // --- 2) Work out how many trials we need for ~60% old, 40% new ---
+  const desiredOldProp = 0.6;
+
+  // We must have at least nOld trials to test each learned once
+  let totalTrials = nOld > 0 ? Math.ceil(nOld / desiredOldProp) : (memory_totalQuestions || 10);
+  if (!Number.isFinite(totalTrials) || totalTrials <= 0) totalTrials = 10;
+
+  memory_totalQuestions = totalTrials;  // keep memory code in sync
+
+  const nOldTargets = nOld;                        // each learned tested once
+  const nNewTargets = Math.max(0, totalTrials - nOldTargets);
+
+  // --- 3) Build pool of NEW mushrooms from full catalog (excluding learned) ---
   const exclude = new Set(learned.map(m => String(m.imagefilename)));
-  const fallback = _getFallbackPool(exclude);
+  const fallback = _getFallbackPool(exclude);  // normalized new items
+  const newTargets = [];
 
-  let pool = learned.slice();
-  // Ensure we have at least 2 items
-  while (pool.length < 2 && fallback.length > 0) {
-    pool.push(fallback.pop());
+  if (fallback.length === 0 && nNewTargets > 0) {
+    console.warn('[memory] No fallback new mushrooms available; all targets will be old.');
   }
 
-  // 3) Build pairs; if still short, draw more from fallback
-  let pairs = _buildPairs(pool, N);
-
-  // If we failed to make N pairs (e.g., pool too tiny), pad using fallback
-  for (let i = pairs.length; i < N; i++) {
-    // need two distinct
-    if (fallback.length < 2) {
-      // refill fallback (avoid infinite loop; just reuse full catalog if needed)
-      const more = _getFallbackPool();
-      _shuffle(more);
-      fallback.push(...more);
-    }
-    // draw two distinct from fallback
-    const a = fallback.pop();
-    // find b != a
-    let b = null, guard = 50;
-    while (guard-- > 0 && fallback.length > 0) {
-      const cand = fallback.pop();
-      if (cand.imagefilename !== a.imagefilename) { b = cand; break; }
-    }
-    if (!b) {
-      // emergency: use 'a' and any from catalog with different filename
-      const alt = _getFallbackPool(new Set([a.imagefilename]));
-      b = alt.length ? alt[(Math.random()*alt.length)|0] : a;
-    }
-    pairs.push([a, b]);
+  while (newTargets.length < nNewTargets && fallback.length > 0) {
+    const idx = (Math.random() * fallback.length) | 0;
+    newTargets.push(fallback[idx]);  // allow reuse if nNewTargets > fallback.length
   }
 
-  // 4) Write to globals the memory phase uses
+  // --- 4) Build target list: all learned (old) + sampled new (new) ---
+  const targetList = [
+    ...learned.map(m => ({ mush: m, isOld: true })),
+    ...newTargets.map(m => ({ mush: m, isOld: false }))
+  ];
+
+  // If for some reason we have fewer targets than trials, pad with old again
+  while (targetList.length < totalTrials && learned.length > 0) {
+    const m = learned[(Math.random() * learned.length) | 0];
+    targetList.push({ mush: m, isOld: true });
+  }
+
+  // Shuffle trial order
+  _shuffle(targetList);
+
+  // --- 5) Build foil pool (anything we can use as a second mushroom) ---
+  let foilPool = learned.concat(fallback);
+  if (foilPool.length === 0 && targetList.length > 0) {
+    // last resort: just reuse the targets themselves
+    foilPool = targetList.map(t => t.mush);
+  }
+
+  // --- 6) Create the actual trials + fill aMushrooms / bMushrooms ---
+  memoryTrials = [];
   aMushrooms = [];
   bMushrooms = [];
-  for (let i = 0; i < N; i++) {
-    const [a, b] = pairs[i];
-    aMushrooms.push(a);
-    bMushrooms.push(b);
+
+  for (let i = 0; i < totalTrials; i++) {
+    const { mush: target, isOld } = targetList[i];
+
+    // pick a foil different from target if possible
+    let foil = foilPool[(Math.random() * foilPool.length) | 0];
+    let guard = 20;
+    while (guard-- > 0 &&
+           foilPool.length > 1 &&
+           foil.imagefilename === target.imagefilename) {
+      foil = foilPool[(Math.random() * foilPool.length) | 0];
+    }
+
+    const targetSide = Math.random() < 0.5 ? 'left' : 'right';
+    let left, right;
+    if (targetSide === 'left') {
+      left = target;
+      right = foil;
+    } else {
+      left = foil;
+      right = target;
+    }
+
+    aMushrooms.push(left);
+    bMushrooms.push(right);
+
+    memoryTrials.push({
+      target,
+      foil,
+      isOld,
+      targetSide
+    });
   }
 }
+
 
 
 async function Memory_initGame() {
@@ -267,12 +310,13 @@ function Memory_selectorKeyHandler(e) {
             rt: rt,
             time_elapsed: performance.now() - participantData.startTime
         });
+        // Use pre-defined target for this trial
+        const trialInfo = memoryTrials[memory_currentQuestion];
+        const mushroomtoask = trialInfo.target;
 
-        // 🔀 Randomize shown mushroom
-        const mushroomtoask = Math.random() < 0.5 ? a : b;
         memory_chosenMushroom = mushroomtoask;
-
         showMemoryChoicePrompt(mushroomtoask);
+
     }
 }
 

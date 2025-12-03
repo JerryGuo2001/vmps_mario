@@ -17,6 +17,8 @@ const maxDecisionTime = 5000; // 5 seconds in ms
 let revealOnlyValue;
 let mushroomTrialIndex = 0;
 let mushroomDecisionStartTime = null;
+let faintMessageActive = false;     // NEW: true while showing "Mario fainted" screen
+let regeneratingMushrooms = false;  // NEW: prevent double-regeneration
 
 
 
@@ -354,22 +356,6 @@ async function generateMushroom(count = 5) {
         chosenRows[idx] = replacement;
       }
     }
-
-    // 🔍 Debug: log per-call composition
-    const colorCounts = {};
-    chosenRows.forEach(r => {
-      const c = String(r.color).toLowerCase();
-      const key = isToxicValue(r.value)
-        ? 'toxic'
-        : isPositiveValue(r.value) ? 'pos' : 'zero';
-      (colorCounts[c] ??= { toxic: 0, pos: 0, zero: 0 });
-      colorCounts[c][key]++;
-    });
-
-    console.log('[generateMushroom] env=', envRaw,
-      ' allowedColors=', getAllowedColorsForEnv(envRaw),
-      ' colorCounts=', colorCounts
-    );
   }
 
   // -------- Compute HP threshold for this room --------
@@ -382,7 +368,7 @@ async function generateMushroom(count = 5) {
     return val > 0 ? sum + val : sum;
   }, 0);
 
-  stageHpThreshold = 0.5 * (baseHP + totalPositiveStamina);
+  stageHpThreshold = 15;
 
   // -------- Layout logic (same as your original) --------
 

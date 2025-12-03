@@ -536,12 +536,48 @@ function updateGame(currentTime) {
   }
 
   // Time-based freeze (e.g., after death)
-  if (freezeTime > 0) {
-    freezeTime -= 16;
-    requestAnimationFrame(updateGame);
-    return;
+    // 🔹 NEW: faint screen when HP ≤ 0
+  if (faintMessageActive) {
+    if (freezeTime > 0) {
+      freezeTime -= 16;
+
+      // Draw faint overlay on Canvas 4
+      clearCanvas();
+      if (currentCanvas === 4) {
+        drawBackground_canvas4();
+        drawCharacter_canvas4();
+        drawHP_canvas4();
+
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        const msg = 'You fainted away because of too low of the stamina';
+        ctx.fillStyle = '#fff';
+        ctx.font = '20px Arial';
+        const textWidth = ctx.measureText(msg).width;
+        ctx.fillText(msg, (canvas.width - textWidth) / 2, canvas.height / 2);
+      }
+
+      requestAnimationFrame(updateGame);
+      return;
+    } else {
+      // 3 seconds are up: respawn Mario and regenerate mushrooms
+      faintMessageActive = false;
+      freezeTime = 0;
+
+      (async () => {
+        currentCanvas = 4;
+        character.hp = 2;
+        const respawn = getRespawnSpot();
+        ensureWorldPosInit();
+        character.worldX = respawn.x;
+        character.y = respawn.y;
+        cameraOffset = 0;
+        mushrooms = await generateMushroom(5);
+      })();
+      // Then we fall through into the normal loop below
+    }
   }
-  freezeTime = 0;
 
   let deltaTime = (currentTime - lastTime) / 1000;
   lastTime = currentTime;
@@ -576,10 +612,19 @@ function updateGame(currentTime) {
       drawHungerCountdown();
       hungry();
       checkHP_canvas4();
-      init_position = true;
 
-      if (character.y > 450) character.hp = 0;
+      // 🔹 NEW: when all mushrooms on this trial are gone, regenerate 5
+      if (!freezeState && !regeneratingMushrooms && (!mushrooms || mushrooms.length === 0)) {
+        regeneratingMushrooms = true;
+        generateMushroom(5)
+          .then(ms => { mushrooms = ms || []; })
+          .catch(err => console.warn('[regen mushrooms]', err))
+          .finally(() => { regeneratingMushrooms = false; });
+      }
+
+      init_position = true;
     }
+
 
     accumulatedTime -= targetTimeStep;
   }
