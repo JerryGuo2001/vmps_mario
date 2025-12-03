@@ -485,7 +485,7 @@ function drawCharacter() {
 // Draw HP
 function drawHP() {
     // Maximum HP (stamina bar max length)
-    const maxHP = 10;
+    const maxHP = baseHP + totalPositiveStamina;
 
     // Calculate the width of the stamina bar based on current HP
     const barWidth = 200;  // Total width of the stamina bar
