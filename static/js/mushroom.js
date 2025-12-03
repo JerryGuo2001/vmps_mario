@@ -78,17 +78,18 @@ function parseValueCell(raw) {
   // Keep "reset" as a special token
   if (/^reset$/i.test(s)) return 'reset';
 
-  // Normalize fancy minus signs to ASCII minus
-  s = s.replace(/\u2212/g, '-');  // U+2212 → '-'
+  // Normalize a whole family of "minus-like" Unicode characters to ASCII '-'
+  // U+2212 (minus), U+2010–U+2015 (various dashes)
+  s = s.replace(/[\u2212\u2010\u2011\u2012\u2013\u2014\u2015]/g, '-');
 
-  // Remove everything except digits, +, -, decimal point
-  s = s.replace(/[^0-9+\-\.]/g, '');
+  // Grab the *first* signed number in the string (e.g. "-5", "+10", "HP -5", "−5.0 hearts")
+  const m = s.match(/[-+]?\d*\.?\d+/);
+  if (!m) return undefined;
 
-  if (!s) return undefined;
-
-  const n = Number(s);
+  const n = Number(m[0]);
   return Number.isFinite(n) ? n : undefined;
 }
+
 
 function parseCSVFlexible(text) {
   const lines = text.trim().split(/\r?\n/);
@@ -153,6 +154,22 @@ async function loadMushroomCatalogCSV() {
     }));
     const rows = normalized.filter(r => r.filename && r.color && EIGHT_COLORS.includes(r.color));
     console.log(`Loaded catalog rows: ${rows.length}`);
+
+    // 🔍 DEBUG: sign stats
+    const stats = { neg: 0, pos: 0, zero: 0, reset: 0, undef: 0 };
+    for (const r of rows) {
+      if (r.value === 'reset') stats.reset++;
+      else if (typeof r.value === 'number') {
+        if (r.value < 0) stats.neg++;
+        else if (r.value > 0) stats.pos++;
+        else stats.zero++;
+      } else {
+        stats.undef++;
+      }
+    }
+    console.log('[catalog value stats]', stats);
+    console.log('[sample negative rows]', rows.filter(r => typeof r.value === 'number' && r.value < 0).slice(0, 5));
+
     if (rows.length === 0) {
       console.warn('[catalog] 0 usable rows after normalization.');
     }
@@ -162,6 +179,7 @@ async function loadMushroomCatalogCSV() {
     return [];
   }
 }
+
 
 /* ==================== CATALOG INDEXES ==================== */
 
