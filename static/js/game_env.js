@@ -1058,35 +1058,4 @@ function drawHP_canvas4() {
 }
 
 
-//Show message for any information
-let areaMessage = '';
-let areaMessageUntil = 0;
-const AREA_MSG_DURATION = 3000; // ms
-
-function showAreaMessage(msg, duration = AREA_MSG_DURATION) {
-  areaMessage = msg;
-  areaMessageUntil = performance.now() + duration;
-}
-
-function drawAreaMessage(now) {
-  if (!areaMessage || now > areaMessageUntil) return;
-
-  ctx.save();
-  ctx.font = '24px Arial';
-  ctx.textAlign = 'center';
-  ctx.fillStyle = 'white';
-  ctx.strokeStyle = 'black';
-  ctx.lineWidth = 4;
-
-  const text = areaMessage;
-  const x = canvas.width / 2;
-  const y = 60;
-
-  // Outline then fill to make it readable
-  ctx.strokeText(text, x, y);
-  ctx.fillText(text, x, y);
-
-  ctx.restore();
-}
-
 // ======================= end game_env.js =======================
