@@ -19,6 +19,10 @@ let mushroomTrialIndex = 0;
 let mushroomDecisionStartTime = null;
 
 
+
+//mushroom size display helper 
+window.MUSHROOM_DISPLAY_SIZE = 150; // px, matches Odd-One-Out
+
 // ------------------ ROOM–COLOR STRUCTURE + HP THRESHOLD ------------------
 
 // Non-sky rooms we care about for color structure
@@ -940,28 +944,56 @@ function handleMovement_canvas4() {
 function drawMushroomQuestionBox() {
   if (!activeMushroom) return;
 
+  const sz = window.MUSHROOM_DISPLAY_SIZE || 150;  // same as OOO
+  const boxMargin = 100;
+  const boxTop    = 80;
+  const boxHeight = 260; // a bit taller to fit a bigger mushroom
+
+  // Background box
   ctx.fillStyle = '#fff';
   ctx.strokeStyle = '#000';
   ctx.lineWidth = 3;
-  ctx.fillRect(100, 100, canvas.width - 200, 200);
-  ctx.strokeRect(100, 100, canvas.width - 200, 200);
+  ctx.fillRect(boxMargin, boxTop, canvas.width - 2 * boxMargin, boxHeight);
+  ctx.strokeRect(boxMargin, boxTop, canvas.width - 2 * boxMargin, boxHeight);
 
-  if (revealOnlyValue == true) {
-    ctx.fillStyle = '#000';
+  // Text
+  ctx.fillStyle = '#000';
+  ctx.font = '18px Arial';
+  ctx.fillText(
+    "Do you want to eat this mushroom?",
+    canvas.width / 2 - 160,
+    boxTop + 30
+  );
+
+  // Draw mushroom in the middle at OOO size
+  if (revealOnlyValue === true) {
     ctx.font = '20px Arial';
     let valueText = activeMushroom.value === 'reset'
       ? 'Toxic!'
       : `${activeMushroom.value > 0 ? '+' : ''}${activeMushroom.value}`;
-    ctx.fillText(valueText, canvas.width / 2 - ctx.measureText(valueText).width / 2, 180);
+    ctx.fillText(
+      valueText,
+      canvas.width / 2 - ctx.measureText(valueText).width / 2,
+      boxTop + 130
+    );
   } else {
-    ctx.drawImage(activeMushroom.image, canvas.width / 2 - 25, 140, 50, 50);
+    ctx.drawImage(
+      activeMushroom.image,
+      canvas.width / 2 - sz / 2,
+      boxTop + 70,
+      sz,
+      sz
+    );
   }
 
-  ctx.fillStyle = '#000';
   ctx.font = '18px Arial';
-  ctx.fillText("Do you want to eat this mushroom?", canvas.width / 2 - 120, 120);
-  ctx.fillText("Press E to eat or I to ignore.", canvas.width / 2 - 100, 250);
+  ctx.fillText(
+    "Press E to eat or I to ignore.",
+    canvas.width / 2 - 130,
+    boxTop + boxHeight - 25
+  );
 }
+
 
 // **Sprite sheet details**
 let frameWidth = 15;  // Each frame width in pixels
@@ -1019,7 +1051,7 @@ function drawCharacter_canvas4() {
 }
 
 function drawHP_canvas4() {
-  const maxHP = 100;
+  const maxHP = 100; // or whatever your conceptual max is
   const barWidth = 200;
   const barHeight = 20;
   const currentWidth = (character.hp / maxHP) * barWidth;
@@ -1027,7 +1059,12 @@ function drawHP_canvas4() {
   ctx.fillStyle = '#ddd';
   ctx.fillRect(canvas.width - barWidth - 20, 20, barWidth, barHeight);
 
-  ctx.fillStyle = (character.hp >= 5) ? 'blue' : 'orange';
+  // blue if at/above threshold, orange otherwise
+  const neededHP = (typeof stageHpThreshold === 'number' && !isNaN(stageHpThreshold))
+    ? stageHpThreshold
+    : 5;
+
+  ctx.fillStyle = (character.hp >= neededHP) ? 'blue' : 'orange';
   ctx.fillRect(canvas.width - barWidth - 20, 20, currentWidth, barHeight);
 
   ctx.strokeStyle = '#000';
