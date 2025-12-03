@@ -1,9 +1,9 @@
 // ========== task.js (platform-locked mushrooms; 5 per room; waits for platforms) ==========
 // Instruction preloads
 const INSTR_SLIDES = {
-  explore: [1, 2, 3, 4, 6, 7],   // only files that really exist
-  memory:  [1, 2, 3],
-  ooo:     [1, 2, 3, 4]
+  explore: [1, 2, 3],   // only files that really exist
+  memory:  [],
+  ooo:     [1]
 };
 
 
@@ -420,7 +420,7 @@ async function initGame() {
 
   showPrompt = false;
 
-  totalMushrooms = 31;
+  totalMushrooms = 31; /* Total room is totalMushrooms-1 */
   collectedMushrooms = [];
 
   if (typeof character.worldX !== 'number') character.worldX = cameraOffset + 30; else character.worldX = 30;
