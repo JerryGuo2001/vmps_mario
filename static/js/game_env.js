@@ -40,7 +40,7 @@ const ROOM_COLOR_MAP = {
   yellow:  ['desert'],   // only desert
   cyan:    ['ocean'],    // only ocean
   green:   ['forest'],   // only forest
-  black: ['cave'],     // only cave
+  black:   ['cave'],     // only cave
   red:     ['lava'],     // only lava
 
   // 1 color shared by exactly 2 rooms
@@ -63,16 +63,23 @@ let stageHpThreshold = 5;
 // ------------------ value / color helpers ------------------
 
 function getAllowedColorsForEnv(envName) {
-  if (!envName || envName === 'sky') return null; // sky handled separately
+  if (!envName) return null;
+  const e = String(envName).trim().toLowerCase();
+
+  if (e === 'sky') return null; // sky handled separately
 
   const allowed = [];
   for (const [color, rooms] of Object.entries(ROOM_COLOR_MAP)) {
-    if (rooms.includes(envName)) {
-      allowed.push(color);
+    for (const room of rooms) {
+      if (String(room).trim().toLowerCase() === e) {
+        allowed.push(color);
+        break;
+      }
     }
   }
   return allowed;
 }
+
 
 // parse value (supports 'reset' + numbers)
 function getNumericValue(v) {
@@ -245,79 +252,123 @@ async function generateMushroom(count = 5) {
   if (!plats.length) return [];
 
   // ---- full catalog ----
-  let allRows = (window.mushroomCatalogRows || []).slice();
+  const allRows = (window.mushroomCatalogRows || []);
   if (!allRows.length) return [];
 
-  const env = (typeof env_deter !== 'undefined') ? env_deter : 'sky';
+  // Normalize env name
+  const envRaw = (typeof env_deter !== 'undefined') ? env_deter : 'sky';
+  const env    = String(envRaw).trim().toLowerCase();
 
   let chosenRows = [];
+  let pool;
 
   // -------- SKY ROOM: only positive mushrooms, no color restriction --------
   if (env === 'sky') {
     const positivePool = allRows.filter(r => isPositiveValue(r.value));
     if (!positivePool.length) return [];
-    chosenRows = pickRandomSubset(positivePool, count);
+    pool = positivePool;
+    chosenRows = pickRandomSubset(pool, count);
   } else {
-  // -------- NON-SKY ROOMS: use ROOM_COLOR_MAP structure --------
-  const allowedColors = getAllowedColorsForEnv(env);
+    // -------- NON-SKY ROOMS: use ROOM_COLOR_MAP structure --------
+    const allowedColors = getAllowedColorsForEnv(envRaw);
+    pool = allRows;
 
-  let pool = allRows;
-  if (Array.isArray(allowedColors) && allowedColors.length > 0) {
-    const set = new Set(allowedColors.map(c => String(c).toLowerCase()));
-    pool = pool.filter(r => set.has(String(r.color).toLowerCase()));
-  }
+    if (Array.isArray(allowedColors) && allowedColors.length > 0) {
+      const set = new Set(allowedColors.map(c => String(c).toLowerCase()));
+      pool = allRows.filter(r => set.has(String(r.color).toLowerCase()));
+    }
 
-  // If somehow no rows for this env, fall back to full catalog
-  if (!pool.length) pool = allRows.slice();
+    // If somehow no rows for this env, fall back to full catalog
+    if (!pool.length) {
+      console.warn(`[generateMushroom] env='${envRaw}' had no rows after color filter; falling back to full catalog.`);
+      pool = allRows.slice();
+    }
 
-  const toxicPool       = pool.filter(r => isToxicValue(r.value));
-  const nonToxicPoolAll = pool.filter(r => !isToxicValue(r.value));
+    const toxicPool    = pool.filter(r => isToxicValue(r.value));
+    const nonToxicPool = pool.filter(r => !isToxicValue(r.value));
 
-  // ---- CASE 1: no toxic available for this room ----
-  if (!toxicPool.length) {
-    // Option A (strict color structure, may have 0 toxic):
-    // chosenRows = pickRandomSubset(pool, count);
-
-    // Option B (force at least 1 toxic if catalog has any, even if color-constraint breaks):
-    const globalToxic = allRows.filter(r => isToxicValue(r.value));
-    if (globalToxic.length > 0 && count >= 1) {
-      const toxicChosen = pickRandomSubset(globalToxic, 1);   // exactly 1 toxic
-      const nonToxicChosen = pickRandomSubset(nonToxicPoolAll, count - 1);
-      chosenRows = toxicChosen.concat(nonToxicChosen);
-    } else {
+    if (!toxicPool.length) {
+      // No toxic available → just random sample from pool
+      console.warn(`[generateMushroom] env='${envRaw}' has no toxic mushrooms; sampling without toxicity constraint.`);
       chosenRows = pickRandomSubset(pool, count);
+    } else {
+      // Compute nToxic so:
+      //   1 ≤ nToxic ≤ 3
+      //   nToxic ≤ toxicPool.length
+      //   count - nToxic ≤ nonToxicPool.length
+      const T = toxicPool.length;
+      const N = nonToxicPool.length;
+
+      const maxT = Math.min(3, T, count);
+      let minT   = Math.max(1, count - N); // need enough non-toxic to fill
+
+      if (minT < 1) minT = 1;
+      if (minT > maxT) {
+        // Can't satisfy both constraints perfectly; fall back to "as good as possible".
+        minT = maxT;  // will still be ≤ 3
+      }
+
+      const nToxic = randInt(minT, maxT);
+      const toxicChosen    = pickRandomSubset(toxicPool,    nToxic);
+      const nonToxicChosen = pickRandomSubset(nonToxicPool, count - nToxic);
+
+      chosenRows = toxicChosen.concat(nonToxicChosen);
     }
 
-  // ---- CASE 2: we have toxic mushrooms in this room ----
-  } else {
-    const maxToxicPossible = Math.min(3, toxicPool.length, count);
-    const minToxicPossible = 1; // we want at least 1 toxic
-    const nToxic = randInt(minToxicPossible, maxToxicPossible);
+    // -------- SAFETY PASS: enforce 1–3 toxic in non-sky rooms --------
+    const toxicPoolEnv = pool.filter(r => isToxicValue(r.value));
+    let toxicIdxs = [];
+    chosenRows.forEach((r, idx) => {
+      if (isToxicValue(r.value)) toxicIdxs.push(idx);
+    });
 
-    const toxicChosen = pickRandomSubset(toxicPool, nToxic);
+    // Ensure at least 1 toxic (if any exist in the env pool)
+    if (toxicIdxs.length === 0 && toxicPoolEnv.length > 0) {
+      const nonToxicIdxs = chosenRows
+        .map((r, idx) => ({ r, idx }))
+        .filter(o => !isToxicValue(o.r.value));
 
-    // non-toxic = everything that is not toxic
-    const nonToxicPool = nonToxicPoolAll.filter(r => !toxicChosen.includes(r));
-    const nNonToxicNeeded = count - toxicChosen.length;
-    const nonToxicChosen = pickRandomSubset(nonToxicPool, nNonToxicNeeded);
-
-    chosenRows = toxicChosen.concat(nonToxicChosen);
-
-    // 🔒 padding step: only from non-toxic, so toxics stay in [1, 3]
-    if (chosenRows.length < count) {
-      const remainingNonToxic = nonToxicPool.filter(r => !nonToxicChosen.includes(r));
-      const extra = pickRandomSubset(remainingNonToxic, count - chosenRows.length);
-      chosenRows = chosenRows.concat(extra);
+      if (nonToxicIdxs.length > 0) {
+        const slot = nonToxicIdxs[Math.floor(Math.random() * nonToxicIdxs.length)];
+        const replacement = toxicPoolEnv[Math.floor(Math.random() * toxicPoolEnv.length)];
+        chosenRows[slot.idx] = replacement;
+        toxicIdxs = [slot.idx];
+      }
     }
+
+    // Ensure at most 3 toxic (if we somehow padded with extra toxics)
+    if (toxicIdxs.length > 3) {
+      const nonToxicEnvPool = pool.filter(r => !isToxicValue(r.value));
+      let availableNonToxic = nonToxicEnvPool.filter(r => !chosenRows.includes(r));
+
+      const keep      = toxicIdxs.slice(0, 3);
+      const toReplace = toxicIdxs.slice(3);
+
+      for (const idx of toReplace) {
+        if (!availableNonToxic.length) break;
+        const replacement = availableNonToxic.pop();
+        chosenRows[idx] = replacement;
+      }
+    }
+
+    // 🔍 Debug: log per-call composition
+    const colorCounts = {};
+    chosenRows.forEach(r => {
+      const c = String(r.color).toLowerCase();
+      const key = isToxicValue(r.value)
+        ? 'toxic'
+        : isPositiveValue(r.value) ? 'pos' : 'zero';
+      (colorCounts[c] ??= { toxic: 0, pos: 0, zero: 0 });
+      colorCounts[c][key]++;
+    });
+
+    console.log('[generateMushroom] env=', envRaw,
+      ' allowedColors=', getAllowedColorsForEnv(envRaw),
+      ' colorCounts=', colorCounts
+    );
   }
-}
-
-
-  // If we somehow picked nothing, bail
-  if (!chosenRows.length) return [];
 
   // -------- Compute HP threshold for this room --------
-  // Assume starting HP is current character.hp if available, else default to 2.
   const baseHP = (typeof character !== 'undefined' && character && typeof character.hp === 'number')
     ? character.hp
     : 2;
@@ -327,13 +378,10 @@ async function generateMushroom(count = 5) {
     return val > 0 ? sum + val : sum;
   }, 0);
 
-  // Threshold = 50% of (baseHP + total positive stamina for this room)
-  // Example: base 2, positives 10 & 5 → (2 + 15) / 2 = 8.5
   stageHpThreshold = 0.5 * (baseHP + totalPositiveStamina);
 
-  // -------- Layout logic: same as your original code below --------
+  // -------- Layout logic (same as your original) --------
 
-  // helper: even X positions on a platform with margins
   function xsOnPlatform(p, k, margin = 10) {
     const startX = p.startX + margin + BOX_W / 2;
     const endX   = p.endX   - margin - BOX_W / 2;
@@ -341,7 +389,6 @@ async function generateMushroom(count = 5) {
 
     if (k <= 0) return [];
     if (span <= 0) {
-      // platform too narrow; stack all at the center
       return new Array(k).fill(Math.round((p.startX + p.endX) / 2));
     }
     if (k === 1) return [Math.round((startX + endX) / 2)];
@@ -354,7 +401,6 @@ async function generateMushroom(count = 5) {
     return xs;
   }
 
-  // your specified 5-mushroom distribution patterns
   function allocationForFivePlatforms(nPlats) {
     switch (nPlats) {
       case 5: return [1,1,1,1,1];
@@ -362,21 +408,20 @@ async function generateMushroom(count = 5) {
       case 3: return [2,2,1];
       case 2: return [3,2];
       case 1: return [5];
-      default: {
-        // If more than 5 platforms exist, use first 5 with 1 each.
+      default:
         return new Array(Math.max(1, Math.min(5, nPlats))).fill(1);
-      }
     }
   }
 
-  // If count != 5, fall back to a simple round-robin spread
   function genericAllocation(nPlats, k) {
     const arr = new Array(nPlats).fill(0);
     for (let i = 0; i < k; i++) arr[i % nPlats]++;
     return arr;
   }
 
-  // decide per-platform counts
+  const BOX_CLEARANCE = 0;
+  const items = [];
+
   let perPlat;
   if (count === 5) {
     perPlat = allocationForFivePlatforms(plats.length);
@@ -387,11 +432,7 @@ async function generateMushroom(count = 5) {
     perPlat = genericAllocation(plats.length, count);
   }
 
-  // build items by platform
-  const BOX_CLEARANCE = 0;
-  const items = [];
   let rowIdx = 0;
-
   for (let pi = 0; pi < plats.length && rowIdx < chosenRows.length; pi++) {
     const p = plats[pi];
     const k = perPlat[pi] || 0;
@@ -403,11 +444,11 @@ async function generateMushroom(count = 5) {
     for (let j = 0; j < xs.length && rowIdx < chosenRows.length; j++) {
       const r = chosenRows[rowIdx++];
       const img = new Image();
-      img.src = r.filename;  // assumes your loader sets r.filename
+      img.src = r.filename;  // or resolveImgSrc(r.filename) if you prefer
 
       items.push({
-        x: xs[j],               // WORLD X (center)
-        y: boxTopY,             // TOP of the box, from this platform p
+        x: xs[j],
+        y: boxTopY,
         type: 0,
         value: r.value,
         isVisible: false,
@@ -422,7 +463,6 @@ async function generateMushroom(count = 5) {
     }
   }
 
-  // If somehow not all assigned (e.g., fewer platforms than needed), place the rest on platform 0
   while (rowIdx < chosenRows.length && plats.length > 0) {
     const p0 = plats[0];
     const x0 = Math.round((p0.startX + p0.endX) / 2);

@@ -201,8 +201,6 @@ async function loadMushroomCatalogCSV() {
         stats.undef++;
       }
     }
-    console.log('[catalog value stats]', stats);
-    console.log('[sample negative rows]', rows.filter(r => typeof r.value === 'number' && r.value < 0).slice(0, 5));
 
     if (rows.length === 0) {
       console.warn('[catalog] 0 usable rows after normalization.');
@@ -397,8 +395,6 @@ async function buildSetAForOOO() {
     mushroomCatalogRows = await loadMushroomCatalogCSV();
   }
   catalogIndex = indexCatalog(mushroomCatalogRows);
-
-  console.log('Colors present in catalog:', Object.keys(catalogIndex.byColor));
 
   OOOTriplets = buildOOOTripletsAnchored(mushroomCatalogRows, {
     perColorSanity: 3,
