@@ -40,20 +40,75 @@ function _normalizeMush(row) {
 
 // --- Get unique learned mushrooms from prior phase (by imagefilename) ---
 function _getLearnedPool() {
-  const seen = Array.isArray(window.learnedMushrooms) ? window.learnedMushrooms : [];
-  const uniq = [];
-  const seenFilenames = new Set();
-  for (const r of seen) {
-    const n = _normalizeMush(r);
-    if (!n || !n.imagefilename) continue;
-    const key = String(n.imagefilename);
-    if (!seenFilenames.has(key)) {
-      seenFilenames.add(key);
-      uniq.push(n);
+  // 1) Pull mushrooms from the explore_decision trials
+  const trials = (window.participantData && Array.isArray(window.participantData.trials))
+    ? window.participantData.trials
+    : [];
+
+  const catalog = Array.isArray(window.mushroomCatalogRows) ? window.mushroomCatalogRows : [];
+
+  // Index catalog by basename (e.g., "mush1.png")
+  const byBase = new Map();
+  for (const r of catalog) {
+    const base = basenameFromPath(r.filename || r.imagefilename);
+    if (base) byBase.set(base.toLowerCase(), r);
+  }
+
+  const out = [];
+  const seenKeys = new Set();
+
+  for (const t of trials) {
+    // We only care about mushrooms from the explore phase
+    if (t.trial_type !== 'explore_decision') continue;
+
+    // Logged as `stimulus: activeMushroom?.imagefilename || 'unknown'`
+    const rawStim =
+      t.stimulus ||
+      (t.selected_mushroom && (t.selected_mushroom.image || t.selected_mushroom.imagefilename));
+
+    if (!rawStim || rawStim === 'unknown') continue;
+
+    const base = basenameFromPath(rawStim);
+    if (!base) continue;
+
+    const key = base.toLowerCase();
+    if (seenKeys.has(key)) continue; // de-duplicate by image
+    seenKeys.add(key);
+
+    // Prefer pulling the full row from the catalog (has color, stem, cap, value)
+    const catRow = byBase.get(key);
+    if (catRow) {
+      out.push(_normalizeMush(catRow));
+    } else {
+      // Fallback: build a minimal row from the trial log
+      out.push(
+        _normalizeMush({
+          imagefilename: base,
+          value: t.value
+        })
+      );
     }
   }
-  return uniq;
+
+  // 2) If for some reason there are still none, fallback to window.learnedMushrooms
+  if (out.length === 0 && Array.isArray(window.learnedMushrooms)) {
+    const uniq = [];
+    const seenFilenames = new Set();
+    for (const r of window.learnedMushrooms) {
+      const n = _normalizeMush(r);
+      if (!n || !n.imagefilename) continue;
+      const key = String(n.imagefilename);
+      if (!seenFilenames.has(key)) {
+        seenFilenames.add(key);
+        uniq.push(n);
+      }
+    }
+    return uniq;
+  }
+
+  return out;
 }
+
 
 // --- Fallback pool from catalog, excluding already chosen filenames ---
 function _getFallbackPool(excludeSet) {
