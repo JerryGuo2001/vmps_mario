@@ -63,7 +63,7 @@ const ROOM_COLOR_MAP = {
  * we set this after each generateMushroom call based on the mushrooms in that room.
  * Used in handleTextInteraction_canvas4.
  */
-let stageHpThreshold = 5;
+let stageHpThreshold = 30;
 
 // ------------------ value / color helpers ------------------
 
@@ -320,7 +320,7 @@ async function generateMushroom(count = 5) {
       chosenRows = toxicChosen.concat(nonToxicChosen);
     }
 
-    // -------- SAFETY PASS: enforce 1–3 toxic in non-sky rooms --------
+    // -------- SAFETY PASS: enforce 1–3 toxic in non-sky rooms (existing logic) --------
     const toxicPoolEnv = pool.filter(r => isToxicValue(r.value));
     let toxicIdxs = [];
     chosenRows.forEach((r, idx) => {
@@ -357,19 +357,63 @@ async function generateMushroom(count = 5) {
     }
   }
 
+  // ---------- NEW: limit zero-value mushrooms to at most 1 + randomize order ----------
+  if (chosenRows.length > 0) {
+    // Find indices of mushrooms with value == 0
+    const zeroIdxs = [];
+    chosenRows.forEach((r, idx) => {
+      if (getNumericValue(r.value) === 0) zeroIdxs.push(idx);
+    });
+
+    if (zeroIdxs.length > 1) {
+      // Keep one of the zeros (random), replace the rest
+      const keepIdx   = zeroIdxs[Math.floor(Math.random() * zeroIdxs.length)];
+      const toReplace = zeroIdxs.filter(i => i !== keepIdx);
+
+      // Candidates: non-zero AND non-toxic (so we don't change toxic count)
+      const nonZeroNonToxicPool = (pool || []).filter(r =>
+        getNumericValue(r.value) !== 0 && !isToxicValue(r.value)
+      );
+
+      // Avoid duplicates where possible (by filename / image name)
+      const chosenNames = new Set(
+        chosenRows.map(r => String(r.filename || r.image || r.imagefilename || ''))
+      );
+
+      let replacementPool = nonZeroNonToxicPool.filter(r => {
+        const name = String(r.filename || r.image || r.imagefilename || '');
+        return !chosenNames.has(name);
+      });
+
+      for (const i of toReplace) {
+        if (!replacementPool.length) break;  // if we run out, just leave the zero
+        const replIndex = (Math.random() * replacementPool.length) | 0;
+        const repl = replacementPool.splice(replIndex, 1)[0];
+        chosenRows[i] = repl;
+      }
+    }
+
+    // Fisher–Yates shuffle so negatives/positives are not ordered left→right
+    for (let i = chosenRows.length - 1; i > 0; i--) {
+      const j = (Math.random() * (i + 1)) | 0;
+      [chosenRows[i], chosenRows[j]] = [chosenRows[j], chosenRows[i]];
+    }
+  }
+
+
   // -------- Compute HP threshold for this room --------
   const baseHP = (typeof character !== 'undefined' && character && typeof character.hp === 'number')
     ? character.hp
-    : 2;
+    : 50;
 
   const totalPositiveStamina = chosenRows.reduce((sum, r) => {
     const val = getNumericValue(r.value);
     return val > 0 ? sum + val : sum;
   }, 0);
 
-  stageHpThreshold = 15;
+  stageHpThreshold = 30;
 
-  // -------- Layout logic (same as your original) --------
+  // -------- Layout logic (unchanged) --------
 
   function xsOnPlatform(p, k, margin = 10) {
     const startX = p.startX + margin + BOX_W / 2;
@@ -483,6 +527,7 @@ async function generateMushroom(count = 5) {
 
 
 
+
 // Generate new platforms each time with varied height
 let groundPlatforms = generateGroundPlatforms(worldWidth, 200, 400);
 // Initial spawn
@@ -549,19 +594,19 @@ async function handleTextInteraction_canvas4() {
   // fallback to 5 if stageHpThreshold hasn't been set yet
   const neededHP = (typeof stageHpThreshold === 'number' && !isNaN(stageHpThreshold))
     ? stageHpThreshold
-    : 5;
+    : 30;
 
   ctx.fillStyle = '#000';
   ctx.font = '16px Arial';
 
   if (character.hp < neededHP) {
-    const text = `Collect stamina to reach at least ${neededHP.toFixed(1)} HP to proceed`;
+    const text = `Stamina Bar will turn blue when you can Proceed`;
     const textWidth = ctx.measureText(text).width;
     const xPos = (canvas.width - textWidth) / 2;
     const yPos = canvas.height / 4;
     ctx.fillText(text, xPos, yPos);
   } else {
-    const text = `Press P to proceed (HP ≥ ${neededHP.toFixed(1)})`;
+    const text = `Press P to proceed`;
     const textWidth = ctx.measureText(text).width;
     const xPos = (canvas.width - textWidth) / 2;
     const yPos = canvas.height / 4;
@@ -569,7 +614,7 @@ async function handleTextInteraction_canvas4() {
 
     if (keys['p']) {
       currentCanvas = 1;
-      character.hp = 3;           // starting HP for next room
+      character.hp = 20;           // starting HP for next room
       currentQuestion += 1;
 
       console.log("Proceeding to next question: " + currentQuestion);
@@ -846,7 +891,7 @@ async function checkHP_canvas4() {
   if (character.hp <= 0 && freezeTime === 0) {
     freezeTime = 1000;
     currentCanvas = 4;
-    character.hp = 2;
+    character.hp = 20;
     const respawn = getRespawnSpot();
     ensureWorldPosInit(); character.worldX = respawn.x;
     character.y = respawn.y;
@@ -1039,23 +1084,43 @@ function drawHP_canvas4() {
   const maxHP = 100; // or whatever your conceptual max is
   const barWidth = 200;
   const barHeight = 20;
+
+  const barX = canvas.width - barWidth - 20;
+  const barY = 20;
+
   const currentWidth = (character.hp / maxHP) * barWidth;
 
+  // background
   ctx.fillStyle = '#ddd';
-  ctx.fillRect(canvas.width - barWidth - 20, 20, barWidth, barHeight);
+  ctx.fillRect(barX, barY, barWidth, barHeight);
 
-  // blue if at/above threshold, orange otherwise
+  // threshold
   const neededHP = (typeof stageHpThreshold === 'number' && !isNaN(stageHpThreshold))
     ? stageHpThreshold
-    : 5;
+    : 30;
 
   ctx.fillStyle = (character.hp >= neededHP) ? 'blue' : 'orange';
-  ctx.fillRect(canvas.width - barWidth - 20, 20, currentWidth, barHeight);
+  ctx.fillRect(barX, barY, currentWidth, barHeight);
 
+  // dashed goal line
+  const goalRatio = Math.max(0, Math.min(neededHP / maxHP, 1)); // clamp 0–1
+  const goalX = barX + goalRatio * barWidth;
+
+  ctx.save();
+  ctx.setLineDash([4, 4]);          // dash pattern
+  ctx.strokeStyle = '#000';
+  ctx.beginPath();
+  ctx.moveTo(goalX, barY - 4);      // a bit above the bar
+  ctx.lineTo(goalX, barY + barHeight + 4); // a bit below the bar
+  ctx.stroke();
+  ctx.restore();
+
+  // border
   ctx.strokeStyle = '#000';
   ctx.lineWidth = 2;
-  ctx.strokeRect(canvas.width - barWidth - 20, 20, barWidth, barHeight);
+  ctx.strokeRect(barX, barY, barWidth, barHeight);
 }
+
 
 
 // ======================= end game_env.js =======================

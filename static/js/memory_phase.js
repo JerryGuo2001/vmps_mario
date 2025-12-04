@@ -5,6 +5,8 @@ let memory_awaitingAnswer = false;
 let memory_chosenMushroom = null;
 let memory_totalQuestions = 5;
 
+const MAX_MEMORY_TRIALS = 100;   // 🔹 hard cap for memory trials
+
 //Preload mushroom pairs, get the mushroom that the participant actually saw in the last phase
 // Globals the memory phase expects
 let aMushrooms = [];
@@ -159,7 +161,11 @@ async function preloadMushroomPairs() {
     // Pure NEW fallback: just sample some new mushrooms from catalog
     const exclude = new Set();  // nothing to exclude
     const fallback = _getFallbackPool(exclude);  // all catalog as new pool
-    const totalTrials = Math.min(memory_totalQuestions || 10, fallback.length || 10);
+    const totalTrials = Math.min(
+    memory_totalQuestions || 10,
+    fallback.length || 10,
+    MAX_MEMORY_TRIALS           // 🔹 cap here
+    );
 
     memory_totalQuestions = totalTrials;
 
@@ -244,8 +250,12 @@ async function preloadMushroomPairs() {
     );
   }
 
-  const totalTrials = nOldTargets + nNewTargets;
+  let totalTrials = nOldTargets + nNewTargets;
+  if (totalTrials > MAX_MEMORY_TRIALS) {
+    totalTrials = MAX_MEMORY_TRIALS;   // 🔹 enforce cap
+  }
   memory_totalQuestions = totalTrials;
+
 
   // --- 4) Sample NEW targets (each at most once) ---
   const newTargets = [];
