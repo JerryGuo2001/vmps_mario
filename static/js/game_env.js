@@ -2,7 +2,7 @@
 
 // Global Variables
 let character, gravity, keys, currentCanvas, showPrompt, currentQuestion, totalMushrooms, collectedMushrooms, atRightEdge, change_detect_right, change_detect_left;
-let totalQuestions = 3;
+let totalQuestions = 30;
 let atLeftEdge;
 currentQuestion = 1;
 let cameraOffset = 0; // Tracks world movement in Canvas 4
