@@ -40,10 +40,12 @@ function _normalizeMush(row) {
 
 // --- Get unique learned mushrooms from prior phase (by imagefilename) ---
 function _getLearnedPool() {
-  // 1) Pull mushrooms from the explore_decision trials
-  const trials = (window.participantData && Array.isArray(window.participantData.trials))
-    ? window.participantData.trials
-    : [];
+  // Prefer the locally scoped participantData (declared with let)
+  const pd = (typeof participantData !== 'undefined')
+    ? participantData
+    : (typeof window !== 'undefined' ? window.participantData : null);
+
+  const trials = (pd && Array.isArray(pd.trials)) ? pd.trials : [];
 
   const catalog = Array.isArray(window.mushroomCatalogRows) ? window.mushroomCatalogRows : [];
 
@@ -58,10 +60,13 @@ function _getLearnedPool() {
   const seenKeys = new Set();
 
   for (const t of trials) {
-    // We only care about mushrooms from the explore phase
+    // Only use explore-phase decisions
     if (t.trial_type !== 'explore_decision') continue;
 
-    // Logged as `stimulus: activeMushroom?.imagefilename || 'unknown'`
+    // 🔸 If you ONLY want mushrooms they actually ate, uncomment this:
+    // if (t.decision !== 'eat') continue;
+
+    // Logged as: stimulus: activeMushroom?.imagefilename || 'unknown'
     const rawStim =
       t.stimulus ||
       (t.selected_mushroom && (t.selected_mushroom.image || t.selected_mushroom.imagefilename));
@@ -75,12 +80,12 @@ function _getLearnedPool() {
     if (seenKeys.has(key)) continue; // de-duplicate by image
     seenKeys.add(key);
 
-    // Prefer pulling the full row from the catalog (has color, stem, cap, value)
+    // Prefer full row from catalog (has color/stem/cap/value)
     const catRow = byBase.get(key);
     if (catRow) {
       out.push(_normalizeMush(catRow));
     } else {
-      // Fallback: build a minimal row from the trial log
+      // Fallback: construct minimal row from trial info
       out.push(
         _normalizeMush({
           imagefilename: base,
@@ -90,16 +95,16 @@ function _getLearnedPool() {
     }
   }
 
-  // 2) If for some reason there are still none, fallback to window.learnedMushrooms
+  // Optional fallback to window.learnedMushrooms if nothing found
   if (out.length === 0 && Array.isArray(window.learnedMushrooms)) {
     const uniq = [];
     const seenFilenames = new Set();
     for (const r of window.learnedMushrooms) {
       const n = _normalizeMush(r);
       if (!n || !n.imagefilename) continue;
-      const key = String(n.imagefilename);
-      if (!seenFilenames.has(key)) {
-        seenFilenames.add(key);
+      const k = String(n.imagefilename);
+      if (!seenFilenames.has(k)) {
+        seenFilenames.add(k);
         uniq.push(n);
       }
     }
@@ -108,6 +113,7 @@ function _getLearnedPool() {
 
   return out;
 }
+
 
 
 // --- Fallback pool from catalog, excluding already chosen filenames ---
