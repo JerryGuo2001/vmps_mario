@@ -40,16 +40,17 @@ function _normalizeMush(row) {
 
 // --- Get unique learned mushrooms from prior phase (by imagefilename) ---
 function _getLearnedPool() {
-  // Prefer the locally scoped participantData (declared with let)
+  // 1) Get trials from the real participantData
   const pd = (typeof participantData !== 'undefined')
     ? participantData
     : (typeof window !== 'undefined' ? window.participantData : null);
 
   const trials = (pd && Array.isArray(pd.trials)) ? pd.trials : [];
 
+  // 2) Optional: catalog rows, if available
   const catalog = Array.isArray(window.mushroomCatalogRows) ? window.mushroomCatalogRows : [];
 
-  // Index catalog by basename (e.g., "mush1.png")
+  // Index catalog by image basename (e.g., "red-14-1.954-+18.png")
   const byBase = new Map();
   for (const r of catalog) {
     const base = basenameFromPath(r.filename || r.imagefilename);
@@ -60,59 +61,41 @@ function _getLearnedPool() {
   const seenKeys = new Set();
 
   for (const t of trials) {
-    // Only use explore-phase decisions
+    // 🔹 Only explore-phase mushrooms
     if (t.trial_type !== 'explore_decision') continue;
 
-    // 🔸 If you ONLY want mushrooms they actually ate, uncomment this:
+    // 🔸 If you want ONLY mushrooms they actually ate, uncomment this:
     // if (t.decision !== 'eat') continue;
 
-    // Logged as: stimulus: activeMushroom?.imagefilename || 'unknown'
-    const rawStim =
-      t.stimulus ||
-      (t.selected_mushroom && (t.selected_mushroom.image || t.selected_mushroom.imagefilename));
-
+    // You log: stimulus: 'TexturePack/mushroom_pack/images_balanced/...png'
+    const rawStim = t.stimulus;
     if (!rawStim || rawStim === 'unknown') continue;
 
     const base = basenameFromPath(rawStim);
     if (!base) continue;
 
     const key = base.toLowerCase();
-    if (seenKeys.has(key)) continue; // de-duplicate by image
+    if (seenKeys.has(key)) continue;   // de-duplicate per image
     seenKeys.add(key);
 
-    // Prefer full row from catalog (has color/stem/cap/value)
+    // Prefer full row from catalog (has color, stem, cap, value)
     const catRow = byBase.get(key);
-    if (catRow) {
-      out.push(_normalizeMush(catRow));
-    } else {
-      // Fallback: construct minimal row from trial info
-      out.push(
-        _normalizeMush({
-          imagefilename: base,
-          value: t.value
-        })
-      );
+
+    const toNorm = catRow || {
+      imagefilename: base,
+      value: t.value
+    };
+
+    const norm = _normalizeMush(toNorm);
+    if (norm && norm.imagefilename) {
+      out.push(norm);
     }
   }
 
-  // Optional fallback to window.learnedMushrooms if nothing found
-  if (out.length === 0 && Array.isArray(window.learnedMushrooms)) {
-    const uniq = [];
-    const seenFilenames = new Set();
-    for (const r of window.learnedMushrooms) {
-      const n = _normalizeMush(r);
-      if (!n || !n.imagefilename) continue;
-      const k = String(n.imagefilename);
-      if (!seenFilenames.has(k)) {
-        seenFilenames.add(k);
-        uniq.push(n);
-      }
-    }
-    return uniq;
-  }
-
+  console.log('[memory] _getLearnedPool returning', out.length, 'items from trials');
   return out;
 }
+
 
 
 
