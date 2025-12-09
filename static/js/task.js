@@ -441,11 +441,70 @@ let accumulatedTime = 0;
 let gameRunning = true;
 let handleEatingChecker;
 
+// --- Freeze snapshot helpers (for mushroom decision freeze) ---
+let decisionFreezeSnapshot = null;
+let wasInDecisionFreeze = false;
+
+function isDecisionFreezeActive() {
+  return (typeof freezeState !== 'undefined' &&
+          typeof activeMushroom !== 'undefined' &&
+          freezeState && !!activeMushroom);
+}
+
+
 function updateGame(currentTime) {
   if (!gameRunning) return;
 
-  // Handle freeze due to mushroom decision
+  // ----------------- Freeze enter/exit detection -----------------
+  const decisionFreezeActive = isDecisionFreezeActive();
+
+  // ENTERING mushroom decision freeze → snapshot character state
+  if (decisionFreezeActive && !wasInDecisionFreeze &&
+      typeof character !== 'undefined' && character) {
+
+    decisionFreezeSnapshot = {
+      worldX:     (typeof character.worldX     === 'number') ? character.worldX     : null,
+      x:          (typeof character.x          === 'number') ? character.x          : null,
+      y:          (typeof character.y          === 'number') ? character.y          : null,
+      speed:      (typeof character.speed      === 'number') ? character.speed      : null,
+      velocityY:  (typeof character.velocityY  === 'number') ? character.velocityY  : null,
+      cameraOffset: cameraOffset
+    };
+  }
+
+  // LEAVING mushroom decision freeze → restore character state
+  if (!decisionFreezeActive && wasInDecisionFreeze &&
+      decisionFreezeSnapshot && typeof character !== 'undefined' && character) {
+
+    if (decisionFreezeSnapshot.worldX    !== null) character.worldX   = decisionFreezeSnapshot.worldX;
+    if (decisionFreezeSnapshot.x         !== null) character.x        = decisionFreezeSnapshot.x;
+    if (decisionFreezeSnapshot.y         !== null) character.y        = decisionFreezeSnapshot.y;
+    if (decisionFreezeSnapshot.speed     !== null) character.speed    = decisionFreezeSnapshot.speed;
+    if (decisionFreezeSnapshot.velocityY !== null) character.velocityY= decisionFreezeSnapshot.velocityY;
+
+    if (typeof decisionFreezeSnapshot.cameraOffset === 'number') {
+      cameraOffset = decisionFreezeSnapshot.cameraOffset;
+    }
+
+    // Reset integrator so we don't "catch up" the frozen interval
+    if (typeof currentTime === 'number') {
+      lastTime = currentTime;
+    }
+    accumulatedTime = 0;
+
+    decisionFreezeSnapshot = null;
+  }
+
+  wasInDecisionFreeze = decisionFreezeActive;
+
+  // ----------------- 1) Freeze due to mushroom decision -----------------
   if (freezeState && activeMushroom) {
+
+    // Drop any elapsed time during the freeze
+    if (typeof currentTime === 'number') {
+      lastTime = currentTime;
+      accumulatedTime = 0;
+    }
 
     // ✅ Allow only 'e' and 'q' keys during freeze
     const allowedKeys = ['e', 'q'];
@@ -476,6 +535,7 @@ function updateGame(currentTime) {
     clearCanvas();
     drawBackground_canvas4();
     drawHP_canvas4();
+    drawCharacter_canvas4();
     drawMushroomQuestionBox();
 
     if (keys['e']) {
@@ -534,14 +594,22 @@ function updateGame(currentTime) {
     return;
   }
 
-  // Time-based freeze (e.g., after death)
+  // ----------------- 2) Time-based freeze (e.g., after death) -----------------
   if (freezeTime > 0) {
     freezeTime -= 16;
+
+    // Also drop elapsed time during this global freeze
+    if (typeof currentTime === 'number') {
+      lastTime = currentTime;
+      accumulatedTime = 0;
+    }
+
     requestAnimationFrame(updateGame);
     return;
   }
   freezeTime = 0;
 
+  // ----------------- Normal update loop -----------------
   let deltaTime = (currentTime - lastTime) / 1000;
   lastTime = currentTime;
   accumulatedTime += deltaTime;
@@ -551,7 +619,9 @@ function updateGame(currentTime) {
 
     if (currentCanvas == 1) {
       if (init_position === true) {
-        if (typeof character.worldX !== 'number') character.worldX = cameraOffset + character.x; character.worldX = cameraOffset + canvas.width / 2;
+        if (typeof character.worldX !== 'number')
+          character.worldX = cameraOffset + character.x;
+        character.worldX = cameraOffset + canvas.width / 2;
       }
       drawBackground();
       handleMovement();
@@ -563,7 +633,9 @@ function updateGame(currentTime) {
       if (init_position === false) {
         cameraOffset = 0;
         const respawn = getRespawnSpot();
-        if (typeof character.worldX !== 'number') character.worldX = cameraOffset + character.x; character.worldX = respawn.x;
+        if (typeof character.worldX !== 'number')
+          character.worldX = cameraOffset + character.x;
+        character.worldX = respawn.x;
         character.y = respawn.y;
       }
       drawBackground_canvas4();
@@ -583,13 +655,12 @@ function updateGame(currentTime) {
           .then(ms => { mushrooms = ms || []; })
           .catch(err => console.warn('[regen mushrooms]', err))
           .finally(() => { regeneratingMushrooms = false; });
-        }
+      }
 
       init_position = true;
 
       if (character.y > 450) character.hp = 0;
     }
-
 
     accumulatedTime -= targetTimeStep;
   }
@@ -602,5 +673,6 @@ function updateGame(currentTime) {
     completeExplore();
   }
 }
+
 
 // ========== end task.js ==========
