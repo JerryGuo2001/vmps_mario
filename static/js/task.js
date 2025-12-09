@@ -474,6 +474,9 @@ function updateGame(currentTime) {
     mushroomDecisionTimer += 16;
 
     clearCanvas();
+    drawBackground_canvas4();
+    drawHP_canvas4();
+    drawMushroomQuestionBox();
 
     if (keys['e']) {
       if (activeMushroom?.decisionMade) return;
