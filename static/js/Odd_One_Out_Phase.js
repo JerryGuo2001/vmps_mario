@@ -6,7 +6,7 @@ let trialStartTimeOOO = null;
 let _oooKeyListenerAttached = false;
 
 // How many OOO trials do you want to run this block?
-const OOO_TRIALS_TO_RUN = 180;  // change as needed (e.g., 30, 60, etc.)
+const OOO_TRIALS_TO_RUN = 3;  // change as needed (e.g., 30, 60, etc.)
 
 async function initTaskOOO() {
   currentTrialOOO = 0;

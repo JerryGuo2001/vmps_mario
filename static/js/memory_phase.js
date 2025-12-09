@@ -5,7 +5,7 @@ let memory_awaitingAnswer = false;
 let memory_chosenMushroom = null;
 let memory_totalQuestions = 5;
 
-const MAX_MEMORY_TRIALS = 100;   // 🔹 hard cap for memory trials
+const MAX_MEMORY_TRIALS = 10;   // 🔹 hard cap for memory trials
 
 //Preload mushroom pairs, get the mushroom that the participant actually saw in the last phase
 // Globals the memory phase expects
