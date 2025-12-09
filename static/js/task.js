@@ -441,66 +441,90 @@ let accumulatedTime = 0;
 let gameRunning = true;
 let handleEatingChecker;
 
-// --- Freeze snapshot helpers (for mushroom decision freeze) ---
+// --- Freeze helpers: snapshot + "instant decision freeze" after head-hit ---
 let decisionFreezeSnapshot = null;
 let wasInDecisionFreeze = false;
+let lastDecisionStartTime = null;
 
 function isDecisionFreezeActive() {
-  return (typeof freezeState !== 'undefined' &&
-          typeof activeMushroom !== 'undefined' &&
-          freezeState && !!activeMushroom);
+  return !!(freezeState && activeMushroom);
 }
+
+// Start the decision freeze as soon as we detect a NEW head-hit
+function maybeStartImmediateDecisionFreeze() {
+  // declared in game_env.js
+  if (typeof mushroomDecisionStartTime === 'undefined') return;
+
+  // New head-hit when startTime becomes non-null and changes
+  if (
+    mushroomDecisionStartTime !== null &&
+    mushroomDecisionStartTime !== lastDecisionStartTime &&
+    !freezeState &&
+    !activeMushroom
+  ) {
+    lastDecisionStartTime = mushroomDecisionStartTime;
+
+    if (Array.isArray(mushrooms)) {
+      // Prefer a visible, not-yet-decided mushroom
+      let m = mushrooms.find(m => m.isVisible && !m.growthComplete && !m.decisionMade);
+      if (!m) m = mushrooms.find(m => m.isVisible);
+
+      if (m) {
+        activeMushroom = m;
+        freezeState = true;
+        mushroomDecisionTimer = 0;
+        // Skip waiting for growth animation – treat as fully grown
+        m.growthComplete = true;
+      }
+    }
+  }
+}
+
 
 
 function updateGame(currentTime) {
   if (!gameRunning) return;
 
-  // ----------------- Freeze enter/exit detection -----------------
+  // 0) As soon as we detect a NEW head-hit, start the decision freeze
+  maybeStartImmediateDecisionFreeze();
+
   const decisionFreezeActive = isDecisionFreezeActive();
 
-  // ENTERING mushroom decision freeze → snapshot character state
-  if (decisionFreezeActive && !wasInDecisionFreeze &&
-      typeof character !== 'undefined' && character) {
-
+  // 0.5) Handle entering/leaving decision freeze: snapshot & restore
+  if (decisionFreezeActive && !wasInDecisionFreeze && character) {
+    // entering freeze
     decisionFreezeSnapshot = {
-      worldX:     (typeof character.worldX     === 'number') ? character.worldX     : null,
-      x:          (typeof character.x          === 'number') ? character.x          : null,
-      y:          (typeof character.y          === 'number') ? character.y          : null,
-      speed:      (typeof character.speed      === 'number') ? character.speed      : null,
-      velocityY:  (typeof character.velocityY  === 'number') ? character.velocityY  : null,
+      worldX:     typeof character.worldX    === 'number' ? character.worldX    : null,
+      x:          typeof character.x         === 'number' ? character.x         : null,
+      y:          typeof character.y         === 'number' ? character.y         : null,
+      speed:      typeof character.speed     === 'number' ? character.speed     : null,
+      velocityY:  typeof character.velocityY === 'number' ? character.velocityY : null,
       cameraOffset: cameraOffset
     };
-  }
-
-  // LEAVING mushroom decision freeze → restore character state
-  if (!decisionFreezeActive && wasInDecisionFreeze &&
-      decisionFreezeSnapshot && typeof character !== 'undefined' && character) {
-
-    if (decisionFreezeSnapshot.worldX    !== null) character.worldX   = decisionFreezeSnapshot.worldX;
-    if (decisionFreezeSnapshot.x         !== null) character.x        = decisionFreezeSnapshot.x;
-    if (decisionFreezeSnapshot.y         !== null) character.y        = decisionFreezeSnapshot.y;
-    if (decisionFreezeSnapshot.speed     !== null) character.speed    = decisionFreezeSnapshot.speed;
-    if (decisionFreezeSnapshot.velocityY !== null) character.velocityY= decisionFreezeSnapshot.velocityY;
-
+  } else if (!decisionFreezeActive && wasInDecisionFreeze && decisionFreezeSnapshot && character) {
+    // leaving freeze → put Mario back exactly where he was when we froze
+    if (decisionFreezeSnapshot.worldX    !== null) character.worldX    = decisionFreezeSnapshot.worldX;
+    if (decisionFreezeSnapshot.x         !== null) character.x         = decisionFreezeSnapshot.x;
+    if (decisionFreezeSnapshot.y         !== null) character.y         = decisionFreezeSnapshot.y;
+    if (decisionFreezeSnapshot.speed     !== null) character.speed     = decisionFreezeSnapshot.speed;
+    if (decisionFreezeSnapshot.velocityY !== null) character.velocityY = decisionFreezeSnapshot.velocityY;
     if (typeof decisionFreezeSnapshot.cameraOffset === 'number') {
       cameraOffset = decisionFreezeSnapshot.cameraOffset;
     }
 
-    // Reset integrator so we don't "catch up" the frozen interval
+    // Don't let the physics integrator "catch up" the frozen time
     if (typeof currentTime === 'number') {
       lastTime = currentTime;
+      accumulatedTime = 0;
     }
-    accumulatedTime = 0;
 
     decisionFreezeSnapshot = null;
   }
-
   wasInDecisionFreeze = decisionFreezeActive;
 
-  // ----------------- 1) Freeze due to mushroom decision -----------------
+  // 1) Handle freeze due to mushroom decision
   if (freezeState && activeMushroom) {
-
-    // Drop any elapsed time during the freeze
+    // prevent time accumulation during freeze
     if (typeof currentTime === 'number') {
       lastTime = currentTime;
       accumulatedTime = 0;
@@ -522,7 +546,7 @@ function updateGame(currentTime) {
     }
 
     freezeTime = 0;
-    if (handleEatingChecker == true) {
+    if (handleEatingChecker === true) {
       handleEatingChecker = false;
       revealOnlyValue = false;
       removeActiveMushroom();
@@ -552,7 +576,7 @@ function updateGame(currentTime) {
         stimulus: activeMushroom?.imagefilename || 'unknown',
         value: activeMushroom?.value ?? null,
         decision: 'eat',
-        rt: rt,
+        rt,
         time_elapsed: timeElapsed,
         room: currentRoom,
         room_repetition: roomRepetitionMap[currentRoom] || 1,
@@ -579,7 +603,7 @@ function updateGame(currentTime) {
         stimulus: activeMushroom?.imagefilename || 'unknown',
         value: activeMushroom?.value ?? null,
         decision: (keys['q'] ? 'ignore' : 'timeout'),
-        rt: rt,
+        rt,
         time_elapsed: timeElapsed,
         room: currentRoom,
         room_repetition: (roomRepetitionMap[currentRoom] || 1),
@@ -594,22 +618,19 @@ function updateGame(currentTime) {
     return;
   }
 
-  // ----------------- 2) Time-based freeze (e.g., after death) -----------------
+  // 2) Time-based freeze (e.g., after death)
   if (freezeTime > 0) {
-    freezeTime -= 16;
-
-    // Also drop elapsed time during this global freeze
     if (typeof currentTime === 'number') {
       lastTime = currentTime;
       accumulatedTime = 0;
     }
-
+    freezeTime -= 16;
     requestAnimationFrame(updateGame);
     return;
   }
   freezeTime = 0;
 
-  // ----------------- Normal update loop -----------------
+  // 3) Normal game loop
   let deltaTime = (currentTime - lastTime) / 1000;
   lastTime = currentTime;
   accumulatedTime += deltaTime;
@@ -619,8 +640,9 @@ function updateGame(currentTime) {
 
     if (currentCanvas == 1) {
       if (init_position === true) {
-        if (typeof character.worldX !== 'number')
+        if (typeof character.worldX !== 'number') {
           character.worldX = cameraOffset + character.x;
+        }
         character.worldX = cameraOffset + canvas.width / 2;
       }
       drawBackground();
@@ -633,8 +655,9 @@ function updateGame(currentTime) {
       if (init_position === false) {
         cameraOffset = 0;
         const respawn = getRespawnSpot();
-        if (typeof character.worldX !== 'number')
+        if (typeof character.worldX !== 'number') {
           character.worldX = cameraOffset + character.x;
+        }
         character.worldX = respawn.x;
         character.y = respawn.y;
       }
@@ -648,7 +671,7 @@ function updateGame(currentTime) {
       hungry();
       checkHP_canvas4();
 
-      // 🔹 NEW: when all mushrooms on this trial are gone, regenerate 5
+      // 🔹 when all mushrooms on this trial are gone, regenerate 5
       if (!freezeState && !regeneratingMushrooms && (!mushrooms || mushrooms.length === 0)) {
         regeneratingMushrooms = true;
         generateMushroom(5)
@@ -673,6 +696,7 @@ function updateGame(currentTime) {
     completeExplore();
   }
 }
+
 
 
 // ========== end task.js ==========
