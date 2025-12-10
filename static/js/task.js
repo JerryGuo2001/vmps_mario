@@ -645,10 +645,10 @@ function updateGame(currentTime) {
         if(lettergradefreezetime<= 0){
           lettergradeupdate = false
         }
-        lettergradefreezetime -= 16
 
         
-
+        lettergradefreezetime -= 16
+        requestAnimationFrame(updateGame)
         return
       }
       //letter grade
