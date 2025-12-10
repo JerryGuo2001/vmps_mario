@@ -191,7 +191,7 @@ function generateGroundPlatforms(worldWidth, minHeight, maxHeight, numSections =
   let lastY = Math.floor(Math.random() * (maxHeight - minHeight + 1)) + minHeight;
 
   const maxStep = 60;   // maximum vertical change
-  const minStep = 10;   // minimum vertical change you want
+  const minStep = 20;   // minimum vertical change you want
 
   for (let i = 0; i < numSections; i++) {
     const startX = i * sectionWidth;
