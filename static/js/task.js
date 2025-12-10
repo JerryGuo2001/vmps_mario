@@ -640,16 +640,18 @@ function updateGame(currentTime) {
 
     if (currentCanvas == 1) {
 
-      //letter grade display section
-      if(lettergradeupdate==true){
-        if(lettergradefreezetime<= 0){
-          lettergradeupdate = false
+      // letter grade display section
+      if (lettergradeupdate === true) {
+        if (lettergradefreezetime <= 0) {
+          lettergradeupdate = false;
         }
-        drawBackground();
 
-        lettergradefreezetime -= 16
-        requestAnimationFrame(updateGame)
-        return
+        drawBackground();          // base sky + ground
+        drawLetterGradeOverlay();  // NEW: overlay the A/B/C letter
+
+        lettergradefreezetime -= 16;
+        requestAnimationFrame(updateGame);
+        return;
       }
       //letter grade display section end
 

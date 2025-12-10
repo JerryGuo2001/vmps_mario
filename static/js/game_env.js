@@ -20,7 +20,19 @@ let mushroomDecisionStartTime = null;
 let regeneratingMushrooms = false;  // NEW: prevent double-regeneration
 
 //letter grade system set up
-let lettergradeupdate, lettergradefreezetime
+let lettergradeupdate = false;
+let lettergradefreezetime = 0;
+let lastRoomHP = 0;
+let lastRoomLetterGrade = null;
+
+function computeLetterGradeFromHP(hp) {
+  if (hp > 80) return 'A';
+  if (hp > 50 && hp <= 80) return 'B';
+  if (hp > 30 && hp <= 50) return 'C';
+  // below or equal to 30 → no passing grade
+  return 'D';
+}
+
 
 //mushroom size display helper 
 window.MUSHROOM_DISPLAY_SIZE = 150; // px, matches Odd-One-Out
@@ -648,15 +660,20 @@ async function handleTextInteraction_canvas4() {
     ctx.fillText(text, xPos, yPos);
 
     if (keys['p']) {
+      // --- NEW: capture HP and compute letter grade BEFORE resetting HP ---
+      lastRoomHP = character.hp;
+      lastRoomLetterGrade = computeLetterGradeFromHP(lastRoomHP);
+
       currentCanvas = 1;
       character.hp = 20;           // starting HP for next room
       currentQuestion += 1;
-      lettergradeupdate = true
-      lettergradefreezetime = 1000
+      lettergradeupdate = true;
+      lettergradefreezetime = 1000;
       console.log("Proceeding to next question: " + currentQuestion);
       roomChoiceStartTime = performance.now();
       doorsAssigned = false;
     }
+
   }
 }
 
