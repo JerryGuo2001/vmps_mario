@@ -639,6 +639,20 @@ function updateGame(currentTime) {
     clearCanvas();
 
     if (currentCanvas == 1) {
+
+      //letter grade display section
+      if(lettergradeupdate==true){
+        if(lettergradefreezetime<= 0){
+          lettergradeupdate = false
+        }
+        lettergradefreezetime -= 16
+
+        
+
+        return
+      }
+      //letter grade
+      lettergradefreezetime=0
       if (init_position === true) {
         if (typeof character.worldX !== 'number') {
           character.worldX = cameraOffset + character.x;

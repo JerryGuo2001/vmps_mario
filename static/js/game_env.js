@@ -19,7 +19,8 @@ let mushroomTrialIndex = 0;
 let mushroomDecisionStartTime = null;
 let regeneratingMushrooms = false;  // NEW: prevent double-regeneration
 
-
+//letter grade system set up
+let lettergradeupdate, lettergradefreezetime
 
 //mushroom size display helper 
 window.MUSHROOM_DISPLAY_SIZE = 150; // px, matches Odd-One-Out
@@ -616,7 +617,8 @@ async function handleTextInteraction_canvas4() {
       currentCanvas = 1;
       character.hp = 20;           // starting HP for next room
       currentQuestion += 1;
-
+      lettergradeupdate = true
+      lettergradefreezetime = 1000
       console.log("Proceeding to next question: " + currentQuestion);
       roomChoiceStartTime = performance.now();
       doorsAssigned = false;
