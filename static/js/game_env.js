@@ -601,7 +601,7 @@ async function handleTextInteraction_canvas4() {
   ctx.font = '16px Arial';
 
   if (character.hp < neededHP) {
-    const text = `Stamina Bar will turn blue when you can Proceed`;
+    const text = ``;
     const textWidth = ctx.measureText(text).width;
     const xPos = (canvas.width - textWidth) / 2;
     const yPos = canvas.height / 4;
