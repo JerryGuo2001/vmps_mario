@@ -645,13 +645,15 @@ function updateGame(currentTime) {
         if(lettergradefreezetime<= 0){
           lettergradeupdate = false
         }
+        drawBackground();
 
-        
         lettergradefreezetime -= 16
         requestAnimationFrame(updateGame)
         return
       }
-      //letter grade
+      //letter grade display section end
+
+      
       lettergradefreezetime=0
       if (init_position === true) {
         if (typeof character.worldX !== 'number') {

@@ -190,12 +190,45 @@ function generateGroundPlatforms(worldWidth, minHeight, maxHeight, numSections =
   const sectionWidth = Math.floor(worldWidth / numSections);
   let lastY = Math.floor(Math.random() * (maxHeight - minHeight + 1)) + minHeight;
 
+  const maxStep = 60;   // maximum vertical change
+  const minStep = 10;   // minimum vertical change you want
+
   for (let i = 0; i < numSections; i++) {
     const startX = i * sectionWidth;
     const endX = (i === numSections - 1) ? worldWidth : startX + sectionWidth;
 
-    const maxStep = 60;
-    const deltaY = Math.floor(Math.random() * (2 * maxStep + 1)) - maxStep;
+    // Compute allowed delta range so that y stays within [minHeight, maxHeight]
+    const lowerBound = Math.max(minHeight - lastY, -maxStep); // smallest allowed delta
+    const upperBound = Math.min(maxHeight - lastY,  maxStep); // largest allowed delta
+
+    // Build two possible intervals that also respect |deltaY| >= minStep:
+    //   [lowerBound, -minStep]  (going down)
+    //   [minStep, upperBound]   (going up)
+    const intervals = [];
+
+    if (lowerBound <= -minStep) {
+      intervals.push({ min: lowerBound, max: -minStep });
+    }
+    if (upperBound >= minStep) {
+      intervals.push({ min: minStep, max: upperBound });
+    }
+
+    let deltaY;
+
+    if (intervals.length > 0) {
+      // Pick one of the valid intervals at random, then sample uniformly in it
+      const chosen = intervals[Math.floor(Math.random() * intervals.length)];
+      const span = chosen.max - chosen.min + 1;
+      deltaY = chosen.min + Math.floor(Math.random() * span);
+    } else {
+      // Fallback: no way to keep |deltaY| >= minStep while staying in bounds.
+      // In this edge case, pick the bound with the largest magnitude.
+      const absLower = Math.abs(lowerBound);
+      const absUpper = Math.abs(upperBound);
+      deltaY = (absLower > absUpper) ? lowerBound : upperBound;
+      // This might be < minStep, but it's the largest change allowed by bounds.
+    }
+
     const y = Math.min(Math.max(lastY + deltaY, minHeight), maxHeight);
 
     platforms.push({
@@ -211,6 +244,7 @@ function generateGroundPlatforms(worldWidth, minHeight, maxHeight, numSections =
 
   return platforms;
 }
+
 
 // ------- Small helpers (fixed) -------
 
