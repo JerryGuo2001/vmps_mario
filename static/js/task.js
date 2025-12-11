@@ -580,8 +580,11 @@ function updateGame(currentTime) {
         time_elapsed: timeElapsed,
         room: currentRoom,
         room_repetition: roomRepetitionMap[currentRoom] || 1,
-        hp: character.hp
+        hp: character.hp,
+        mushroom_x: activeMushroom ? activeMushroom.x : null,   // world X (same as in generateMushroom)
+        mushroom_y: activeMushroom ? activeMushroom.y : null    // Y where the box sits
       });
+
 
       freezeTime = 1000;
       revealOnlyValue = true;
@@ -607,8 +610,11 @@ function updateGame(currentTime) {
         time_elapsed: timeElapsed,
         room: currentRoom,
         room_repetition: (roomRepetitionMap[currentRoom] || 1),
-        hp: character.hp
+        hp: character.hp,
+        mushroom_x: activeMushroom ? activeMushroom.x : null,
+        mushroom_y: activeMushroom ? activeMushroom.y : null
       });
+
 
       mushroomDecisionStartTime = null;
       removeActiveMushroom();
