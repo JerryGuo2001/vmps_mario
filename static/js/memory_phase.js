@@ -117,9 +117,14 @@ async function Memory_initGame() {
   const memPhase = document.getElementById('memoryphase');
   if (memPhase) memPhase.style.display = 'block';
 
+  // Ensure progress bar exists and reset for trial 0
+  ensureMemoryProgressUI();
+  updateMemoryProgressBar();
+
   // Start simplified UI
   Memory_startSelectorPhase();
 }
+
 
 function Memory_startSelectorPhase() {
   // Ensure only one listener
@@ -152,7 +157,91 @@ function showMushrooms() {
   memory_awaitingAnswer = false;
   hideChoiceIndicator();
   updateSelector();
+
+  // Update progress bar for this trial
+  updateMemoryProgressBar();
 }
+
+
+// ========================== PROGRESS BAR ===========================
+
+function ensureMemoryProgressUI() {
+  const phase = document.getElementById('memorySelectorPhase');
+  if (!phase) return;
+
+  // Make sure the container can host absolutely positioned children
+  if (!phase.style.position) {
+    phase.style.position = 'relative';
+  }
+
+  let container = document.getElementById('memoryProgressContainer');
+  if (!container) {
+    container = document.createElement('div');
+    container.id = 'memoryProgressContainer';
+    container.style.position = 'absolute';
+    container.style.left = '50%';
+    container.style.bottom = '10px';
+    container.style.transform = 'translateX(-50%)';
+    container.style.width = '60%';
+    container.style.textAlign = 'center';
+    container.style.zIndex = '800';
+    phase.appendChild(container);
+
+    // Outer bar
+    const outer = document.createElement('div');
+    outer.id = 'memoryProgressOuter';
+    outer.style.width = '100%';
+    outer.style.height = '12px';
+    outer.style.border = '1px solid #000';
+    outer.style.backgroundColor = '#eee';
+    outer.style.borderRadius = '6px';
+    outer.style.overflow = 'hidden';
+    container.appendChild(outer);
+
+    // Inner (fill) bar
+    const inner = document.createElement('div');
+    inner.id = 'memoryProgressInner';
+    inner.style.height = '100%';
+    inner.style.width = '0%';
+    inner.style.backgroundColor = '#4caf50';
+    outer.appendChild(inner);
+
+    // Optional text label below the bar, e.g. "Trial 1 of 36"
+    const label = document.createElement('div');
+    label.id = 'memoryProgressLabel';
+    label.style.marginTop = '4px';
+    label.style.fontSize = '12px';
+    label.textContent = '';
+    container.appendChild(label);
+  }
+}
+
+function updateMemoryProgressBar() {
+  if (!memory_totalQuestions || memory_totalQuestions <= 0) return;
+
+  // Ensure UI exists
+  ensureMemoryProgressUI();
+
+  const inner = document.getElementById('memoryProgressInner');
+  const label = document.getElementById('memoryProgressLabel');
+
+  if (!inner) return;
+
+  // Progress based on completed trials (0% at start, 100% after last)
+  const pct = Math.max(
+    0,
+    Math.min(100, (memory_currentQuestion / memory_totalQuestions) * 100)
+  );
+  inner.style.width = pct + '%';
+
+  if (label) {
+    // Display 1-based trial index for participants
+    const displayTrial = Math.min(memory_currentQuestion + 1, memory_totalQuestions);
+    label.textContent = `Trial ${displayTrial} of ${memory_totalQuestions}`;
+  }
+}
+
+
 
 // Move the selector box to highlight the currently selected side
 function updateSelector() {
@@ -406,6 +495,10 @@ function completeMemory() {
   if (prompt) prompt.remove();
 
   hideChoiceIndicator();
+
+  // Optionally hide progress bar
+  const progContainer = document.getElementById('memoryProgressContainer');
+  if (progContainer) progContainer.style.display = 'none';
 
   // Hide all phases
   document.querySelectorAll('.phase').forEach(div => (div.style.display = 'none'));

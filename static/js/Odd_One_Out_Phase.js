@@ -79,6 +79,9 @@ async function initTaskOOO() {
   instructionOOO.textContent = 'Press 1 for left, 2 for middle, 3 for right.';
   containerOOO.appendChild(instructionOOO);
 
+  // Ensure progress bar is present for this block
+  ensureOOOProgressUI();
+
   // Attach listener once
   if (!_oooKeyListenerAttached) {
     document.addEventListener('keydown', handleKeyPressOOO);
@@ -89,9 +92,19 @@ async function initTaskOOO() {
   await showTrialOOO();
 }
 
+
 async function showTrialOOO() {
   const imgContainerOOO = document.getElementById('imageContainerOOO');
   if (!imgContainerOOO) return;
+
+  // Safety guard
+  if (!trialsOOO || currentTrialOOO >= trialsOOO.length) {
+    finishTaskOOO();
+    return;
+  }
+
+  // Update progress for this trial
+  updateOOOProgressBar();
 
   const tripletIdx = trialsOOO[currentTrialOOO];   // index into constructed OOO trials
   imgContainerOOO.innerHTML = '';
@@ -178,6 +191,9 @@ function finishTaskOOO() {
   const taskDivOOO = document.getElementById('oddOneOutTaskDiv');
   if (taskDivOOO) taskDivOOO.style.display = 'none';
 
+  const oooProg = document.getElementById('oooProgressContainer');
+  if (oooProg) oooProg.style.display = 'none';
+
   // Remove listener once block ends
   if (_oooKeyListenerAttached) {
     document.removeEventListener('keydown', handleKeyPressOOO);
@@ -199,5 +215,81 @@ function finishTaskOOO() {
       const trialFilename = `data_${id}.csv`;
       downloadCSV(participantData.trials, trialFilename);
     }
+  }
+}
+
+
+// ========================== OOO PROGRESS BAR ===========================
+
+function ensureOOOProgressUI() {
+  const container = document.getElementById('oddOneOutTaskDiv');
+  if (!container) return;
+
+  // Make sure container can host positioned children
+  if (!container.style.position) {
+    container.style.position = 'relative';
+  }
+
+  let wrapper = document.getElementById('oooProgressContainer');
+  if (!wrapper) {
+    wrapper = document.createElement('div');
+    wrapper.id = 'oooProgressContainer';
+    wrapper.style.marginTop = '20px';
+    wrapper.style.width = '60%';
+    wrapper.style.marginLeft = 'auto';
+    wrapper.style.marginRight = 'auto';
+    wrapper.style.textAlign = 'center';
+    container.appendChild(wrapper);
+
+    // Outer bar
+    const outer = document.createElement('div');
+    outer.id = 'oooProgressOuter';
+    outer.style.width = '100%';
+    outer.style.height = '12px';
+    outer.style.border = '1px solid #000';
+    outer.style.backgroundColor = '#eee';
+    outer.style.borderRadius = '6px';
+    outer.style.overflow = 'hidden';
+    wrapper.appendChild(outer);
+
+    // Inner (fill) bar
+    const inner = document.createElement('div');
+    inner.id = 'oooProgressInner';
+    inner.style.height = '100%';
+    inner.style.width = '0%';
+    inner.style.backgroundColor = '#4caf50';
+    outer.appendChild(inner);
+
+    // Label: "Trial X of N"
+    const label = document.createElement('div');
+    label.id = 'oooProgressLabel';
+    label.style.marginTop = '4px';
+    label.style.fontSize = '12px';
+    label.textContent = '';
+    wrapper.appendChild(label);
+  }
+}
+
+function updateOOOProgressBar() {
+  if (!trialsOOO || !trialsOOO.length) return;
+
+  ensureOOOProgressUI();
+
+  const inner = document.getElementById('oooProgressInner');
+  const label = document.getElementById('oooProgressLabel');
+  if (!inner) return;
+
+  const total = trialsOOO.length;
+
+  // Completed trials are currentTrialOOO; 0% at start, 100% after last
+  const pct = Math.max(
+    0,
+    Math.min(100, (currentTrialOOO / total) * 100)
+  );
+  inner.style.width = pct + '%';
+
+  if (label) {
+    const displayTrial = Math.min(currentTrialOOO + 1, total);
+    label.textContent = `Trial ${displayTrial} of ${total}`;
   }
 }
