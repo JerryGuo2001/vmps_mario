@@ -265,96 +265,129 @@ function nearestRowFor(color, wantStem, wantCap, idx) {
 
 function rowId(r) { return `${r.color}|${r.stem}|${r.cap}|${basenameFromPath(r.filename)}`; }
 
-/* ==================== OOO: ANCHORED TRIPLETS ==================== */
+/* ==================== OOO: BETWEEN-COLOR TRIPLETS (72→24) ==================== */
 
-function buildOOOTripletsAnchored(catalogRows, options={}) {
-  const {
-    perColorSanity = 3,
-    crossColorPerColor = 3,
-    refColor = null
-  } = options;
+function buildOOOTrialsFromPool(mushroomPool) {
+  // Uses every mushroom at most once.
+  // First makes as many "all different color" triplets as possible,
+  // then uses leftovers for fallback triplets. Finally shuffles trials.
 
-  const idx = indexCatalog(catalogRows);
-  const colors = Object.keys(idx.byColor).sort().filter(c => (idx.byColor[c] || []).length > 0);
-  if (colors.length === 0) {
-    console.warn('No colors in catalog—cannot build OOO triplets.');
+  if (!Array.isArray(mushroomPool)) {
+    throw new Error('[OOO] mushroomPool must be an array.');
+  }
+  const n = mushroomPool.length;
+  if (n < 3) {
+    console.warn('[OOO] Not enough mushrooms to build any trials.');
     return [];
   }
 
-  const referenceColor = refColor || colors[0];
-  const triplets = [];
+  const totalTrials = Math.floor(n / 3); // for 72 → 24
 
-  const pushTriplet = (a,b,c,note=null) => {
-    if (!a || !b || !c) return;
-    triplets.push({ a, b, c, note });
-  };
+  // Shallow copy; tag index for debugging
+  const all = mushroomPool.map((m, idx) => ({ ...m, _idx: idx }));
 
-  for (const color of colors) {
-    const meta = pickExtremesForColor(color, idx);
-    if (!meta) continue;
+  // Group by color
+  const byColor = new Map();
+  for (const m of all) {
+    const key = (m.color || '').toLowerCase() || 'UNKNOWN';
+    if (!byColor.has(key)) byColor.set(key, []);
+    byColor.get(key).push(m);
+  }
 
-    const A = nearestRowFor(color, meta.corners[0].stem, meta.corners[0].cap, idx);
-    const B = nearestRowFor(color, meta.corners[1].stem, meta.corners[1].cap, idx);
-    const C = nearestRowFor(color, meta.corners[2].stem, meta.corners[2].cap, idx);
-    const D = nearestRowFor(color, meta.corners[3].stem, meta.corners[3].cap, idx);
-    const center = nearestRowFor(color, meta.center.stem, meta.center.cap, idx);
-
-    const anchors = [A,B,C,D].filter(Boolean);
-    const anchorIds = new Set(anchors.map(rowId));
-
-    const others = (idx.byColor[color] || []).filter(r => !anchorIds.has(rowId(r)));
-
-    for (const x of others) {
-      pushTriplet(x, A, C, `triag1:${color}`);
-      pushTriplet(x, B, D, `triag2:${color}`);
-    }
-
-    const anchorTriples = [
-      [A,B,C], [A,B,D], [A,C,D], [B,C,D]
-    ].filter(t => t.every(Boolean));
-
-    for (let i=0; i<perColorSanity && i<anchorTriples.length; i++) {
-      const t = anchorTriples[i];
-      pushTriplet(t[0], t[1], t[2], `sanity:${color}`);
-    }
-
-    if (center) {
-      pushTriplet(center, A, D, `centerDiag:${color}`);
-      pushTriplet(center, B, C, `centerDiag:${color}`);
+  // Shuffle within each color group
+  for (const group of byColor.values()) {
+    for (let i = group.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [group[i], group[j]] = [group[j], group[i]];
     }
   }
 
-  const refMeta = pickExtremesForColor(referenceColor, idx);
-  const refNeutral = refMeta ? nearestRowFor(referenceColor, refMeta.center.stem, refMeta.center.cap, idx) : null;
-  const refA = refMeta ? nearestRowFor(referenceColor, refMeta.corners[0].stem, refMeta.corners[0].cap, idx) : null;
-  const refD = refMeta ? nearestRowFor(referenceColor, refMeta.corners[3].stem, refMeta.corners[3].cap, idx) : null;
-
-  for (const color of colors) {
-    if (color === referenceColor) continue;
-    const meta = pickExtremesForColor(color, idx);
-    if (!meta) continue;
-    const candidates = [
-      nearestRowFor(color, meta.center.stem, meta.center.cap, idx),
-      nearestRowFor(color, meta.corners[0].stem, meta.corners[0].cap, idx),
-      nearestRowFor(color, meta.corners[3].stem, meta.corners[3].cap, idx),
-      nearestRowFor(color, meta.corners[1].stem, meta.corners[1].cap, idx),
-    ].filter(Boolean);
-
-    for (let k=0; k<Math.min(crossColorPerColor, candidates.length); k++) {
-      const x = candidates[k];
-      if (refNeutral && refA) pushTriplet(x, refNeutral, refA, `xRefA:${color}`);
-      if (refNeutral && refD) pushTriplet(x, refNeutral, refD, `xRefD:${color}`);
+  function colorsWithRemaining() {
+    const colors = [];
+    for (const [color, group] of byColor.entries()) {
+      if (group.length > 0) colors.push(color);
     }
+    return colors;
   }
 
-  console.log(`Built OOO triplets (anchored): ${triplets.length}`);
-  return triplets;
+  function takeOneFromColor(color) {
+    const group = byColor.get(color);
+    if (!group || group.length === 0) return null;
+    return group.pop();
+  }
+
+  const trials = [];
+
+  // ---------- Phase 1: as many "all different color" trials as possible ----------
+  while (trials.length < totalTrials) {
+    const availColors = colorsWithRemaining();
+    if (availColors.length < 3) break;
+
+    // Shuffle available colors and pick 3 distinct ones
+    for (let i = availColors.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [availColors[i], availColors[j]] = [availColors[j], availColors[i]];
+    }
+    const chosenColors = availColors.slice(0, 3);
+
+    const triplet = [];
+    for (const c of chosenColors) {
+      const m = takeOneFromColor(c);
+      if (!m) {
+        throw new Error(`[OOO] Logic error: expected mushroom in color ${c}.`);
+      }
+      triplet.push(m);
+    }
+
+    trials.push({
+      a: triplet[0],
+      b: triplet[1],
+      c: triplet[2],
+      allDifferent: true,
+    });
+  }
+
+  // ---------- Phase 2: leftovers → fallback trials (colors can repeat) ----------
+  let leftovers = [];
+  for (const group of byColor.values()) {
+    leftovers = leftovers.concat(group);
+  }
+
+  // Shuffle leftovers
+  for (let i = leftovers.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [leftovers[i], leftovers[j]] = [leftovers[j], leftovers[i]];
+  }
+
+  while (leftovers.length >= 3 && trials.length < totalTrials) {
+    const triplet = leftovers.splice(0, 3);
+    const colorSet = new Set(triplet.map(m => (m.color || '').toLowerCase() || 'UNKNOWN'));
+    trials.push({
+      a: triplet[0],
+      b: triplet[1],
+      c: triplet[2],
+      allDifferent: (colorSet.size === 3),
+    });
+  }
+
+  if (trials.length !== totalTrials) {
+    console.warn(
+      `[OOO] Built ${trials.length} trials from ${n} mushrooms; expected ${totalTrials}.`
+    );
+  }
+
+  // ---------- Final shuffle: mix different-color and same-color trials ----------
+  for (let i = trials.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [trials[i], trials[j]] = [trials[j], trials[i]];
+  }
+
+  return trials;
 }
 
 /* ==================== LAZY OOO RENDER HELPERS ==================== */
 
 function _rowToRenderableMeta(r) {
-  // metadata only (no image yet)
   return {
     filename: r.filename,
     color: r.color,
@@ -377,47 +410,63 @@ async function _materializeOOOTripletLazy(tri) {
     a: { ..._rowToRenderableMeta(tri.a), image: imgA },
     b: { ..._rowToRenderableMeta(tri.b), image: imgB },
     c: { ..._rowToRenderableMeta(tri.c), image: imgC },
-    note: tri.note
+    allDifferent: !!tri.allDifferent
   };
 }
 
 /* ==================== PUBLIC STATE & API ==================== */
 
 let mushroomCatalogRows = [];
-let catalogIndex = null;
-
-let OOOTriplets = [];        // {a,b,c,note} — catalog rows, no images
-let _OOOTrialsCache = new Map(); // index -> Promise<rendered triplet>
+let OOOTriplets = [];              // {a,b,c,allDifferent} — catalog rows, no images yet
+let _OOOTrialsCache = new Map();   // index -> Promise<rendered triplet>
 
 async function buildSetAForOOO() {
+  // Load catalog if needed
   if (!mushroomCatalogRows || mushroomCatalogRows.length === 0) {
-    console.warn('Catalog not loaded yet; loading now…');
+    console.warn('[OOO] Catalog not loaded yet; loading now…');
     mushroomCatalogRows = await loadMushroomCatalogCSV();
   }
-  catalogIndex = indexCatalog(mushroomCatalogRows);
 
-  OOOTriplets = buildOOOTripletsAnchored(mushroomCatalogRows, {
-    perColorSanity: 3,
-    crossColorPerColor: 3,
-    refColor: null
-  });
-
-  // Hard cap / uniform subsample (keeps diversity, keeps runtime low)
-  const MAX_OOO = 180;
-  if (OOOTriplets.length > MAX_OOO) {
-    const stride = OOOTriplets.length / MAX_OOO;
-    const sampled = [];
-    for (let i=0;i<MAX_OOO;i++) sampled.push(OOOTriplets[Math.floor(i*stride)]);
-    OOOTriplets = sampled;
+  if (!Array.isArray(mushroomCatalogRows) || mushroomCatalogRows.length < 3) {
+    console.warn('[OOO] Catalog has too few rows for OOO.');
+    OOOTriplets = [];
+    return 0;
   }
 
-  // Shuffle order
-  for (let i = OOOTriplets.length - 1; i > 0; i--) {
+  // ---- Choose 72 mushrooms as base OOO pool ----
+  const N_DESIRED = 72;
+  const shuffled = mushroomCatalogRows.slice();
+  // Shuffle catalog before sampling
+  for (let i = shuffled.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
-    [OOOTriplets[i], OOOTriplets[j]] = [OOOTriplets[j], OOOTriplets[i]];
+    [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
   }
 
-  console.log(`Prepared OOO trials (meta only): ${OOOTriplets.length}`);
+  let poolCount = Math.min(N_DESIRED, shuffled.length);
+  if (poolCount < N_DESIRED) {
+    console.warn(
+      `[OOO] Only found ${poolCount} mushrooms in catalog (wanted 72). ` +
+      'Using all of them.'
+    );
+  }
+
+  let basePool = shuffled.slice(0, poolCount);
+
+  // Ensure length is a multiple of 3 (drop a couple if necessary)
+  if (basePool.length % 3 !== 0) {
+    const trimmedCount = basePool.length - (basePool.length % 3);
+    console.warn(
+      `[OOO] Pool size ${basePool.length} not divisible by 3; trimming to ${trimmedCount}.`
+    );
+    basePool = basePool.slice(0, trimmedCount);
+  }
+
+  // Build 3-mushroom trials with between-color preference
+  OOOTriplets = buildOOOTrialsFromPool(basePool);
+
+  console.log(
+    `[OOO] Prepared ${OOOTriplets.length} OOO trials from ${basePool.length} mushrooms.`
+  );
   return OOOTriplets.length;
 }
 
@@ -447,15 +496,19 @@ function getOOOCount() { return OOOTriplets.length; }
 function getOOOMeta(i) { return (i>=0 && i<OOOTriplets.length) ? OOOTriplets[i] : null; }
 
 /* ==================== OPTIONAL: 2AFC helpers (lazy) ==================== */
-// NOTE: No startup preload anymore; call when needed.
-function sampleRows(n=5, colorWhitelist=null) {
+
+function sampleRows(n = 5, colorWhitelist = null) {
   const pool = (mushroomCatalogRows || []).filter(r =>
     !colorWhitelist || colorWhitelist.includes(r.color)
   );
+  const tmp = pool.slice();
   const out = [];
-  for (let i=0; i<n && pool.length>0; i++) {
-    const j = Math.floor(Math.random() * pool.length);
-    out.push(pool.splice(j,1)[0]);
+  for (let i = tmp.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [tmp[i], tmp[j]] = [tmp[j], tmp[i]];
+  }
+  for (let i = 0; i < n && i < tmp.length; i++) {
+    out.push(tmp[i]);
   }
   return out;
 }
@@ -477,7 +530,9 @@ async function getRandomPair() {
 
 function getPlatforms(overridePlatforms) {
   if (Array.isArray(overridePlatforms) && overridePlatforms.length > 0) return overridePlatforms;
-  if (typeof groundPlatforms !== 'undefined' && Array.isArray(groundPlatforms) && groundPlatforms.length > 0) {
+  if (typeof groundPlatforms !== 'undefined' &&
+      Array.isArray(groundPlatforms) &&
+      groundPlatforms.length > 0) {
     return groundPlatforms;
   }
   return [{ startX: 0, endX: 800, y: 400 }];
@@ -486,7 +541,7 @@ function getPlatforms(overridePlatforms) {
 /* ==================== BOOTSTRAP ==================== */
 
 (async () => {
-  // Load catalog + build triplets (meta only; no images)
+  // Load catalog + build between-color OOO triplets (meta only; no images yet)
   await buildSetAForOOO();
 
   // Expose globals your task can call on-demand
@@ -499,8 +554,4 @@ function getPlatforms(overridePlatforms) {
 
   // 2AFC helpers
   window.getRandomPair         = getRandomPair;
-
-  // No eager image loading here — render loop should call:
-  // const trial = await getOOOTrial(currentIndex);
-  // prefetchOOO(currentIndex);
 })();
