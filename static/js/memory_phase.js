@@ -150,7 +150,6 @@ function showMushrooms() {
   memory_selectedSide = 'middle';
   memory_trialStartTime = performance.now();
   memory_awaitingAnswer = false;
-  hideChoiceIndicator();
   updateSelector();
 }
 
@@ -181,86 +180,6 @@ function updateSelector() {
   selector.style.left = `${leftPos}px`;
 }
 
-// ========================== CHOICE INDICATOR ===========================
-
-// Ensure we have a reusable black circle for the animation
-function getChoiceIndicator() {
-  const phase = document.getElementById('memorySelectorPhase');
-  if (!phase) return null;
-
-  let indicator = document.getElementById('memoryChoiceIndicator');
-  if (!indicator) {
-    indicator = document.createElement('div');
-    indicator.id = 'memoryChoiceIndicator';
-    indicator.style.position = 'absolute';
-    indicator.style.width = '30px';
-    indicator.style.height = '30px';
-    indicator.style.borderRadius = '50%';
-    indicator.style.backgroundColor = 'black';
-    indicator.style.zIndex = '900';
-    indicator.style.display = 'none';
-    phase.appendChild(indicator);
-  }
-  return indicator;
-}
-
-function hideChoiceIndicator() {
-  const indicator = document.getElementById('memoryChoiceIndicator');
-  if (indicator) indicator.style.display = 'none';
-}
-
-// Animate the black circle moving to the chosen mushroom over 1 second
-function animateChoiceIndicator(targetBox, onDone) {
-  const phase = document.getElementById('memorySelectorPhase');
-  if (!phase || !targetBox) {
-    if (onDone) onDone();
-    return;
-  }
-
-  const indicator = getChoiceIndicator();
-  if (!indicator) {
-    if (onDone) onDone();
-    return;
-  }
-
-  const containerRect = phase.getBoundingClientRect();
-  const targetRect = targetBox.getBoundingClientRect();
-
-  // Start from center of the container
-  const startX = containerRect.left + containerRect.width / 2;
-  const startY = containerRect.top + containerRect.height / 2;
-
-  const endX = targetRect.left + targetRect.width / 2;
-  const endY = targetRect.top + targetRect.height / 2;
-
-  const duration = 1000; // 1 second
-  const startTime = performance.now();
-
-  indicator.style.display = 'block';
-
-  function step(now) {
-    const t = Math.min(1, (now - startTime) / duration);
-    const x = startX + (endX - startX) * t;
-    const y = startY + (endY - startY) * t;
-
-    // Position relative to container
-    indicator.style.left = `${x - containerRect.left - indicator.offsetWidth / 2}px`;
-    indicator.style.top = `${y - containerRect.top - indicator.offsetHeight / 2}px`;
-
-    if (t < 1) {
-      requestAnimationFrame(step);
-    } else {
-      // Small pause at the target, then hide and continue
-      setTimeout(() => {
-        hideChoiceIndicator();
-        if (onDone) onDone();
-      }, 50);
-    }
-  }
-
-  requestAnimationFrame(step);
-}
-
 // ========================== KEY HANDLER & CHOICE ===========================
 
 function Memory_selectorKeyHandler(e) {
@@ -281,7 +200,7 @@ function Memory_selectorKeyHandler(e) {
   }
 }
 
-// Handle a left/right choice, log it, animate, then either prompt or go to next trial
+// Handle a left/right choice, log it, then either prompt or go to next trial
 function handleMemoryChoice(side) {
   const a = aMushrooms[memory_currentQuestion];
   const b = bMushrooms[memory_currentQuestion];
@@ -336,20 +255,13 @@ function handleMemoryChoice(side) {
     });
   }
 
-  const targetBox =
-    side === 'left'
-      ? document.getElementById('leftMushroomBox')
-      : document.getElementById('rightMushroomBox');
-
-  // Animate black circle moving to chosen mushroom, then either show similarity prompt or advance
-  animateChoiceIndicator(targetBox, () => {
-    if (ENABLE_SIMILARITY_TEST) {
-      memory_chosenMushroom = selected;
-      showMemoryChoicePrompt(selected);
-    } else {
-      proceedToNextMemoryTrial();
-    }
-  });
+  // No animation / black dot — go straight to next step
+  if (ENABLE_SIMILARITY_TEST) {
+    memory_chosenMushroom = selected;
+    showMemoryChoicePrompt(selected);
+  } else {
+    proceedToNextMemoryTrial();
+  }
 }
 
 // Advance to the next trial or finish memory phase
@@ -446,8 +358,6 @@ function completeMemory() {
 
   const prompt = document.getElementById('memoryPrompt');
   if (prompt) prompt.remove();
-
-  hideChoiceIndicator();
 
   // Hide all phases
   document.querySelectorAll('.phase').forEach(div => (div.style.display = 'none'));
