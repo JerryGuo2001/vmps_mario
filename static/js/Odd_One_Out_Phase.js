@@ -1,12 +1,12 @@
-// ===== Odd_One_Out_Phase.js (lazy OOO, no generateMushroomSets) =====
+// ===== Odd_One_Out_Phase.js (lazy OOO, 72→24 design) =====
 
-let currentTrialOOO, trialsOOO;  // trialsOOO will store indices into OOOTriplets
+let currentTrialOOO, trialsOOO;  // trialsOOO will store indices into OOOTrials
 let typeOOO = 0;
 let trialStartTimeOOO = null;
 let _oooKeyListenerAttached = false;
 
-// How many OOO trials do you want to run this block?
-const OOO_TRIALS_TO_RUN = 3;  // change as needed (e.g., 30, 60, etc.)
+// We have 72 mushrooms, each used once → 24 trials.
+const OOO_TRIALS_TO_RUN = 24;
 
 async function initTaskOOO() {
   currentTrialOOO = 0;
@@ -22,27 +22,30 @@ async function initTaskOOO() {
   if (typeof window.getOOOCount !== 'function' ||
       typeof window.getOOOTrial !== 'function' ||
       typeof window.prefetchOOO !== 'function') {
-    console.error('[OOO] mushroom.js lazy API not found. Make sure mushroom.js (lazy edition) is loaded before this file.');
+    console.error('[OOO] mushroom.js lazy API not found. Make sure mushroom.js (OOO section) is loaded before this file.');
     alert('Internal error: OOO module not ready. Please reload.');
     return;
   }
 
-  const total = window.getOOOCount();
+  const total = window.getOOOCount();  // should be 24
   if (!total || total <= 0) {
     console.warn('[OOO] No OOO triplets prepared (meta).');
     alert('No OOO stimuli available. Check catalog.');
     return;
   }
 
-  // Build a small randomized index list into OOOTriplets
+  // Build a randomized index list into OOO trials
   const N = Math.min(OOO_TRIALS_TO_RUN, total);
   const allIdx = Array.from({ length: total }, (_, i) => i);
+
   // simple Fisher–Yates shuffle
   for (let i = allIdx.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
     [allIdx[i], allIdx[j]] = [allIdx[j], allIdx[i]];
   }
-  trialsOOO = allIdx.slice(0, N); // e.g., first 3 indices
+
+  // We only use N of the available trials (here N should be 24 == total)
+  trialsOOO = allIdx.slice(0, N);
 
   // Reuse or create task container
   let containerOOO = document.getElementById('oddOneOutTaskDiv');
@@ -90,7 +93,7 @@ async function showTrialOOO() {
   const imgContainerOOO = document.getElementById('imageContainerOOO');
   if (!imgContainerOOO) return;
 
-  const tripletIdx = trialsOOO[currentTrialOOO];   // index into OOOTriplets
+  const tripletIdx = trialsOOO[currentTrialOOO];   // index into constructed OOO trials
   imgContainerOOO.innerHTML = '';
 
   // Lazily get the rendered triplet (a,b,c each has {filename,..., image})
@@ -106,7 +109,7 @@ async function showTrialOOO() {
   // Render three images
   for (const m of order) {
     const img = document.createElement('img');
-    img.src = m.image.src;   // already loaded and cached
+    img.src = m.image.src;   // already loaded and cached (from mushroom.js OOO builder)
     img.style.width = '150px';
     img.alt = `${m.color}-${m.stem}-${m.cap}`;
     // optional: store filename for convenience
@@ -196,7 +199,5 @@ function finishTaskOOO() {
       const trialFilename = `data_${id}.csv`;
       downloadCSV(participantData.trials, trialFilename);
     }
-    // No mushroomSets here anymore; if you still want to export catalogs,
-    // add your own exporter using window.OOOTriplets / window.mushroomCatalogRows.
   }
 }

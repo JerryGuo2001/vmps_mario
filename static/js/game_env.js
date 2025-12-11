@@ -668,7 +668,7 @@ async function handleTextInteraction_canvas4() {
       character.hp = 20;           // starting HP for next room
       currentQuestion += 1;
       lettergradeupdate = true;
-      lettergradefreezetime = 1000;
+      lettergradefreezetime = 1500;
       console.log("Proceeding to next question: " + currentQuestion);
       roomChoiceStartTime = performance.now();
       doorsAssigned = false;
