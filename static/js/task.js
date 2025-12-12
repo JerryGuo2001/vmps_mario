@@ -589,7 +589,12 @@ function updateGame(currentTime) {
       freezeTime = 1000;
       revealOnlyValue = true;
       drawMushroomQuestionBox();
-      character.hp += (activeMushroom.value === 'reset' ? -character.hp : activeMushroom.value);
+      if (activeMushroom.value === 'reset') {
+        character.hp = 0;
+      } else {
+        character.hp = clampHP(character.hp + getNumericValue(activeMushroom.value));
+      }
+
       mushroomDecisionStartTime = null;
 
     } else if (keys['q'] || mushroomDecisionTimer >= maxDecisionTime) {
@@ -646,23 +651,24 @@ function updateGame(currentTime) {
 
     if (currentCanvas == 1) {
 
-      // letter grade display section
-      if (lettergradeupdate === true) {
-        if (lettergradefreezetime <= 0) {
-          lettergradeupdate = false;
-        }
+      // // letter grade display section
+      // if (lettergradeupdate === true) {
+      //   if (lettergradefreezetime <= 0) {
+      //     lettergradeupdate = false;
+      //   }
 
-        drawBackground();          // base sky + ground
-        drawLetterGradeOverlay();  // NEW: overlay the A/B/C letter
+      //   drawBackground();          // base sky + ground
+      //   drawLetterGradeOverlay();  // NEW: overlay the A/B/C letter
 
-        lettergradefreezetime -= 16;
-        requestAnimationFrame(updateGame);
-        return;
-      }
-      //letter grade display section end
+      //   lettergradefreezetime -= 16;
+      //   requestAnimationFrame(updateGame);
+      //   return;
+      // }
+      // lettergradefreezetime=0
+      // //letter grade display section end
 
       
-      lettergradefreezetime=0
+      
       if (init_position === true) {
         if (typeof character.worldX !== 'number') {
           character.worldX = cameraOffset + character.x;

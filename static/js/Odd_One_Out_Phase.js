@@ -4,7 +4,7 @@ let currentTrialOOO, trialsOOO;  // trialsOOO will store indices into OOOTrials
 let typeOOO = 0;
 let trialStartTimeOOO = null;
 let _oooKeyListenerAttached = false;
-
+let percentagecompleted
 // We have 72 mushrooms, each used once → 24 trials.
 const OOO_TRIALS_TO_RUN = 24;
 
@@ -290,6 +290,7 @@ function updateOOOProgressBar() {
 
   if (label) {
     const displayTrial = Math.min(currentTrialOOO + 1, total);
-    label.textContent = `Trial ${displayTrial} of ${total}`;
+    percentagecompleted=displayTrial/total
+    label.textContent = `${percentagecompleted} % Completed`;
   }
 }

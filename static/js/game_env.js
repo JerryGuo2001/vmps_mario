@@ -19,19 +19,48 @@ let mushroomTrialIndex = 0;
 let mushroomDecisionStartTime = null;
 let regeneratingMushrooms = false;  // NEW: prevent double-regeneration
 
-//letter grade system set up
-let lettergradeupdate = false;
-let lettergradefreezetime = 0;
-let lastRoomHP = 0;
-let lastRoomLetterGrade = null;
 
-function computeLetterGradeFromHP(hp) {
-  if (hp > 80) return 'A';
-  if (hp > 50 && hp <= 80) return 'B';
-  if (hp > 30 && hp <= 50) return 'C';
-  // below or equal to 30 → no passing grade
-  return 'D';
+// ================= HP rules =================
+const MAX_HP = 100;
+const BASE_START_HP = 20;
+const CARRY_THRESHOLD_HP = 30;
+
+function clampHP(hp) {
+  return Math.max(0, Math.min(MAX_HP, hp));
 }
+
+// Bonus = number of full 10-HP chunks above 30
+// Examples:
+// 54 -> (54-30)=24 -> floor(24/10)=2
+// 33 -> (33-30)=3  -> floor(3/10)=0
+function nextRoomStartHP(hpEnd) {
+  const end = Number(hpEnd);
+  if (!Number.isFinite(end)) return BASE_START_HP;
+
+  if (end <= CARRY_THRESHOLD_HP) return BASE_START_HP;
+
+  const extra = end - CARRY_THRESHOLD_HP;
+  const bonus = Math.floor(extra / 10);
+
+  return clampHP(BASE_START_HP + bonus);
+}
+
+
+
+
+//letter grade system set up
+// let lettergradeupdate = false;
+// let lettergradefreezetime = 0;
+// let lastRoomHP = 0;
+// let lastRoomLetterGrade = null;
+
+// function computeLetterGradeFromHP(hp) {
+//   if (hp > 80) return 'A';
+//   if (hp > 50 && hp <= 80) return 'B';
+//   if (hp >= 30 && hp <= 50) return 'C';
+//   // below 30 → no passing grade
+//   return 'D';
+// }
 
 
 //mushroom size display helper 
@@ -659,20 +688,18 @@ async function handleTextInteraction_canvas4() {
     const yPos = canvas.height / 4;
     ctx.fillText(text, xPos, yPos);
 
-    if (keys['p']) {
-      // --- NEW: capture HP and compute letter grade BEFORE resetting HP ---
-      lastRoomHP = character.hp;
-      lastRoomLetterGrade = computeLetterGradeFromHP(lastRoomHP);
+  if (keys['p']) {
+    const startHPNext = nextRoomStartHP(character.hp);
 
-      currentCanvas = 1;
-      character.hp = 20;           // starting HP for next room
-      currentQuestion += 1;
-      lettergradeupdate = true;
-      lettergradefreezetime = 1500;
-      console.log("Proceeding to next question: " + currentQuestion);
-      roomChoiceStartTime = performance.now();
-      doorsAssigned = false;
-    }
+    currentCanvas = 1;
+    character.hp = startHPNext;     // ✅ carry-over applied here (capped to 100)
+
+    currentQuestion += 1;
+    console.log("Proceeding to next question: " + currentQuestion);
+    roomChoiceStartTime = performance.now();
+    doorsAssigned = false;
+  }
+
 
   }
 }
@@ -788,9 +815,11 @@ function drawMysBox() {
             staminaChange = 'reset';
             character.hp = 0;
           } else {
-            character.hp += mushroom.value;
-            staminaChange = mushroom.value;
+            const delta = getNumericValue(mushroom.value);
+            character.hp = clampHP(character.hp + delta);
+            staminaChange = delta;
           }
+
           const heartMessage = document.createElement('div');
           heartMessage.style.position = 'fixed';
           heartMessage.style.top = '50%';
@@ -876,9 +905,11 @@ async function handleMushroomCollision_canvas4() {
           ctx.font = '20px Arial';
           ctx.fillStyle = 'red';
         } else {
-          character.hp += mushroom.value;
-          staminaChange = mushroom.value;
+          const delta = getNumericValue(mushroom.value);
+          character.hp = clampHP(character.hp + delta);
+          staminaChange = delta;
         }
+
         if (staminaChange > 0) {
           const heartMessage = document.createElement('div');
           heartMessage.style.position = 'fixed';
@@ -944,7 +975,7 @@ async function checkHP_canvas4() {
   if (character.hp <= 0 && freezeTime === 0) {
     freezeTime = 1000;
     currentCanvas = 4;
-    character.hp = 20;
+    character.hp = BASE_START_HP;
     const respawn = getRespawnSpot();
     ensureWorldPosInit(); character.worldX = respawn.x;
     character.y = respawn.y;
@@ -1134,7 +1165,7 @@ function drawCharacter_canvas4() {
 }
 
 function drawHP_canvas4() {
-  const maxHP = 100; // or whatever your conceptual max is
+  const maxHP = MAX_HP;
   const barWidth = 200;
   const barHeight = 20;
 

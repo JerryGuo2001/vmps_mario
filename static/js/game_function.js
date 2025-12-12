@@ -326,35 +326,35 @@ function drawBackground() {
 }
 
 
-function drawLetterGradeOverlay() {
-  if (!lastRoomLetterGrade) return;  // nothing to show yet
+// function drawLetterGradeOverlay() {
+//   if (!lastRoomLetterGrade) return;  // nothing to show yet
 
-  ctx.save();
-  // Dim background
-  ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
+//   ctx.save();
+//   // Dim background
+//   ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
+//   ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-  ctx.textAlign = 'center';
-  ctx.fillStyle = '#ffffff';
+//   ctx.textAlign = 'center';
+//   ctx.fillStyle = '#ffffff';
 
-  // Title
-  ctx.font = '32px Arial';
-  ctx.fillText('Last room result', canvas.width / 2, canvas.height / 2 - 40);
+//   // Title
+//   ctx.font = '32px Arial';
+//   ctx.fillText('Last room result', canvas.width / 2, canvas.height / 2 - 40);
 
-  // Big letter grade
-  ctx.font = '64px Arial';
-  ctx.fillText(lastRoomLetterGrade, canvas.width / 2, canvas.height / 2 + 10);
+//   // Big letter grade
+//   ctx.font = '64px Arial';
+//   ctx.fillText(lastRoomLetterGrade, canvas.width / 2, canvas.height / 2 + 10);
 
-  // HP text
-  ctx.font = '20px Arial';
-  ctx.fillText(
-    `HP collected: ${lastRoomHP}`,
-    canvas.width / 2,
-    canvas.height / 2 + 50
-  );
+//   // HP text
+//   ctx.font = '20px Arial';
+//   ctx.fillText(
+//     `HP collected: ${lastRoomHP}`,
+//     canvas.width / 2,
+//     canvas.height / 2 + 50
+//   );
 
-  ctx.restore();
-}
+//   ctx.restore();
+// }
 
 
 // Handle Character Movement
