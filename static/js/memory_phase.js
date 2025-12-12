@@ -237,7 +237,7 @@ function updateMemoryProgressBar() {
   if (label) {
     // Display 1-based trial index for participants
     const displayTrial = Math.min(memory_currentQuestion + 1, memory_totalQuestions);
-    percentagecompleted=displayTrial/memory_totalQuestions
+    percentagecompleted=Math.round(100*displayTrial/memory_totalQuestions)
     label.textContent = `${percentagecompleted}% Completed`;
   }
 }

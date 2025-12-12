@@ -290,7 +290,7 @@ function updateOOOProgressBar() {
 
   if (label) {
     const displayTrial = Math.min(currentTrialOOO + 1, total);
-    percentagecompleted=displayTrial/total
+    percentagecompleted=Math.round(100*displayTrial/total)
     label.textContent = `${percentagecompleted} % Completed`;
   }
 }
