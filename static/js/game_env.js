@@ -85,17 +85,13 @@ function expGetZone(row, ...keys) {
 function expTypeKeyFromRow(row) {
   const color = expGetZone(row, 'color');
 
-  const stem  = expGetZone(row, 'stem_width_zone', 'stemWidthZone', 'stem_width');
-  const round = expGetZone(row, 'cap_roundness_zone', 'capRoundnessZone', 'cap_roundness');
+  // ✅ your CSV uses these
+  const stem  = expGetZone(row, 'stem_width_zone', 'stemWidthZone', 'stem_width', 'stem');
+  const round = expGetZone(row, 'cap_roundness_zone', 'capRoundnessZone', 'cap_roundness', 'cap');
 
-  if (!EXP_TYPE_INCLUDE_CAP_SIZE) {
-    return `c:${color}|s:${stem}|r:${round}`;
-  }
-
-  // Optional: include a discrete cap-size zone if you have it
-  const cap = expGetZone(row, 'cap_size_zone', 'capSizeZone', 'cap_size');
-  return `c:${color}|s:${stem}|r:${round}|cap:${cap}`;
+  return `c:${color}|s:${stem}|r:${round}`;
 }
+
 
 // Which rooms does this row belong to? (explicit room column beats color-map)
 function expRoomsForRow(row) {
