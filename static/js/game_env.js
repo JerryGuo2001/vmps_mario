@@ -93,24 +93,50 @@ function capZoneFromValue(capRoundness) {
   return "neutral";
 }
 
-function stemZoneFromValue(stemWidth, capZone) {
+function stemZoneFromValue(stemWidth) {
   const stem = _num(stemWidth);
   if (!Number.isFinite(stem)) return "na";
-  if (capZone === "neutral" && stem >= 6 && stem <= 10) return "neutral";
-  return (stem <= 8) ? "thin" : "thick";
+  if (stem < 6) return "thin";
+  if (stem > 10) return "thick";
+  return "neutral";
 }
 
+// and update expTypeKeyFromRow to NOT pass capZone into stem zoning
 function expTypeKeyFromRow(row) {
   const color = String(row.color_name ?? row.color ?? "na").trim().toLowerCase();
   const stemW = row.stem_width ?? row.stem;
   const capR  = row.cap_roundness ?? row.cap;
 
   const rZone = capZoneFromValue(capR);
-  const sZone = stemZoneFromValue(stemW, rZone);
+  const sZone = stemZoneFromValue(stemW);
 
   return `c:${color}|s:${sZone}|r:${rZone}`;
 }
 
+function debugExploreTypes() {
+  const rows = window.mushroomCatalogRows || [];
+  const keys = rows.map(expTypeKeyFromRow);
+
+  const uniq = new Set(keys);
+  const na = keys.filter(k => k.includes("|s:na") || k.includes("|r:na")).length;
+
+  // count combos per color
+  const byColor = {};
+  for (const k of uniq) {
+    const m = k.match(/^c:([^|]+)\|s:([^|]+)\|r:(.+)$/);
+    if (!m) continue;
+    const color = m[1];
+    (byColor[color] ||= new Set()).add(`s:${m[2]}|r:${m[3]}`);
+  }
+
+  console.log("rows:", rows.length);
+  console.log("unique type keys:", uniq.size);
+  console.log("keys with NA zones:", na);
+
+  for (const [c, set] of Object.entries(byColor)) {
+    console.log(`color=${c} combos=${set.size}`, Array.from(set).sort());
+  }
+}
 // Which rooms does this row belong to?
 // - If a row has explicit room/env/environment, use that.
 // - Otherwise infer from ROOM_COLOR_MAP[color].
