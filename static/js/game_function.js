@@ -10,6 +10,10 @@ let roomChoiceStartTime = null;
 
 const doorTypes = ['lava', 'forest', 'ocean', 'desert', 'cave'];
 
+// NEW: dynamic room pool (rooms get removed once fully explored)
+if (!Array.isArray(availableDoorTypes)) availableDoorTypes = doorTypes.slice();
+
+
 const doorImages = {
     lava: new Image(),
     forest: new Image(),
@@ -28,9 +32,18 @@ doorImages.cave.src = 'TexturePack/caveDoor.png';
 async function drawObstacles() {
     if (currentCanvas === 1) {
         if (!doorsAssigned) {
-            const shuffled = [...doorTypes].sort(() => Math.random() - 0.5);
+            ensureExplorationIndex();
+
+            if (!Array.isArray(availableDoorTypes) || availableDoorTypes.length === 0) {
+            // all rooms cleared
+            completeExplore();
+            return;
+            }
+
+            const shuffled = [...availableDoorTypes].sort(() => Math.random() - 0.5);
             leftDoorType = shuffled[0];
-            rightDoorType = shuffled[1];
+            rightDoorType = (shuffled.length > 1) ? shuffled[1] : shuffled[0];
+
             doorsAssigned = true;
             roomChoiceStartTime = performance.now(); // Start timer now
         }

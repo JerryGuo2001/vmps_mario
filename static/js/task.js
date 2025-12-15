@@ -470,6 +470,8 @@ function maybeStartImmediateDecisionFreeze() {
       if (!m) m = mushrooms.find(m => m.isVisible);
 
       if (m) {
+        markMushroomSeenOnce(m, currentRoom);
+
         activeMushroom = m;
         freezeState = true;
         mushroomDecisionTimer = 0;
@@ -722,9 +724,10 @@ function updateGame(currentTime) {
     requestAnimationFrame(updateGame);
   }
 
-  if (currentQuestion > totalQuestions) {
+  if (isExploreComplete() || currentQuestion > totalQuestions) {
     completeExplore();
   }
+
 }
 
 

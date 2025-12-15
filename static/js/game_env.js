@@ -46,6 +46,190 @@ function nextRoomStartHP(hpEnd) {
 }
 
 
+// ================= Exploration quota + progress =================
+const REQUIRED_SEEN_PER_TYPE = 3;  // each mushroom type must be seen 3x
+
+let EXP_TOTAL_TYPES = 0;           // computed from catalog
+let EXP_TARGET_SIGHTINGS = 0;      // EXP_TOTAL_TYPES * REQUIRED_SEEN_PER_TYPE
+
+const expSeen = Object.create(null);        // id -> seen count (uncapped)
+const expRowById = Object.create(null);     // id -> catalog row
+const expHomeRoomById = Object.create(null); // id -> "home room" (used for room completion)
+const expRoomToIds = Object.create(null);   // room -> [ids]
+
+let expTotalSeenCapped = 0;        // Σ min(seen, REQUIRED_SEEN_PER_TYPE)
+let roomsPassed = 0;               // each P-press increments this
+let clearedRooms = new Set();
+let availableDoorTypes = null;     // will become doorTypes.slice()
+
+function expNormalizeRoom(r) {
+  return String(r || '').trim().toLowerCase();
+}
+function expMushroomId(rowOrId) {
+  if (!rowOrId) return '';
+  if (typeof rowOrId === 'string') return rowOrId.trim();
+  return String(rowOrId.filename || rowOrId.imagefilename || rowOrId.image || '').trim();
+}
+
+/**
+ * IMPORTANT:
+ * If you can, add an explicit "room" column in your catalog rows (lava/forest/ocean/desert/cave).
+ * Then home-room inference is exact.
+ * Otherwise we fall back to color -> ROOM_COLOR_MAP[color][0].
+ */
+function expInferHomeRoomFromRow(row) {
+  // If your catalog ever has an explicit room/env column, use it.
+  const explicit = row.room || row.env || row.environment;
+  if (explicit) return expNormalizeRoom(explicit);
+
+  const c = String(row.color || '').trim().toLowerCase();
+  const rooms = ROOM_COLOR_MAP[c];
+
+  // ✅ Only UNIQUE colors define a "home room"
+  if (Array.isArray(rooms) && rooms.length === 1) {
+    return expNormalizeRoom(rooms[0]);
+  }
+
+  // shared colors do NOT belong to a single room for clearing logic
+  return null;
+}
+
+
+function ensureExplorationIndex() {
+  const rows = window.mushroomCatalogRows || [];
+  if (!rows.length) return false;
+  if (EXP_TOTAL_TYPES > 0) return true; // already built
+
+  for (const r of rows) {
+    const id = expMushroomId(r);
+    if (!id) continue;
+
+    if (!expRowById[id]) expRowById[id] = r;
+    if (!(id in expSeen)) expSeen[id] = 0;
+
+    const home = expInferHomeRoomFromRow(r);
+    expHomeRoomById[id] = home; // may be null for shared colors
+
+    // ✅ Only unique-color mushrooms gate room completion
+    if (home) {
+      if (!expRoomToIds[home]) expRoomToIds[home] = [];
+      if (!expRoomToIds[home].includes(id)) expRoomToIds[home].push(id);
+    }
+
+  }
+
+  EXP_TOTAL_TYPES = Object.keys(expSeen).length;
+  EXP_TARGET_SIGHTINGS = EXP_TOTAL_TYPES * REQUIRED_SEEN_PER_TYPE;
+
+  ensureExploreProgressUI();
+  updateExploreProgressUI();
+  return true;
+}
+
+function ensureExploreProgressUI() {
+  if (document.getElementById('explore-progress')) return;
+  const canvasEl = document.getElementById('gameCanvas');
+  if (!canvasEl) return;
+
+  const div = document.createElement('div');
+  div.id = 'explore-progress';
+  div.style.margin = '8px auto 0';
+  div.style.maxWidth = (canvasEl.width ? `${canvasEl.width}px` : '600px');
+  div.style.fontFamily = 'Arial, sans-serif';
+  div.style.fontSize = '14px';
+
+  div.innerHTML = `
+    <div id="explore-progress-text"></div>
+    <div id="explore-progress-sub" style="opacity:0.85"></div>
+    <div style="height:10px; background:#ddd; border:1px solid #000; margin-top:6px;">
+      <div id="explore-progress-bar" style="height:100%; width:0%; background:#3a6df0;"></div>
+    </div>
+  `;
+  canvasEl.insertAdjacentElement('afterend', div);
+}
+
+function getExplorePercent() {
+  if (!EXP_TARGET_SIGHTINGS) return 0;
+  const pct = (expTotalSeenCapped / EXP_TARGET_SIGHTINGS) * 100;
+  return Math.max(0, Math.min(100, pct));
+}
+
+function updateExploreProgressUI() {
+  ensureExploreProgressUI();
+  const pct = getExplorePercent();
+
+  const textEl = document.getElementById('explore-progress-text');
+  const subEl  = document.getElementById('explore-progress-sub');
+  const barEl  = document.getElementById('explore-progress-bar');
+
+  if (textEl) {
+    if (!EXP_TARGET_SIGHTINGS) {
+      textEl.textContent = `Exploration progress: 0% (catalog not loaded yet)`;
+    } else {
+      textEl.textContent =
+        `Exploration progress: ${Math.floor(pct)}% (${expTotalSeenCapped}/${EXP_TARGET_SIGHTINGS} sightings)`;
+    }
+  }
+
+
+  if (subEl) {
+    const bonus = roomsPassed * 2; // display-only “+2% per room pass”
+    const roomsLeft = Array.isArray(availableDoorTypes) ? availableDoorTypes.length : '—';
+    subEl.textContent = `Room passes: ${roomsPassed} (display bonus +${bonus}%) | Rooms remaining: ${roomsLeft}`;
+  }
+
+  if (barEl) barEl.style.width = `${pct}%`;
+}
+
+function roomIsComplete(room) {
+  const r = expNormalizeRoom(room);
+  const ids = expRoomToIds[r];
+  if (!Array.isArray(ids) || ids.length === 0) return false;
+  return ids.every(id => (expSeen[id] || 0) >= REQUIRED_SEEN_PER_TYPE);
+}
+
+function checkAndClearRoom(room) {
+  const r = expNormalizeRoom(room);
+  if (!r || r === 'sky' || clearedRooms.has(r)) return false;
+  if (!roomIsComplete(r)) return false;
+
+  clearedRooms.add(r);
+  if (Array.isArray(availableDoorTypes)) {
+    availableDoorTypes = availableDoorTypes.filter(x => expNormalizeRoom(x) !== r);
+  }
+  updateExploreProgressUI();
+  return true;
+}
+
+function markMushroomSeenOnce(mushroomObjOrId, fallbackRoom = null) {
+  ensureExplorationIndex();
+
+  const id = expMushroomId(mushroomObjOrId);
+  if (!id) return;
+
+  // Only once per spawned mushroom object
+  if (typeof mushroomObjOrId === 'object' && mushroomObjOrId) {
+    if (mushroomObjOrId._seenLogged === true) return;
+    mushroomObjOrId._seenLogged = true;
+  }
+
+  const before = Math.min(expSeen[id] || 0, REQUIRED_SEEN_PER_TYPE);
+  expSeen[id] = (expSeen[id] || 0) + 1;
+  const after  = Math.min(expSeen[id], REQUIRED_SEEN_PER_TYPE);
+  expTotalSeenCapped += (after - before);
+
+  const roomHere = expNormalizeRoom(fallbackRoom) || expNormalizeRoom(currentRoom);
+  checkAndClearRoom(roomHere);
+
+
+  updateExploreProgressUI();
+}
+
+function isExploreComplete() {
+  ensureExplorationIndex();
+  return EXP_TARGET_SIGHTINGS > 0 && expTotalSeenCapped >= EXP_TARGET_SIGHTINGS;
+}
+
 
 
 //letter grade system set up
@@ -353,7 +537,7 @@ async function generateMushroom(count = 5) {
     // -------- NON-SKY ROOMS: use ROOM_COLOR_MAP structure --------
     const allowedColors = getAllowedColorsForEnv(envRaw);
     pool = allRows;
-
+    
     if (Array.isArray(allowedColors) && allowedColors.length > 0) {
       const set = new Set(allowedColors.map(c => String(c).toLowerCase()));
       pool = allRows.filter(r => set.has(String(r.color).toLowerCase()));
@@ -689,6 +873,9 @@ async function handleTextInteraction_canvas4() {
     ctx.fillText(text, xPos, yPos);
 
   if (keys['p']) {
+    roomsPassed += 1;          // NEW: “+2%” display bonus per room pass
+    checkAndClearRoom(currentRoom); // NEW: in case last sighting completed the room
+    updateExploreProgressUI();
     const startHPNext = nextRoomStartHP(character.hp);
 
     currentCanvas = 1;
@@ -752,7 +939,11 @@ function drawMysBox() {
     if (character.velocityY < 0 && hOver &&
         prev.top >= boxBottom && nextTop <= boxBottom) {
       mushroom.isVisible = true;
+      // NEW: count as "seen" at first reveal
+      markMushroomSeenOnce(mushroom, currentRoom);
+
       if (mushroomDecisionStartTime === null) mushroomDecisionStartTime = performance.now();
+
       character.y = boxBottom;
       character.velocityY = 0;
       return;
