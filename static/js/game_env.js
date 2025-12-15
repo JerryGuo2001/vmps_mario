@@ -72,25 +72,43 @@ let availableDoorTypes = null;     // will become doorTypes.slice()
 // like cap_size_zone in the catalog.
 const EXP_TYPE_INCLUDE_CAP_SIZE = false;
 
-function expGetZone(row, ...keys) {
-  for (const k of keys) {
-    if (row && row[k] !== undefined && row[k] !== null && String(row[k]).trim() !== '') {
-      return String(row[k]).trim().toLowerCase();
-    }
-  }
-  return 'na';
+function _num(v) {
+  if (v === null || v === undefined) return NaN;
+  if (typeof v === "number") return v;
+  const s = String(v).trim();
+  if (s === "" || s.toLowerCase() === "na") return NaN;
+  return Number(s);
 }
 
-// 72-type identity: color × stem_width_zone × cap_roundness_zone
+function capZoneFromValue(capRoundness) {
+  const cap = _num(capRoundness);
+  if (!Number.isFinite(cap)) return "na";
+  if (cap < 0.8) return "flat";
+  if (cap > 1.4) return "round";
+  return "neutral";
+}
+
+function stemZoneFromValue(stemWidth, capZone) {
+  const stem = _num(stemWidth);
+  if (!Number.isFinite(stem)) return "na";
+
+  // “neutral rectangle” rule
+  if (capZone === "neutral" && stem >= 6 && stem <= 10) return "neutral";
+
+  // otherwise binary split
+  return (stem <= 8) ? "thin" : "thick";
+}
+
 function expTypeKeyFromRow(row) {
-  const color = expGetZone(row, 'color', 'color_name', 'colorName');
-  const stem  = expGetZone(row, 'stem_width_zone', 'requested_stem_zone', 'stemWidthZone');
-  const round = expGetZone(row, 'cap_roundness_zone', 'requested_cap_zone', 'capRoundnessZone');
+  // support BOTH schemas:
+  const color = String(row.color_name ?? row.color ?? "na").trim().toLowerCase();
+  const stemW = row.stem_width ?? row.stem;
+  const capR  = row.cap_roundness ?? row.cap;
 
-  // If any part is missing, don't count it as a type
-  if (color === 'na' || stem === 'na' || round === 'na') return '';
+  const rZone = capZoneFromValue(capR);
+  const sZone = stemZoneFromValue(stemW, rZone);
 
-  return `c:${color}|s:${stem}|r:${round}`;
+  return `c:${color}|s:${sZone}|r:${rZone}`;
 }
 
 
