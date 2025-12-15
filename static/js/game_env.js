@@ -68,8 +68,70 @@ let availableDoorTypes = null;     // will become doorTypes.slice()
 
 // ================= Exploration "type key" (72 types) =================
 
-// If you *really* want cap size to define type too, set true AND ensure you have a discrete column
-// like cap_size_zone in the catalog.
+// ================= Exploration helpers (paste ABOVE ensureExplorationIndex) =================
+
+function expNormalizeRoom(r) {
+  return String(r || '').trim().toLowerCase();
+}
+
+function _num(v) {
+  if (v === null || v === undefined) return NaN;
+  if (typeof v === "number") return v;
+  const s = String(v).trim();
+  if (s === "" || s.toLowerCase() === "na") return NaN;
+  const n = Number(s);
+  return Number.isFinite(n) ? n : NaN;
+}
+
+// If your cap/stem are continuous numbers, these thresholds work.
+// If your cap/stem are categorical codes/labels, you should replace these with your mapping.
+function capZoneFromValue(capRoundness) {
+  const cap = _num(capRoundness);
+  if (!Number.isFinite(cap)) return "na";
+  if (cap < 0.8) return "flat";
+  if (cap > 1.4) return "round";
+  return "neutral";
+}
+
+function stemZoneFromValue(stemWidth, capZone) {
+  const stem = _num(stemWidth);
+  if (!Number.isFinite(stem)) return "na";
+  if (capZone === "neutral" && stem >= 6 && stem <= 10) return "neutral";
+  return (stem <= 8) ? "thin" : "thick";
+}
+
+function expTypeKeyFromRow(row) {
+  const color = String(row.color_name ?? row.color ?? "na").trim().toLowerCase();
+  const stemW = row.stem_width ?? row.stem;
+  const capR  = row.cap_roundness ?? row.cap;
+
+  const rZone = capZoneFromValue(capR);
+  const sZone = stemZoneFromValue(stemW, rZone);
+
+  return `c:${color}|s:${sZone}|r:${rZone}`;
+}
+
+// Which rooms does this row belong to?
+// - If a row has explicit room/env/environment, use that.
+// - Otherwise infer from ROOM_COLOR_MAP[color].
+// IMPORTANT: this removes expGetZone entirely (so no missing function).
+function expRoomsForRow(row) {
+  const explicit = row.room || row.env || row.environment;
+  if (explicit) return [expNormalizeRoom(explicit)];
+
+  // infer from color map
+  const color = String(row.color_name ?? row.color ?? '').trim().toLowerCase();
+  if (!color) return [];
+
+  // ROOM_COLOR_MAP must exist by the time ensureExplorationIndex() is called
+  const rooms = (typeof ROOM_COLOR_MAP !== "undefined") ? ROOM_COLOR_MAP[color] : null;
+  if (!Array.isArray(rooms)) return [];
+
+  return rooms.map(expNormalizeRoom);
+}
+
+// ================= END helpers =================
+
 function normalizeZoneLabel(v) {
   if (v === null || v === undefined) return null;
   const s = String(v).trim().toLowerCase();
@@ -122,34 +184,6 @@ function _num(v) {
   if (s === "" || s.toLowerCase() === "na") return NaN;
   const n = Number(s);
   return Number.isFinite(n) ? n : NaN;
-}
-
-function capZoneFromValue(capRoundness) {
-  const cap = _num(capRoundness);
-  if (!Number.isFinite(cap)) return "na";
-  if (cap < 0.8) return "flat";
-  if (cap > 1.4) return "round";
-  return "neutral";
-}
-
-function stemZoneFromValue(stemWidth, capZone) {
-  const stem = _num(stemWidth);
-  if (!Number.isFinite(stem)) return "na";
-  if (capZone === "neutral" && stem >= 6 && stem <= 10) return "neutral";
-  return (stem <= 8) ? "thin" : "thick";
-}
-
-function expTypeKeyFromRow(row) {
-  const color = String(row.color_name ?? row.color ?? "na").trim().toLowerCase();
-
-  // Prefer explicit zone columns if you ever add them; otherwise use your current columns.
-  const capRaw  = row.cap_roundness_zone ?? row.cap_zone ?? row.cap_roundness ?? row.cap;
-  const rZone   = capZoneFromAny(capRaw);
-
-  const stemRaw = row.stem_width_zone ?? row.stem_zone ?? row.stem_width ?? row.stem;
-  const sZone   = stemZoneFromAny(stemRaw, rZone);
-
-  return `c:${color}|s:${sZone}|r:${rZone}`;
 }
 
 
