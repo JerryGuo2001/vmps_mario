@@ -332,6 +332,25 @@ function checkAndClearRoom(room) {
   return true;
 }
 
+function expMushroomId(objOrId) {
+  if (!objOrId) return "";
+
+  // Spawned mushroom object: prefer precomputed id
+  if (typeof objOrId === "object") {
+    if (objOrId._expId) return String(objOrId._expId).trim();
+
+    // If it looks like a catalog row, compute from row
+    if (("color" in objOrId) && ("stem" in objOrId) && ("cap" in objOrId)) {
+      return expTypeKeyFromRow(objOrId);
+    }
+  }
+
+  // String fallback
+  if (typeof objOrId === "string") return objOrId.trim();
+
+  return "";
+}
+
 
 function markMushroomSeenOnce(mushroomObjOrId, fallbackRoom = null) {
   ensureExplorationIndex();
