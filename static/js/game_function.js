@@ -40,9 +40,19 @@ async function drawObstacles() {
             return;
             }
 
-            const shuffled = [...availableDoorTypes].sort(() => Math.random() - 0.5);
+            const last = expNormalizeRoom(currentRoom); // room just played
+            let pool = Array.isArray(availableDoorTypes) ? availableDoorTypes.slice() : doorTypes.slice();
+
+            // exclude last room if possible
+            const filtered = pool.filter(r => expNormalizeRoom(r) !== last);
+            if (filtered.length >= 2) pool = filtered;            // enough to exclude safely
+            else if (filtered.length === 1) pool = filtered;      // only one choice left
+
+            const shuffled = pool.sort(() => Math.random() - 0.5);
+
             leftDoorType = shuffled[0];
-            rightDoorType = (shuffled.length > 1) ? shuffled[1] : shuffled[0];
+            rightDoorType = shuffled.find(x => x !== leftDoorType) || shuffled[0]; // ensure distinct if possible
+
 
             doorsAssigned = true;
             roomChoiceStartTime = performance.now(); // Start timer now
@@ -70,6 +80,14 @@ async function drawObstacles() {
             ctx.fillText('Press E to enter', leftX - 20, doorY - 30);
 
             if (keys['e']) {
+                // after setting currentRoom = env_deter;
+                const rr = expNormalizeRoom(currentRoom);
+                roomEntryCount[rr] = (roomEntryCount[rr] || 0) + 1;
+
+                // in case you already finished the room earlier, re-check now that entry count increased
+                checkAndClearRoom(rr);
+                updateExploreProgressUI();
+
                 env_deter = leftDoorType;
                 currentRoom = env_deter;
 
@@ -114,6 +132,14 @@ async function drawObstacles() {
             ctx.fillText('Press E to enter', rightX - 20, doorY - 30);
 
             if (keys['e']) {
+                // after setting currentRoom = env_deter;
+                const rr = expNormalizeRoom(currentRoom);
+                roomEntryCount[rr] = (roomEntryCount[rr] || 0) + 1;
+
+                // in case you already finished the room earlier, re-check now that entry count increased
+                checkAndClearRoom(rr);
+                updateExploreProgressUI();
+
                 env_deter = rightDoorType;
                 currentRoom = env_deter;
 

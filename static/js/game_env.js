@@ -20,6 +20,10 @@ let mushroomDecisionStartTime = null;
 let regeneratingMushrooms = false;  // NEW: prevent double-regeneration
 
 
+const MIN_ROOM_ENTRIES_BEFORE_CLEAR = 3;
+const roomEntryCount = Object.create(null); // room -> #door entries
+
+
 // ================= HP rules =================
 const MAX_HP = 100;
 const BASE_START_HP = 20;
@@ -62,14 +66,72 @@ let roomsPassed = 0;               // each P-press increments this
 let clearedRooms = new Set();
 let availableDoorTypes = null;     // will become doorTypes.slice()
 
+// ================= Exploration "type key" (72 types) =================
+
+// If you *really* want cap size to define type too, set true AND ensure you have a discrete column
+// like cap_size_zone in the catalog.
+const EXP_TYPE_INCLUDE_CAP_SIZE = false;
+
+function expGetZone(row, ...keys) {
+  for (const k of keys) {
+    if (row && row[k] !== undefined && row[k] !== null && String(row[k]).trim() !== '') {
+      return String(row[k]).trim().toLowerCase();
+    }
+  }
+  return 'na';
+}
+
+// 72-type identity: color × stem_width_zone × cap_roundness_zone
+function expTypeKeyFromRow(row) {
+  const color = expGetZone(row, 'color');
+
+  const stem  = expGetZone(row, 'stem_width_zone', 'stemWidthZone', 'stem_width');
+  const round = expGetZone(row, 'cap_roundness_zone', 'capRoundnessZone', 'cap_roundness');
+
+  if (!EXP_TYPE_INCLUDE_CAP_SIZE) {
+    return `c:${color}|s:${stem}|r:${round}`;
+  }
+
+  // Optional: include a discrete cap-size zone if you have it
+  const cap = expGetZone(row, 'cap_size_zone', 'capSizeZone', 'cap_size');
+  return `c:${color}|s:${stem}|r:${round}|cap:${cap}`;
+}
+
+// Which rooms does this row belong to? (explicit room column beats color-map)
+function expRoomsForRow(row) {
+  const explicit = row.room || row.env || row.environment;
+  if (explicit) return [expNormalizeRoom(explicit)];
+
+  const color = expGetZone(row, 'color');
+  const rooms = ROOM_COLOR_MAP[color];          // e.g. ['desert','cave']
+  if (!Array.isArray(rooms)) return [];
+  return rooms.map(expNormalizeRoom);
+}
+
+
+
 function expNormalizeRoom(r) {
   return String(r || '').trim().toLowerCase();
 }
 function expMushroomId(rowOrId) {
   if (!rowOrId) return '';
+
+  // If it's a spawned mushroom object, prefer the precomputed key
+  if (typeof rowOrId === 'object') {
+    if (rowOrId._expId) return rowOrId._expId;
+
+    // If it looks like a catalog row, compute the key
+    if ('color' in rowOrId || 'stem_width_zone' in rowOrId || 'cap_roundness_zone' in rowOrId) {
+      return expTypeKeyFromRow(rowOrId);
+    }
+  }
+
+  // string fallback (keep for safety)
   if (typeof rowOrId === 'string') return rowOrId.trim();
-  return String(rowOrId.filename || rowOrId.imagefilename || rowOrId.image || '').trim();
+
+  return '';
 }
+
 
 /**
  * IMPORTANT:
@@ -101,25 +163,29 @@ function ensureExplorationIndex() {
   if (EXP_TOTAL_TYPES > 0) return true; // already built
 
   for (const r of rows) {
-    const id = expMushroomId(r);
-    if (!id) continue;
+    const id = expTypeKeyFromRow(r);
+    if (!id || id.includes('na')) {
+      // still allow, but you probably want your catalog columns consistent
+      // console.warn('[explore] missing zone/color for row', r);
+    }
 
+    // build unique type index
     if (!expRowById[id]) expRowById[id] = r;
     if (!(id in expSeen)) expSeen[id] = 0;
 
-    const home = expInferHomeRoomFromRow(r);
-    expHomeRoomById[id] = home; // may be null for shared colors
-
-    // ✅ Only unique-color mushrooms gate room completion
-    if (home) {
-      if (!expRoomToIds[home]) expRoomToIds[home] = [];
-      if (!expRoomToIds[home].includes(id)) expRoomToIds[home].push(id);
+    // map this type into every room it can appear in
+    const rooms = expRoomsForRow(r);
+    for (const rm of rooms) {
+      if (!rm) continue;
+      if (!expRoomToIds[rm]) expRoomToIds[rm] = [];
+      if (!expRoomToIds[rm].includes(id)) expRoomToIds[rm].push(id);
     }
-
   }
+
 
   EXP_TOTAL_TYPES = Object.keys(expSeen).length;
   EXP_TARGET_SIGHTINGS = EXP_TOTAL_TYPES * REQUIRED_SEEN_PER_TYPE;
+
 
   ensureExploreProgressUI();
   updateExploreProgressUI();
@@ -191,7 +257,13 @@ function roomIsComplete(room) {
 function checkAndClearRoom(room) {
   const r = expNormalizeRoom(room);
   if (!r || r === 'sky' || clearedRooms.has(r)) return false;
+
+  // must be complete...
   if (!roomIsComplete(r)) return false;
+
+  // ...AND must have been entered at least MIN times
+  const entries = roomEntryCount[r] || 0;
+  if (entries < MIN_ROOM_ENTRIES_BEFORE_CLEAR) return false;
 
   clearedRooms.add(r);
   if (Array.isArray(availableDoorTypes)) {
@@ -200,6 +272,7 @@ function checkAndClearRoom(room) {
   updateExploreProgressUI();
   return true;
 }
+
 
 function markMushroomSeenOnce(mushroomObjOrId, fallbackRoom = null) {
   ensureExplorationIndex();
@@ -751,7 +824,9 @@ async function generateMushroom(count = 5) {
         color: r.color,
         imagefilename: r.filename,
         image: img,
-        groundPlatformIndex: pi
+        groundPlatformIndex: pi,
+          // NEW: exploration type key (72-type identity)
+        _expId: expId
       });
     }
   }
@@ -777,7 +852,9 @@ async function generateMushroom(count = 5) {
       color: r.color,
       imagefilename: r.filename,
       image: img,
-      groundPlatformIndex: 0
+      groundPlatformIndex: 0,
+        // NEW: exploration type key (72-type identity)
+      _expId: expId
     });
   }
 
