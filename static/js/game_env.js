@@ -115,6 +115,29 @@ function capZoneFromAny(v) {
   // fallback: treat as continuous numeric value
   return capZoneFromValue(v);
 }
+function _num(v) {
+  if (v === null || v === undefined) return NaN;
+  if (typeof v === "number") return v;
+  const s = String(v).trim();
+  if (s === "" || s.toLowerCase() === "na") return NaN;
+  const n = Number(s);
+  return Number.isFinite(n) ? n : NaN;
+}
+
+function capZoneFromValue(capRoundness) {
+  const cap = _num(capRoundness);
+  if (!Number.isFinite(cap)) return "na";
+  if (cap < 0.8) return "flat";
+  if (cap > 1.4) return "round";
+  return "neutral";
+}
+
+function stemZoneFromValue(stemWidth, capZone) {
+  const stem = _num(stemWidth);
+  if (!Number.isFinite(stem)) return "na";
+  if (capZone === "neutral" && stem >= 6 && stem <= 10) return "neutral";
+  return (stem <= 8) ? "thin" : "thick";
+}
 
 function expTypeKeyFromRow(row) {
   const color = String(row.color_name ?? row.color ?? "na").trim().toLowerCase();
