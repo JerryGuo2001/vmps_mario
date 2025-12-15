@@ -70,81 +70,63 @@ let availableDoorTypes = null;     // will become doorTypes.slice()
 
 // If you *really* want cap size to define type too, set true AND ensure you have a discrete column
 // like cap_size_zone in the catalog.
-const EXP_TYPE_INCLUDE_CAP_SIZE = false;
-
-function _num(v) {
-  if (v === null || v === undefined) return NaN;
-  if (typeof v === "number") return v;
-  const s = String(v).trim();
-  if (s === "" || s.toLowerCase() === "na") return NaN;
-  return Number(s);
+function normalizeZoneLabel(v) {
+  if (v === null || v === undefined) return null;
+  const s = String(v).trim().toLowerCase();
+  if (!s || s === "na" || s === "undefined") return null;
+  return s;
 }
 
-function capZoneFromValue(capRoundness) {
-  const cap = _num(capRoundness);
-  if (!Number.isFinite(cap)) return "na";
-  if (cap < 0.8) return "flat";
-  if (cap > 1.4) return "round";
-  return "neutral";
+// If your CSV uses numeric codes, map them here (edit if your coding differs)
+function stemZoneFromAny(v, capZoneMaybe) {
+  const s = normalizeZoneLabel(v);
+
+  // already a label
+  if (s && (s === "thin" || s === "thick" || s === "neutral")) return s;
+
+  // numeric code
+  const n = Number(s);
+  if (Number.isFinite(n)) {
+    // Example mapping: 0=thin, 1=neutral, 2=thick (EDIT if needed)
+    if (n === 0) return "thin";
+    if (n === 1) return "neutral";
+    if (n === 2) return "thick";
+  }
+
+  // fallback: treat as continuous numeric value
+  return stemZoneFromValue(v, capZoneMaybe);
 }
 
-function stemZoneFromValue(stemWidth, capZone) {
-  const stem = _num(stemWidth);
-  if (!Number.isFinite(stem)) return "na";
+function capZoneFromAny(v) {
+  const s = normalizeZoneLabel(v);
 
-  // “neutral rectangle” rule
-  if (capZone === "neutral" && stem >= 6 && stem <= 10) return "neutral";
+  // already a label
+  if (s && (s === "flat" || s === "round" || s === "neutral")) return s;
 
-  // otherwise binary split
-  return (stem <= 8) ? "thin" : "thick";
+  // numeric code
+  const n = Number(s);
+  if (Number.isFinite(n)) {
+    // Example mapping: 0=flat, 1=neutral, 2=round (EDIT if needed)
+    if (n === 0) return "flat";
+    if (n === 1) return "neutral";
+    if (n === 2) return "round";
+  }
+
+  // fallback: treat as continuous numeric value
+  return capZoneFromValue(v);
 }
 
 function expTypeKeyFromRow(row) {
-  // support BOTH schemas:
   const color = String(row.color_name ?? row.color ?? "na").trim().toLowerCase();
-  const stemW = row.stem_width ?? row.stem;
-  const capR  = row.cap_roundness ?? row.cap;
 
-  const rZone = capZoneFromValue(capR);
-  const sZone = stemZoneFromValue(stemW, rZone);
+  // Prefer explicit zone columns if you ever add them; otherwise use your current columns.
+  const capRaw  = row.cap_roundness_zone ?? row.cap_zone ?? row.cap_roundness ?? row.cap;
+  const rZone   = capZoneFromAny(capRaw);
+
+  const stemRaw = row.stem_width_zone ?? row.stem_zone ?? row.stem_width ?? row.stem;
+  const sZone   = stemZoneFromAny(stemRaw, rZone);
 
   return `c:${color}|s:${sZone}|r:${rZone}`;
-}
-
-
-// Which rooms does this row belong to? (explicit room column beats color-map)
-function expRoomsForRow(row) {
-  const explicit = row.room || row.env || row.environment;
-  if (explicit) return [expNormalizeRoom(explicit)];
-
-  const color = expGetZone(row, 'color');
-  const rooms = ROOM_COLOR_MAP[color];          // e.g. ['desert','cave']
-  if (!Array.isArray(rooms)) return [];
-  return rooms.map(expNormalizeRoom);
-}
-
-
-
-function expNormalizeRoom(r) {
-  return String(r || '').trim().toLowerCase();
-}
-function expMushroomId(rowOrId) {
-  if (!rowOrId) return '';
-
-  // If it's a spawned mushroom object, prefer the precomputed key
-  if (typeof rowOrId === 'object') {
-    if (rowOrId._expId) return rowOrId._expId;
-
-    // If it looks like a catalog row, compute the key
-    if ('color' in rowOrId || 'stem_width_zone' in rowOrId || 'cap_roundness_zone' in rowOrId) {
-      return expTypeKeyFromRow(rowOrId);
-    }
-  }
-
-  // string fallback (keep for safety)
-  if (typeof rowOrId === 'string') return rowOrId.trim();
-
-  return '';
 }
 
 
@@ -159,8 +141,9 @@ function expInferHomeRoomFromRow(row) {
   const explicit = row.room || row.env || row.environment;
   if (explicit) return expNormalizeRoom(explicit);
 
-  const c = String(row.color || '').trim().toLowerCase();
-  const rooms = ROOM_COLOR_MAP[c];
+  const color = String(row.color_name ?? row.color ?? '').trim().toLowerCase();
+  const rooms = ROOM_COLOR_MAP[color];
+
 
   // ✅ Only UNIQUE colors define a "home room"
   if (Array.isArray(rooms) && rooms.length === 1) {
@@ -202,6 +185,12 @@ function ensureExplorationIndex() {
 
   ensureExploreProgressUI();
   updateExploreProgressUI();
+
+  console.log("[explore] rows:", rows.length);
+console.log("[explore] EXP_TOTAL_TYPES:", EXP_TOTAL_TYPES);
+console.log("[explore] EXP_TARGET_SIGHTINGS:", EXP_TARGET_SIGHTINGS);
+console.log("[explore] sample keys:", Object.keys(expSeen).slice(0, 10));
+
   return true;
 }
 
@@ -824,6 +813,7 @@ async function generateMushroom(count = 5) {
       const r = chosenRows[rowIdx++];
       const img = new Image();
       img.src = r.filename;  // or resolveImgSrc(r.filename) if you prefer
+      const expId = expTypeKeyFromRow(r);
 
       items.push({
         x: xs[j],
@@ -838,6 +828,7 @@ async function generateMushroom(count = 5) {
         imagefilename: r.filename,
         image: img,
         groundPlatformIndex: pi,
+        _expId: expId,
       });
     }
   }
@@ -850,7 +841,7 @@ async function generateMushroom(count = 5) {
     const r = chosenRows[rowIdx++];
     const img = new Image();
     img.src = r.filename;
-
+    const expId = expTypeKeyFromRow(r);
     items.push({
       x: x0,
       y: y0,
@@ -864,6 +855,7 @@ async function generateMushroom(count = 5) {
       imagefilename: r.filename,
       image: img,
       groundPlatformIndex: 0,
+      _expId: expId,
     });
   }
 
