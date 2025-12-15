@@ -825,8 +825,6 @@ async function generateMushroom(count = 5) {
         imagefilename: r.filename,
         image: img,
         groundPlatformIndex: pi,
-          // NEW: exploration type key (72-type identity)
-        _expId: expId
       });
     }
   }
@@ -853,8 +851,6 @@ async function generateMushroom(count = 5) {
       imagefilename: r.filename,
       image: img,
       groundPlatformIndex: 0,
-        // NEW: exploration type key (72-type identity)
-      _expId: expId
     });
   }
 
