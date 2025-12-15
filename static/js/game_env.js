@@ -83,11 +83,12 @@ function expGetZone(row, ...keys) {
 
 // 72-type identity: color × stem_width_zone × cap_roundness_zone
 function expTypeKeyFromRow(row) {
-  const color = expGetZone(row, 'color');
+  const color = expGetZone(row, 'color', 'color_name', 'colorName');
+  const stem  = expGetZone(row, 'stem_width_zone', 'requested_stem_zone', 'stemWidthZone');
+  const round = expGetZone(row, 'cap_roundness_zone', 'requested_cap_zone', 'capRoundnessZone');
 
-  // ✅ your CSV uses these
-  const stem  = expGetZone(row, 'stem_width_zone', 'stemWidthZone', 'stem_width', 'stem');
-  const round = expGetZone(row, 'cap_roundness_zone', 'capRoundnessZone', 'cap_roundness', 'cap');
+  // If any part is missing, don't count it as a type
+  if (color === 'na' || stem === 'na' || round === 'na') return '';
 
   return `c:${color}|s:${stem}|r:${round}`;
 }
@@ -159,11 +160,9 @@ function ensureExplorationIndex() {
   if (EXP_TOTAL_TYPES > 0) return true; // already built
 
   for (const r of rows) {
-    const id = expTypeKeyFromRow(r);
-    if (!id || id.includes('na')) {
-      // still allow, but you probably want your catalog columns consistent
-      // console.warn('[explore] missing zone/color for row', r);
-    }
+      const id = expTypeKeyFromRow(r);
+      if (!id) continue;
+
 
     // build unique type index
     if (!expRowById[id]) expRowById[id] = r;
