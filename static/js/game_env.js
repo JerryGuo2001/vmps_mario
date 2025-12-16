@@ -265,14 +265,8 @@ function ensureExplorationIndex() {
   EXP_TOTAL_TYPES = Object.keys(expSeen).length;
   EXP_TARGET_SIGHTINGS = EXP_TOTAL_TYPES * REQUIRED_SEEN_PER_TYPE;
 
-
   ensureExploreProgressUI();
   updateExploreProgressUI();
-
-  console.log("[explore] rows:", rows.length);
-console.log("[explore] EXP_TOTAL_TYPES:", EXP_TOTAL_TYPES);
-console.log("[explore] EXP_TARGET_SIGHTINGS:", EXP_TARGET_SIGHTINGS);
-console.log("[explore] sample keys:", Object.keys(expSeen).slice(0, 10));
 
   return true;
 }
@@ -318,15 +312,8 @@ function updateExploreProgressUI() {
       textEl.textContent = `Exploration progress: 0% (catalog not loaded yet)`;
     } else {
       textEl.textContent =
-        `Exploration progress: ${Math.floor(pct)}% (${expTotalSeenCapped}/${EXP_TARGET_SIGHTINGS} sightings)`;
+        `Exploration progress: ${Math.floor(pct)}%`;
     }
-  }
-
-
-  if (subEl) {
-    const bonus = roomsPassed * 2; // display-only “+2% per room pass”
-    const roomsLeft = Array.isArray(availableDoorTypes) ? availableDoorTypes.length : '—';
-    subEl.textContent = `Room passes: ${roomsPassed} (display bonus +${bonus}%) | Rooms remaining: ${roomsLeft}`;
   }
 
   if (barEl) barEl.style.width = `${pct}%`;
