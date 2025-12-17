@@ -66,24 +66,32 @@ function preloadInstructionSlides(phaseKey) {
   if (!sub) return Promise.resolve({ urls: [], imgs: [] });
 
   const folderUrl = `${INSTR_BASE}/${sub}`;
-  const slideIds = INSTR_SLIDES[phaseKey] || [];
-  const urls = [];
-  const imgs = [];
-  const jobs = slideIds.map(i => {
-    const url = `${folderUrl}/${i}.${INSTR_EXT}`;
-    return new Promise(resolve => {
+  const slideIds = (INSTR_SLIDES[phaseKey] || []).slice(); // keep declared order
+
+  const jobs = slideIds.map((rawId) => {
+    const id = Number(rawId); // ensure numeric for correct sorting
+    const url = `${folderUrl}/${id}.${INSTR_EXT}`;
+
+    return new Promise((resolve) => {
       const img = new Image();
-      img.onload  = () => { urls.push(url); imgs.push(img); resolve(true); };
-      img.onerror = () => resolve(false);
+      img.onload  = () => resolve({ ok: true,  id, url, img });
+      img.onerror = () => resolve({ ok: false, id, url, img: null });
       img.src = url;
     });
   });
 
-  return Promise.all(jobs).then(() => {
+  return Promise.all(jobs).then((results) => {
+    // Keep only successfully loaded slides, sorted by id (1,2,3,...)
+    const ok = results.filter(r => r.ok).sort((a, b) => a.id - b.id);
+
+    const urls = ok.map(r => r.url);
+    const imgs = ok.map(r => r.img);
+
     INSTR_CACHE[phaseKey] = { urls, imgs };
     return INSTR_CACHE[phaseKey];
   });
 }
+
 
 
 function preloadAllInstructions() {
