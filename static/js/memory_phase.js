@@ -13,6 +13,78 @@ let memory_totalQuestions = 36;
 const MEMORY_TRIALS = 36;             // 36 trials -> 72 mushrooms used exactly once
 const ENABLE_SIMILARITY_TEST = true; // set to true to re-enable old/new/similar
 
+
+// ---------------- TOO-FAST PAUSE (MEMORY) ----------------
+const MEMORY_TOO_FAST_MS = 300;
+const MEMORY_TOO_FAST_SECONDS = 5;
+
+// Apply to the 2AFC choice (Q/E)
+const ENFORCE_TOO_FAST_ON_CHOICE = true;
+
+// Apply to the old/new prompt (1/2); set false if you only want it on the choice
+const ENFORCE_TOO_FAST_ON_PROMPT = true;
+
+let memoryPaused = false;
+
+function showMemoryTooFastWarning(seconds = MEMORY_TOO_FAST_SECONDS) {
+  return new Promise((resolve) => {
+    let overlay = document.getElementById('memoryTooFastOverlay');
+    if (!overlay) {
+      overlay = document.createElement('div');
+      overlay.id = 'memoryTooFastOverlay';
+      overlay.style.position = 'fixed';
+      overlay.style.left = '0';
+      overlay.style.top = '0';
+      overlay.style.width = '100vw';
+      overlay.style.height = '100vh';
+      overlay.style.background = 'rgba(0,0,0,0.75)';
+      overlay.style.display = 'flex';
+      overlay.style.alignItems = 'center';
+      overlay.style.justifyContent = 'center';
+      overlay.style.zIndex = '999999';
+
+      const card = document.createElement('div');
+      card.style.background = '#fff';
+      card.style.padding = '24px 28px';
+      card.style.borderRadius = '12px';
+      card.style.maxWidth = '560px';
+      card.style.textAlign = 'center';
+      card.style.fontFamily = 'Arial, sans-serif';
+
+      const title = document.createElement('h2');
+      title.textContent = 'You responded too quickly.';
+      title.style.margin = '0 0 10px 0';
+
+      const body = document.createElement('div');
+      body.id = 'memoryTooFastText';
+      body.style.fontSize = '16px';
+      body.textContent = `The task will resume in ${seconds} seconds.`;
+
+      card.appendChild(title);
+      card.appendChild(body);
+      overlay.appendChild(card);
+      document.body.appendChild(overlay);
+    }
+
+    const text = document.getElementById('memoryTooFastText');
+    let remaining = seconds;
+    if (text) text.textContent = `You responded too quickly. The task will resume in ${remaining} seconds.`;
+
+    const tick = setInterval(() => {
+      remaining -= 1;
+      if (remaining > 0) {
+        if (text) text.textContent = `You responded too quickly. The task will resume in ${remaining} seconds.`;
+      } else {
+        clearInterval(tick);
+        const ov = document.getElementById('memoryTooFastOverlay');
+        if (ov) ov.remove();
+        resolve();
+      }
+    }, 1000);
+  });
+}
+
+
 // Globals the memory phase expects
 let aMushrooms = []; // left mushrooms per trial
 let bMushrooms = []; // right mushrooms per trial
@@ -312,6 +384,7 @@ function animateChoiceIndicator(targetBox, onDone) {
 // ========================== KEY HANDLER & CHOICE ===========================
 
 function Memory_selectorKeyHandler(e) {
+  if (memoryPaused) return;
   if (memory_awaitingAnswer) return;
 
   if (e.key === 'ArrowLeft') {
@@ -321,27 +394,59 @@ function Memory_selectorKeyHandler(e) {
     memory_selectedSide = 'right';
     updateSelector();
   } else if (e.key.toLowerCase() === 'q') {
-    // Q = choose left
     handleMemoryChoice('left');
   } else if (e.key.toLowerCase() === 'e') {
-    // E = choose right
     handleMemoryChoice('right');
   }
 }
 
+
 // Handle a left/right choice, log it, animate, then either prompt or go to next trial
 function handleMemoryChoice(side) {
+  if (memoryPaused) return;
+
   const a = aMushrooms[memory_currentQuestion];
   const b = bMushrooms[memory_currentQuestion];
   if (!a || !b) return;
 
+  // Compute RT as soon as possible
+  const rtChoice = performance.now() - memory_trialStartTime;
+
+  // ---- TOO FAST CHECK (CHOICE) ----
+  if (ENFORCE_TOO_FAST_ON_CHOICE && rtChoice < MEMORY_TOO_FAST_MS) {
+    memoryPaused = true;
+    memory_awaitingAnswer = true; // block inputs
+
+    // Optional: log too-fast event (comment out if you don't want it)
+    if (participantData?.trials) {
+      participantData.trials.push({
+        id: participantData.id,
+        trial_type: 'memory_choice',
+        trial_index: memory_currentQuestion,
+        event: 'too_fast',
+        rt_choice: rtChoice,
+        threshold_ms: MEMORY_TOO_FAST_MS,
+        time_elapsed: performance.now() - participantData.startTime
+      });
+    }
+
+    showMemoryTooFastWarning(MEMORY_TOO_FAST_SECONDS).then(() => {
+      memoryPaused = false;
+      memory_awaitingAnswer = false;     // allow response again
+      memory_trialStartTime = performance.now(); // restart RT clock from resume
+      // keep the same stimuli on screen; no advance, no log
+    });
+
+    return;
+  }
+
+  // ---- NORMAL PATH ----
   memory_selectedSide = side;
   updateSelector();
   memory_awaitingAnswer = true;
 
   const selected = side === 'left' ? a : b;
   const other = side === 'left' ? b : a;
-  const rtChoice = performance.now() - memory_trialStartTime;
 
   // Correct if selected has higher value than the other (ties → null)
   let correct = null;
@@ -420,9 +525,36 @@ function proceedToNextMemoryTrial() {
 
 function handleMemoryResponse(e) {
   if (!ENABLE_SIMILARITY_TEST) return;
+  if (memoryPaused) return;
   if (!memory_awaitingAnswer || !['1', '2'].includes(e.key)) return;
 
   const rtPrompt = performance.now() - memory_promptStartTime;
+
+  // ---- TOO FAST CHECK (PROMPT) ----
+  if (ENFORCE_TOO_FAST_ON_PROMPT && rtPrompt < MEMORY_TOO_FAST_MS) {
+    memoryPaused = true;
+
+    // Optional: log too-fast prompt event
+    if (participantData?.trials) {
+      participantData.trials.push({
+        id: participantData.id,
+        trial_type: 'oldnew_response',
+        trial_index: memory_currentQuestion,
+        event: 'too_fast',
+        rt: rtPrompt,
+        threshold_ms: MEMORY_TOO_FAST_MS,
+        time_elapsed: performance.now() - participantData.startTime
+      });
+    }
+
+    showMemoryTooFastWarning(MEMORY_TOO_FAST_SECONDS).then(() => {
+      memoryPaused = false;
+      memory_promptStartTime = performance.now(); // restart RT from resume
+      // keep prompt on screen; allow them to answer again
+    });
+
+    return;
+  }
 
   if (typeof participantData !== 'undefined' && participantData && participantData.trials) {
     participantData.trials.push({
