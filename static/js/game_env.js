@@ -2,7 +2,7 @@
 
 // Global Variables
 let character, gravity, keys, currentCanvas, showPrompt, currentQuestion, totalMushrooms, collectedMushrooms, atRightEdge, change_detect_right, change_detect_left;
-let totalQuestions = 100;
+let totalQuestions = 2;
 let atLeftEdge;
 currentQuestion = 1;
 let cameraOffset = 0; // Tracks world movement in Canvas 4
@@ -1040,7 +1040,7 @@ async function handleTextInteraction_canvas4() {
     ctx.fillText(text, xPos, yPos);
 
   if (keys['p']) {
-    roomsPassed += 1;          // NEW: “+2%” display bonus per room pass
+    roomsPassed += 1;
     checkAndClearRoom(currentRoom); // NEW: in case last sighting completed the room
     updateExploreProgressUI();
     const startHPNext = nextRoomStartHP(character.hp);
