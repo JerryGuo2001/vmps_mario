@@ -732,9 +732,10 @@ function updateGame(currentTime) {
     requestAnimationFrame(updateGame);
   }
 
-  if (isExploreComplete() || currentQuestion > totalQuestions) {
+  if (explorationCompleteTriggered || currentQuestion > totalQuestions) {
     completeExplore();
   }
+
 
 }
 

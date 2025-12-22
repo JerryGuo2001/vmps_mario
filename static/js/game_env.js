@@ -18,6 +18,7 @@ let revealOnlyValue;
 let mushroomTrialIndex = 0;
 let mushroomDecisionStartTime = null;
 let regeneratingMushrooms = false;  // NEW: prevent double-regeneration
+let explorationCompleteTriggered = false;
 
 
 const MIN_ROOM_ENTRIES_BEFORE_CLEAR = 3;
@@ -63,6 +64,9 @@ const expRoomToIds = Object.create(null);   // room -> [ids]
 
 let expTotalSeenCapped = 0;        // Σ min(seen, REQUIRED_SEEN_PER_TYPE)
 let roomsPassed = 0;               // each P-press increments this
+// ================= Progress bonus per room =================
+const ROOM_PASS_BONUS_PCT = 1;   // +1% per non-sky room completion (Press P)
+let roomsPassedNonSky = 0;       // counts how many non-sky rooms have been passed via P
 let clearedRooms = new Set();
 let availableDoorTypes = null;     // will become doorTypes.slice()
 
@@ -266,7 +270,8 @@ function ensureExplorationIndex() {
   EXP_TARGET_SIGHTINGS = EXP_TOTAL_TYPES * REQUIRED_SEEN_PER_TYPE;
 
   ensureExploreProgressUI();
-  updateExploreProgressUI();
+  updateExploreProgressUI(true); // initial render only
+
 
   return true;
 }
@@ -295,11 +300,18 @@ function ensureExploreProgressUI() {
 
 function getExplorePercent() {
   if (!EXP_TARGET_SIGHTINGS) return 0;
-  const pct = (expTotalSeenCapped / EXP_TARGET_SIGHTINGS) * 100;
+
+  const basePct = (expTotalSeenCapped / EXP_TARGET_SIGHTINGS) * 100;
+  const bonusPct = roomsPassedNonSky * ROOM_PASS_BONUS_PCT;
+
+  const pct = basePct + bonusPct;
   return Math.max(0, Math.min(100, pct));
 }
 
-function updateExploreProgressUI() {
+
+function updateExploreProgressUI(force = false) {
+  if (!force) return; // ✅ only update when you explicitly force it (on 'P')
+
   ensureExploreProgressUI();
   const pct = getExplorePercent();
 
@@ -311,13 +323,19 @@ function updateExploreProgressUI() {
     if (!EXP_TARGET_SIGHTINGS) {
       textEl.textContent = `Exploration progress: 0% (catalog not loaded yet)`;
     } else {
-      textEl.textContent =
-        `Exploration progress: ${Math.floor(pct)}%`;
+      textEl.textContent = `Exploration progress: ${Math.floor(pct)}%`;
     }
+  }
+
+  if (subEl && EXP_TARGET_SIGHTINGS) {
+    const basePct = (expTotalSeenCapped / EXP_TARGET_SIGHTINGS) * 100;
+    const bonusPct = roomsPassedNonSky * ROOM_PASS_BONUS_PCT;
+    subEl.textContent = `Base: ${Math.floor(Math.min(100, basePct))}%  |  Room bonus: +${bonusPct}%`;
   }
 
   if (barEl) barEl.style.width = `${pct}%`;
 }
+
 
 function roomIsComplete(room) {
   const r = expNormalizeRoom(room);
@@ -341,7 +359,6 @@ function checkAndClearRoom(room) {
   if (Array.isArray(availableDoorTypes)) {
     availableDoorTypes = availableDoorTypes.filter(x => expNormalizeRoom(x) !== r);
   }
-  updateExploreProgressUI();
   return true;
 }
 
@@ -384,14 +401,11 @@ function markMushroomSeenOnce(mushroomObjOrId, fallbackRoom = null) {
 
   const roomHere = expNormalizeRoom(fallbackRoom) || expNormalizeRoom(currentRoom);
   checkAndClearRoom(roomHere);
-
-
-  updateExploreProgressUI();
 }
 
 function isExploreComplete() {
   ensureExplorationIndex();
-  return EXP_TARGET_SIGHTINGS > 0 && expTotalSeenCapped >= EXP_TARGET_SIGHTINGS;
+  return EXP_TARGET_SIGHTINGS > 0 && getExplorePercent() >= 100;
 }
 
 
@@ -1040,19 +1054,32 @@ async function handleTextInteraction_canvas4() {
     ctx.fillText(text, xPos, yPos);
 
   if (keys['p']) {
+    keys['p'] = false; // ✅ consume so we only count once per press
+
     roomsPassed += 1;
-    checkAndClearRoom(currentRoom); // NEW: in case last sighting completed the room
-    updateExploreProgressUI();
+
+    // +1% bonus for completing a room, excluding sky
+    const r = expNormalizeRoom(currentRoom);
+    if (r && r !== 'sky') {
+      roomsPassedNonSky += 1;
+    }
+
+    checkAndClearRoom(currentRoom); // keep your clearing logic
+    updateExploreProgressUI(true);
+    if (isExploreComplete()) explorationCompleteTriggered = true;
+
+
     const startHPNext = nextRoomStartHP(character.hp);
 
     currentCanvas = 1;
-    character.hp = startHPNext;     // ✅ carry-over applied here (capped to 100)
+    character.hp = startHPNext;     // carry-over (capped)
 
     currentQuestion += 1;
     console.log("Proceeding to next question: " + currentQuestion);
     roomChoiceStartTime = performance.now();
     doorsAssigned = false;
   }
+
 
 
   }
