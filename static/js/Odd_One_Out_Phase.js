@@ -93,6 +93,76 @@ async function initTaskOOO() {
 }
 
 
+//too fast response check
+// ---------------- TOO-FAST PAUSE ----------------
+const OOO_TOO_FAST_MS = 300;
+let oooPaused = false;
+
+function showOOOTooFastWarning(seconds = 5) {
+  return new Promise((resolve) => {
+    const container = document.getElementById('oddOneOutTaskDiv') || document.body;
+
+    // Overlay
+    let overlay = document.getElementById('oooTooFastOverlay');
+    if (!overlay) {
+      overlay = document.createElement('div');
+      overlay.id = 'oooTooFastOverlay';
+      overlay.style.position = 'fixed';
+      overlay.style.left = '0';
+      overlay.style.top = '0';
+      overlay.style.width = '100vw';
+      overlay.style.height = '100vh';
+      overlay.style.background = 'rgba(0,0,0,0.75)';
+      overlay.style.display = 'flex';
+      overlay.style.alignItems = 'center';
+      overlay.style.justifyContent = 'center';
+      overlay.style.zIndex = '999999';
+
+      const card = document.createElement('div');
+      card.style.background = '#fff';
+      card.style.padding = '24px 28px';
+      card.style.borderRadius = '12px';
+      card.style.maxWidth = '520px';
+      card.style.textAlign = 'center';
+      card.style.fontFamily = 'Arial, sans-serif';
+
+      const title = document.createElement('h2');
+      title.textContent = 'You responded too quickly.';
+      title.style.margin = '0 0 10px 0';
+
+      const body = document.createElement('div');
+      body.id = 'oooTooFastText';
+      body.style.fontSize = '16px';
+      body.textContent = `The task will resume in ${seconds} seconds.`;
+
+      card.appendChild(title);
+      card.appendChild(body);
+      overlay.appendChild(card);
+      container.appendChild(overlay);
+    }
+
+    const text = document.getElementById('oooTooFastText');
+    let remaining = seconds;
+
+    // Initial text
+    if (text) text.textContent = `You responded too quickly. The task will resume in ${remaining} seconds.`;
+
+    const tick = setInterval(() => {
+      remaining -= 1;
+
+      if (remaining > 0) {
+        if (text) text.textContent = `You responded too quickly. The task will resume in ${remaining} seconds.`;
+      } else {
+        clearInterval(tick);
+        const ov = document.getElementById('oooTooFastOverlay');
+        if (ov) ov.remove();
+        resolve();
+      }
+    }, 1000);
+  });
+}
+
+
 async function showTrialOOO() {
   const imgContainerOOO = document.getElementById('imageContainerOOO');
   if (!imgContainerOOO) return;
@@ -143,9 +213,38 @@ async function showTrialOOO() {
 
 function handleKeyPressOOO(event) {
   if (!['1', '2', '3'].includes(event.key)) return;
+  if (oooPaused) return;
   if (trialStartTimeOOO == null) return; // guard against double-presses between trials
 
   const rt = performance.now() - trialStartTimeOOO;
+
+  // ---- TOO FAST CHECK ----
+  if (rt < OOO_TOO_FAST_MS) {
+    // Pause immediately; do NOT log, do NOT advance
+    oooPaused = true;
+    trialStartTimeOOO = null; // prevent key spam from being treated as responses
+
+    // Optional: log a "too_fast" event (comment out if you don’t want this)
+    (participantData.trials ||= []).push({
+      id: participantData.id,
+      trial_index: (currentTrialOOO + 1),
+      trial_type: 'odd_one_out',
+      event: 'too_fast',
+      rt: rt,
+      threshold_ms: OOO_TOO_FAST_MS,
+      time_elapsed: performance.now() - (participantData?.startTime || performance.now())
+    });
+
+    showOOOTooFastWarning(5).then(() => {
+      // Resume same trial; reset the start time so they must respond again
+      oooPaused = false;
+      trialStartTimeOOO = performance.now();
+    });
+
+    return;
+  }
+
+  // ---- NORMAL RESPONSE PATH ----
   const timeElapsed = performance.now() - (participantData?.startTime || performance.now());
 
   const imgContainerOOO = document.getElementById('imageContainerOOO');
@@ -179,13 +278,12 @@ function handleKeyPressOOO(event) {
   trialStartTimeOOO = null;
 
   if (currentTrialOOO < trialsOOO.length) {
-    // render next
-    // use microtask to avoid blocking key handler
     Promise.resolve().then(showTrialOOO);
   } else {
     finishTaskOOO();
   }
 }
+
 
 function finishTaskOOO() {
   const taskDivOOO = document.getElementById('oddOneOutTaskDiv');

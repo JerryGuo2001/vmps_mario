@@ -11,7 +11,7 @@ let memory_totalQuestions = 36;
 
 // --- Config: number of trials & similarity test toggle ---
 const MEMORY_TRIALS = 36;             // 36 trials -> 72 mushrooms used exactly once
-const ENABLE_SIMILARITY_TEST = false; // set to true to re-enable old/new/similar
+const ENABLE_SIMILARITY_TEST = true; // set to true to re-enable old/new/similar
 
 // Globals the memory phase expects
 let aMushrooms = []; // left mushrooms per trial
@@ -420,7 +420,7 @@ function proceedToNextMemoryTrial() {
 
 function handleMemoryResponse(e) {
   if (!ENABLE_SIMILARITY_TEST) return;
-  if (!memory_awaitingAnswer || !['1', '2', '3'].includes(e.key)) return;
+  if (!memory_awaitingAnswer || !['1', '2'].includes(e.key)) return;
 
   const rtPrompt = performance.now() - memory_promptStartTime;
 
@@ -476,7 +476,7 @@ function showMemoryChoicePrompt(mushroom) {
   promptDiv.appendChild(img);
 
   const text = document.createElement('p');
-  text.textContent = 'Is this mushroom: 1 = new, 2 = similar, 3 = old?';
+  text.textContent = 'Is this mushroom: 1 = new, 2 = old?';
   promptDiv.appendChild(text);
 
   document.body.appendChild(promptDiv);
