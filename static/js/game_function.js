@@ -291,23 +291,7 @@ async function hungry() {
                     hungerCountdown--;
                 } else {
                     character.hp = Math.max(0, character.hp - 1);
-                    hungerCountdown = 10;
-
-                    if (character.hp <= 0) {
-                        clearInterval(hungerInterval);
-                        hungerInterval = null;
-                    
-                        // Increment repetition for this room
-                        if (currentRoom) {
-                            roomRepetitionMap[currentRoom] = (roomRepetitionMap[currentRoom] || 1) + 1;
-                        }
-                    
-                        mushrooms = await generateMushroom(5);
-                        currentCanvas = 4;
-                        character.hp = 1;
-                        freezeTime = 1000;
-                        cameraOffset = 0;
-                    }                    
+                    hungerCountdown = 10;               
                 }
             }, 1000);
         }

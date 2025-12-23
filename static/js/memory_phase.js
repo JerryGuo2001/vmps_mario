@@ -7,10 +7,16 @@ let memory_trialStartTime = null; // for choice RT
 let memory_promptStartTime = null; // for optional old/new/similar RT
 let memory_awaitingAnswer = false;
 let memory_chosenMushroom = null;
-let memory_totalQuestions = 36;
+let memory_totalQuestions
+let Memory_debug =true
+if (Memory_debug==true){
+  memory_totalQuestions = 2;  
+}else{
+  memory_totalQuestions = 36;  
+}      
 
 // --- Config: number of trials & similarity test toggle ---
-const MEMORY_TRIALS = 36;             // 36 trials -> 72 mushrooms used exactly once
+const MEMORY_TRIALS=36     // 36 trials -> 72 mushrooms used exactly once
 const ENABLE_SIMILARITY_TEST = true; // set to true to re-enable old/new/similar
 
 
@@ -388,14 +394,8 @@ function Memory_selectorKeyHandler(e) {
   if (memory_awaitingAnswer) return;
 
   if (e.key === 'ArrowLeft') {
-    memory_selectedSide = 'left';
-    updateSelector();
-  } else if (e.key === 'ArrowRight') {
-    memory_selectedSide = 'right';
-    updateSelector();
-  } else if (e.key.toLowerCase() === 'q') {
     handleMemoryChoice('left');
-  } else if (e.key.toLowerCase() === 'e') {
+  } else if (e.key === 'ArrowRight') {
     handleMemoryChoice('right');
   }
 }
@@ -424,7 +424,7 @@ function handleMemoryChoice(side) {
         trial_type: 'memory_choice',
         trial_index: memory_currentQuestion,
         event: 'too_fast',
-        rt_choice: rtChoice,
+        rt: rtChoice,
         threshold_ms: MEMORY_TOO_FAST_MS,
         time_elapsed: performance.now() - participantData.startTime
       });
@@ -484,7 +484,7 @@ function handleMemoryChoice(side) {
         value: other.value
       },
       correct: correct,
-      rt_choice: rtChoice,
+      rt: rtChoice,
       time_elapsed: performance.now() - participantData.startTime
     });
   }
