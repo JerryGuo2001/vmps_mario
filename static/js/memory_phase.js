@@ -15,6 +15,9 @@ if (Memory_debug==true){
   memory_totalQuestions = 36;  
 }      
 
+let memory_promptMushroom = null; // the mushroom shown in the similarity/old-new prompt
+
+
 // --- Config: number of trials & similarity test toggle ---
 const MEMORY_TRIALS=36     // 36 trials -> 72 mushrooms used exactly once
 const ENABLE_SIMILARITY_TEST = true; // set to true to re-enable old/new/similar
@@ -90,6 +93,83 @@ function showMemoryTooFastWarning(seconds = MEMORY_TOO_FAST_SECONDS) {
   });
 }
 
+///memory phase generation
+// --- Type key that matches your exploration/OOO "72 types" as closely as possible ---
+function memoryTypeKey(m) {
+  // If you already have the exact function used by the exploration progress bar, reuse it.
+  // It should accept an object with {color, cap, stem} (your normalized mush has these).
+  if (typeof window.expTypeKeyFromRow === 'function') return window.expTypeKeyFromRow(m);
+
+  // Fallback: simple (color|cap|stem)
+  return `${m.color}|${m.cap}|${m.stem}`;
+}
+
+// --- Normalize any logged image path to the catalog base filename (e.g., "blue_x_y.png") ---
+function _cleanImageName(s) {
+  if (!s) return null;
+  const str = String(s);
+
+  // grab last ".../NAME.ext"
+  const m = str.match(/[^\\/]+\.(png|jpg|jpeg|webp)$/i);
+  if (!m) return null;
+
+  // strip any "images_balanced/" prefix patterns if present upstream
+  return m[0].replace(/^.*images_balanced[\\/]/i, '').replace(/^.*[\\/]/, '');
+}
+
+// --- Collect ALL "seen" mushroom filenames from the learning/exploration logs ---
+function _getSeenImageSet() {
+  const seen = new Set();
+  const trials = (typeof participantData !== 'undefined' && participantData?.trials) ? participantData.trials : [];
+
+  // Pull filenames from common shapes you use across phases (and nested objects)
+  const tryAdd = (v) => {
+    const base = _cleanImageName(v);
+    if (base) seen.add(base);
+  };
+
+  for (const tr of trials) {
+    if (!tr || typeof tr !== 'object') continue;
+
+    // Skip memory logs if any already exist (usually none at init)
+    if (typeof tr.trial_type === 'string' && tr.trial_type.includes('memory')) continue;
+
+    // direct keys
+    tryAdd(tr.imagefilename);
+    tryAdd(tr.image);
+    tryAdd(tr.filename);
+    tryAdd(tr.img);
+    tryAdd(tr.mushroom_image);
+
+    // nested common keys
+    if (tr.mushroom && typeof tr.mushroom === 'object') {
+      tryAdd(tr.mushroom.imagefilename);
+      tryAdd(tr.mushroom.image);
+      tryAdd(tr.mushroom.filename);
+    }
+
+    if (tr.left_mushroom && typeof tr.left_mushroom === 'object') {
+      tryAdd(tr.left_mushroom.imagefilename);
+      tryAdd(tr.left_mushroom.image);
+      tryAdd(tr.left_mushroom.filename);
+    }
+
+    if (tr.right_mushroom && typeof tr.right_mushroom === 'object') {
+      tryAdd(tr.right_mushroom.imagefilename);
+      tryAdd(tr.right_mushroom.image);
+      tryAdd(tr.right_mushroom.filename);
+    }
+
+    if (tr.selected_mushroom && typeof tr.selected_mushroom === 'object') {
+      tryAdd(tr.selected_mushroom.imagefilename);
+      tryAdd(tr.selected_mushroom.image);
+      tryAdd(tr.selected_mushroom.filename);
+    }
+  }
+
+  return seen;
+}
+
 
 // Globals the memory phase expects
 let aMushrooms = []; // left mushrooms per trial
@@ -112,17 +192,35 @@ function memoryImageSrc(imagefilename) {
 }
 
 // --- Normalize a mushroom row/object to a consistent shape used by memory UI ---
+function mushTypeKey(m) {
+  return `${m.color}|${m.cap}|${m.stem}`;
+}
+
 function _normalizeMush(row) {
   if (!row) return null;
-  // Prefer existing fields; derive basename only.
+
   let raw = row.imagefilename || row.filename || row.image || '';
-  // Keep only the filename (drop any path parts, including images_balanced/)
   const imagefilename = String(raw)
     .replace(/^.*images_balanced\//i, '')
     .replace(/^.*[\\/]/, '');
+
   const name = row.name || (imagefilename ? imagefilename.replace(/\.[^.]+$/, '') : 'mushroom');
-  return { name, imagefilename, value: row.value ?? 0 };
+
+  // Pull type attributes from catalog (common keys in your pipeline)
+  const color = row.color ?? row.col ?? null;
+  const cap   = row.cap   ?? row.cap_size ?? row.cap_zone ?? null;
+  const stem  = row.stem  ?? row.stem_width ?? row.stem_zone ?? null;
+
+  return {
+    name,
+    imagefilename,
+    value: row.value ?? 0,
+    color,
+    cap,
+    stem
+  };
 }
+
 
 // --- Get the full catalog pool (no dependence on prior phases) ---
 function _getCatalogPool() {
@@ -136,9 +234,10 @@ function _getCatalogPool() {
   return out;
 }
 
-// --- Prepare 36 trials from catalog: 72 mushrooms paired once (if available) ---
+// --- Prepare trials from catalog: 72 unique types, try 36 seen + fill with unseen,
+// then randomize pairing so trials can be SS / SU / UU ---
 async function preloadMushroomPairs() {
-  const pool = _getCatalogPool(); // normalized {name, imagefilename, value}
+  const pool = _getCatalogPool(); // normalized {name, imagefilename, value, color, cap, stem}
   if (pool.length < 2) {
     console.warn('[memory] Not enough mushrooms in catalog to run memory phase.');
     aMushrooms = [];
@@ -148,14 +247,102 @@ async function preloadMushroomPairs() {
     return;
   }
 
-  // Shuffle all catalog mushrooms
-  const shuffled = _shuffle(pool.slice());
+  const desiredPairs = (typeof Memory_debug !== 'undefined' && Memory_debug) ? 2 : MEMORY_TRIALS;
+  const desiredItems = desiredPairs * 2;                 // 72 (or 4 in debug)
+  const targetSeenItems = Math.floor(desiredItems / 2);  // 36 (or 2 in debug)
 
-  // Pair them sequentially: (0,1), (2,3), ...
-  const nPairsPossible = Math.floor(shuffled.length / 2);
+  // Build "seen" set from learning/exploration phase logs
+  const seenSet = _getSeenImageSet();
 
-  // We want up to MEMORY_TRIALS pairs, but cannot exceed nPairsPossible
-  const nPairs = Math.min(MEMORY_TRIALS, nPairsPossible);
+  // Bucket catalog items by type, split into seen vs unseen exemplars
+  const byType = new Map(); // typeKey -> { seen: [], unseen: [] }
+  for (const m of pool) {
+    const typeKey = memoryTypeKey(m);
+    if (!typeKey || typeKey.includes('null') || typeKey.includes('undefined')) continue;
+
+    if (!byType.has(typeKey)) byType.set(typeKey, { seen: [], unseen: [] });
+
+    const base = _cleanImageName(m.imagefilename) || m.imagefilename;
+    const isSeen = seenSet.has(base);
+
+    m.type_key = typeKey;
+    m.seen_in_learning = isSeen ? 1 : 0;
+
+    byType.get(typeKey)[isSeen ? 'seen' : 'unseen'].push(m);
+  }
+
+  const allTypes = Array.from(byType.keys());
+  if (allTypes.length === 0) {
+    console.warn('[memory] No valid types found in catalog for memory phase.');
+    aMushrooms = [];
+    bMushrooms = [];
+    memoryTrials = [];
+    memory_totalQuestions = 0;
+    return;
+  }
+
+  // We cannot exceed available unique types
+  const nTypesWanted = Math.min(desiredItems, allTypes.length);
+
+  // ---- Step 1: choose up to targetSeenItems types that have at least one seen exemplar ----
+  const typesWithSeen = allTypes.filter(t => byType.get(t).seen.length > 0);
+  _shuffle(typesWithSeen);
+
+  const chosenTypesSeen = typesWithSeen.slice(0, Math.min(targetSeenItems, nTypesWanted));
+  const chosenTypeSet = new Set(chosenTypesSeen);
+
+  // ---- Step 2: fill remaining types with unseen-first (fallback to seen-only if needed) ----
+  const remainingNeed = nTypesWanted - chosenTypeSet.size;
+
+  const remainingTypes = allTypes.filter(t => !chosenTypeSet.has(t));
+  _shuffle(remainingTypes);
+
+  const chosenTypesFill = [];
+  for (const t of remainingTypes) {
+    if (chosenTypesFill.length >= remainingNeed) break;
+    const bucket = byType.get(t);
+    // Prefer unseen types to fill the rest
+    if (bucket.unseen.length > 0 || bucket.seen.length > 0) {
+      chosenTypesFill.push(t);
+      chosenTypeSet.add(t);
+    }
+  }
+
+  const finalTypes = [...chosenTypesSeen, ...chosenTypesFill].slice(0, nTypesWanted);
+
+  // ---- Step 3: pick one exemplar per type (seen for chosenTypesSeen, unseen if possible for fill) ----
+  const selectedItems = [];
+
+  for (const t of finalTypes) {
+    const bucket = byType.get(t);
+    let chosen = null;
+
+    const isSeenTypeTarget = chosenTypesSeen.includes(t);
+
+    if (isSeenTypeTarget && bucket.seen.length > 0) {
+      chosen = bucket.seen[(Math.random() * bucket.seen.length) | 0];
+      chosen.memory_status = 'seen';
+    } else {
+      // fill types: prefer unseen, fallback to seen
+      if (bucket.unseen.length > 0) {
+        chosen = bucket.unseen[(Math.random() * bucket.unseen.length) | 0];
+        chosen.memory_status = 'unseen';
+      } else if (bucket.seen.length > 0) {
+        chosen = bucket.seen[(Math.random() * bucket.seen.length) | 0];
+        chosen.memory_status = 'seen_fallback';
+      }
+    }
+
+    if (chosen) selectedItems.push(chosen);
+  }
+
+  // Ensure even count for pairing
+  if (selectedItems.length % 2 === 1) selectedItems.pop();
+
+  // Shuffle to randomize *pair composition* (SS / SU / UU)
+  _shuffle(selectedItems);
+
+  const nPairs = Math.min(desiredPairs, Math.floor(selectedItems.length / 2));
 
   memory_totalQuestions = nPairs;
   aMushrooms = [];
@@ -163,17 +350,57 @@ async function preloadMushroomPairs() {
   memoryTrials = [];
 
   for (let i = 0; i < nPairs; i++) {
-    const left = shuffled[i * 2];
-    const right = shuffled[i * 2 + 1];
+    const left = selectedItems[i * 2];
+    const right = selectedItems[i * 2 + 1];
     aMushrooms.push(left);
     bMushrooms.push(right);
     memoryTrials.push({ left, right });
   }
 
+  // ===================== DEBUG PRINTS =====================
+  const normStatus = (s) => (String(s || '').startsWith('seen') ? 'seen' : 'unseen');
+
+  const uniqTypes = new Set(selectedItems.map(x => x.type_key || memoryTypeKey(x))).size;
+  const seenCount = selectedItems.filter(x => normStatus(x.memory_status) === 'seen').length;
+  const unseenCount = selectedItems.filter(x => normStatus(x.memory_status) === 'unseen').length;
+
+  let ss = 0, su = 0, uu = 0;
+  for (const tr of memoryTrials) {
+    const L = normStatus(tr.left.memory_status);
+    const R = normStatus(tr.right.memory_status);
+    if (L === 'seen' && R === 'seen') ss++;
+    else if (L === 'unseen' && R === 'unseen') uu++;
+    else su++;
+  }
+
   console.log(
-    `[memory] Prepared ${nPairs} trials using ${nPairs * 2} mushrooms from catalog (pool size = ${pool.length}).`
+    `[memory] Prepared ${nPairs} trials (${nPairs * 2} items). ` +
+    `uniqueTypes=${uniqTypes}/${desiredItems}, seen=${seenCount}, unseen=${unseenCount}, ` +
+    `pairs: SS=${ss}, SU=${su}, UU=${uu}, catalogTypes=${allTypes.length}, seenSet=${seenSet.size}`
   );
+
+  // Print full sequence (one row per trial)
+  const seq = memoryTrials.map((tr, i) => ({
+    trial: i + 1,
+    L_status: normStatus(tr.left.memory_status),
+    L_type: tr.left.type_key,
+    L_img: tr.left.imagefilename,
+    R_status: normStatus(tr.right.memory_status),
+    R_type: tr.right.type_key,
+    R_img: tr.right.imagefilename,
+  }));
+  console.table(seq);
+
+  // If you *must* have 72 unique types but catalog has fewer, warn loudly:
+  if (desiredItems === 72 && uniqTypes < 72) {
+    console.warn(
+      `[memory] WARNING: Could not reach 72 unique types. ` +
+      `Got ${uniqTypes}. Check catalog unique type count or type-key mapping.`
+    );
+  }
 }
+
+
 
 // =========================== INIT & MAIN LOOP ===========================
 
@@ -185,6 +412,7 @@ async function Memory_initGame() {
   memory_selectedSide = 'middle';
   memory_awaitingAnswer = false;
   memory_chosenMushroom = null;
+  memory_promptMushroom = null;
   memory_trialStartTime = null;
   memory_promptStartTime = null;
 
@@ -496,12 +724,15 @@ function handleMemoryChoice(side) {
 
   // Animate black circle moving to chosen mushroom, then either show similarity prompt or advance
   animateChoiceIndicator(targetBox, () => {
-    if (ENABLE_SIMILARITY_TEST) {
-      memory_chosenMushroom = selected;
-      showMemoryChoicePrompt(selected);
-    } else {
-      proceedToNextMemoryTrial();
-    }
+  if (ENABLE_SIMILARITY_TEST) {
+    // Randomly choose which of the TWO presented mushrooms to test (left or right),
+    // independent of the participant's choice.
+    memory_promptMushroom = (Math.random() < 0.5) ? a : b;
+
+    showMemoryChoicePrompt(memory_promptMushroom);
+  } else {
+    proceedToNextMemoryTrial();
+  }
   });
 }
 
@@ -509,6 +740,7 @@ function handleMemoryChoice(side) {
 function proceedToNextMemoryTrial() {
   memory_awaitingAnswer = false;
   memory_chosenMushroom = null;
+  memory_promptMushroom = null;
   memory_currentQuestion++;
 
   const prompt = document.getElementById('memoryPrompt');
@@ -562,9 +794,9 @@ function handleMemoryResponse(e) {
       trial_type: 'oldnew_response',
       trial_index: memory_currentQuestion,
       tested_mushroom: {
-        name: memory_chosenMushroom.name,
-        image: memory_chosenMushroom.imagefilename,
-        value: memory_chosenMushroom.value
+        name: memory_promptMushroom?.name ?? null,
+        image: memory_promptMushroom?.imagefilename ?? null,
+        value: memory_promptMushroom?.value ?? null
       },
       response: e.key, // '1' = new, '2' = similar, '3' = old
       rt: rtPrompt,
@@ -574,6 +806,8 @@ function handleMemoryResponse(e) {
 
   memory_awaitingAnswer = false;
   memory_chosenMushroom = null;
+  memory_promptMushroom = null;
+
 
   const prompt = document.getElementById('memoryPrompt');
   if (prompt) prompt.remove();

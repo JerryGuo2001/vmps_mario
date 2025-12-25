@@ -24,6 +24,8 @@ let explorationCompleteTriggered = false;
 const MIN_ROOM_ENTRIES_BEFORE_CLEAR = 3;
 const roomEntryCount = Object.create(null); // room -> #door entries
 
+//bonus on/off switch
+let ENABLE_HP_CARRYOVER = false;
 
 // ================= HP rules =================
 const MAX_HP = 100;
@@ -39,6 +41,8 @@ function clampHP(hp) {
 // 54 -> (54-30)=24 -> floor(24/10)=2
 // 33 -> (33-30)=3  -> floor(3/10)=0
 function nextRoomStartHP(hpEnd) {
+  if (!ENABLE_HP_CARRYOVER) return BASE_START_HP;
+
   const end = Number(hpEnd);
   if (!Number.isFinite(end)) return BASE_START_HP;
 
@@ -49,6 +53,7 @@ function nextRoomStartHP(hpEnd) {
 
   return clampHP(BASE_START_HP + bonus);
 }
+
 
 
 // ================= Exploration quota + progress =================
