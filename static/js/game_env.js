@@ -452,19 +452,19 @@ const NON_SKY_ROOMS = ['desert', 'ocean', 'forest', 'cave', 'lava'];
 const ROOM_COLOR_MAP = {
   // 5 unique colors (each belongs to 1 room)
   yellow:  ['desert'],   // only desert
-  cyan:    ['ocean'],    // only ocean
+  magenta:    ['ocean'],    // only ocean
   green:   ['forest'],   // only forest
   black:   ['cave'],     // only cave
   red:     ['lava'],     // only lava
 
   // 1 color shared by exactly 2 rooms
-  blue:    ['desert', 'cave'],
+  cyan:    ['desert', 'cave'],
 
   // 1 color shared by exactly 3 rooms
   white:   ['ocean', 'forest', 'lava'],
 
   // 1 color shared by all 5 rooms
-  magenta:   ['desert', 'ocean', 'forest', 'cave', 'lava']
+  blue:   ['desert', 'ocean', 'forest', 'cave', 'lava']
 };
 
 /**
