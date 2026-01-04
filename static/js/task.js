@@ -1,8 +1,8 @@
 // ========== task.js (platform-locked mushrooms; 5 per room; waits for platforms) ==========
 // Instruction preloads
 const INSTR_SLIDES = {
-  explore: [1, 2, 3],   // only files that really exist
-  memory:  [],
+  explore: [1, 2, 3],   
+  memory:  [1, 2],
   ooo:     [1]
 };
 
