@@ -335,7 +335,7 @@ function updateExploreProgressUI(force = false) {
   if (subEl && EXP_TARGET_SIGHTINGS) {
     const basePct = (expTotalSeenCapped / EXP_TARGET_SIGHTINGS) * 100;
     const bonusPct = roomsPassedNonSky * ROOM_PASS_BONUS_PCT;
-    subEl.textContent = `Base: ${Math.floor(Math.min(100, basePct))}%  |  Room bonus: +${bonusPct}%`;
+    subEl.textContent = ``;
   }
 
   if (barEl) barEl.style.width = `${pct}%`;
