@@ -8,7 +8,7 @@ let memory_promptStartTime = null; // for optional old/new/similar RT
 let memory_awaitingAnswer = false;
 let memory_chosenMushroom = null;
 let memory_totalQuestions
-let Memory_debug =true
+let Memory_debug =false
 if (Memory_debug==true){
   memory_totalQuestions = 2;  
 }else{
