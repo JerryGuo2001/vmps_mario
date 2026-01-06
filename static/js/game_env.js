@@ -27,6 +27,34 @@ const roomEntryCount = Object.create(null); // room -> #door entries
 //bonus on/off switch
 let ENABLE_HP_CARRYOVER = false;
 
+// ===== Difficulty adapt + "P unlock" per room visit =====
+const EASY_MODE_AFTER_SEEN = 40;   // after this many reveals in the SAME room visit
+const EASY_MODE_TOXIC_MAX  = 1;    // in easy mode: allow 0–1 toxic per spawn (non-sky)
+
+let roomSeenThisVisit      = 0;    // # mushrooms revealed since entering currentRoom
+let roomProceedUnlocked    = false; // latched once HP >= neededHP at any time this room
+let roomAutoAdvanceFired   = false; // guard: only auto-advance once at HP<=0 after unlock
+
+function resetRoomVisitState() {
+  roomSeenThisVisit    = 0;
+  roomProceedUnlocked  = false;
+  roomAutoAdvanceFired = false;
+}
+
+// easy-mode is only for the CURRENT room visit, before passing
+function isEasyToxicModeActiveFor(envLower) {
+  const r = expNormalizeRoom(currentRoom);
+  return (
+    envLower &&
+    r &&
+    envLower === r &&
+    r !== 'sky' &&
+    !roomProceedUnlocked &&
+    roomSeenThisVisit >= EASY_MODE_AFTER_SEEN
+  );
+}
+
+
 // ================= HP rules =================
 const MAX_HP = 100;
 const BASE_START_HP = 20;
@@ -406,6 +434,9 @@ function markMushroomSeenOnce(mushroomObjOrId, fallbackRoom = null) {
 
   const roomHere = expNormalizeRoom(fallbackRoom) || expNormalizeRoom(currentRoom);
   checkAndClearRoom(roomHere);
+
+  // NEW: count revealed mushrooms within this room visit (only once per spawned mushroom)
+  if (roomHere && roomHere !== 'sky') roomSeenThisVisit += 1;
 }
 
 function isExploreComplete() {
@@ -706,6 +737,10 @@ async function generateMushroom(count = 5) {
   // Normalize env name
   const envRaw = (typeof env_deter !== 'undefined') ? env_deter : 'sky';
   const env    = String(envRaw).trim().toLowerCase();
+  const easyToxic = isEasyToxicModeActiveFor(env);
+  const TOXIC_MIN = easyToxic ? 0 : 1;
+  const TOXIC_MAX = easyToxic ? EASY_MODE_TOXIC_MAX : 3;
+
 
   let chosenRows = [];
   let pool;
@@ -736,68 +771,66 @@ async function generateMushroom(count = 5) {
     const nonToxicPool = pool.filter(r => !isToxicValue(r.value));
 
     if (!toxicPool.length) {
-      // No toxic available → just random sample from pool
-      console.warn(`[generateMushroom] env='${envRaw}' has no toxic mushrooms; sampling without toxicity constraint.`);
       chosenRows = pickRandomSubset(pool, count);
     } else {
-      // Compute nToxic so:
-      //   1 ≤ nToxic ≤ 3
-      //   nToxic ≤ toxicPool.length
-      //   count - nToxic ≤ nonToxicPool.length
       const T = toxicPool.length;
       const N = nonToxicPool.length;
 
-      const maxT = Math.min(3, T, count);
-      let minT   = Math.max(1, count - N); // need enough non-toxic to fill
+      const maxT = Math.min(TOXIC_MAX, T, count);
 
-      if (minT < 1) minT = 1;
-      if (minT > maxT) {
-        // Can't satisfy both constraints perfectly; fall back to "as good as possible".
-        minT = maxT;  // will still be ≤ 3
-      }
+      // need enough non-toxic to fill the rest; allow 0 in easy mode
+      let minT = Math.max(TOXIC_MIN, count - N);
+      if (minT < TOXIC_MIN) minT = TOXIC_MIN;
+      if (minT > maxT) minT = maxT;
 
       const nToxic = randInt(minT, maxT);
-      const toxicChosen    = pickRandomSubset(toxicPool,    nToxic);
-      const nonToxicChosen = pickRandomSubset(nonToxicPool, count - nToxic);
+
+      const toxicChosen = (nToxic > 0) ? pickRandomSubset(toxicPool, nToxic) : [];
+      let nonToxicChosen = pickRandomSubset(nonToxicPool, count - nToxic);
+
+      // if still short (rare), top up from pool (best-effort)
+      if (nonToxicChosen.length < (count - nToxic)) {
+        const need = (count - nToxic) - nonToxicChosen.length;
+        const nameOf = (r) => String(r.filename || r.image || r.imagefilename || '');
+        const already = new Set([...toxicChosen, ...nonToxicChosen].map(nameOf));
+        const topUpPool = pool.filter(r => !already.has(nameOf(r)));
+        nonToxicChosen = nonToxicChosen.concat(pickRandomSubset(topUpPool, need));
+      }
 
       chosenRows = toxicChosen.concat(nonToxicChosen);
     }
 
-    // -------- SAFETY PASS: enforce 1–3 toxic in non-sky rooms (existing logic) --------
+    // ---- SAFETY PASS: enforce [TOXIC_MIN..TOXIC_MAX] only when possible ----
     const toxicPoolEnv = pool.filter(r => isToxicValue(r.value));
     let toxicIdxs = [];
-    chosenRows.forEach((r, idx) => {
-      if (isToxicValue(r.value)) toxicIdxs.push(idx);
-    });
+    chosenRows.forEach((r, idx) => { if (isToxicValue(r.value)) toxicIdxs.push(idx); });
 
-    // Ensure at least 1 toxic (if any exist in the env pool)
-    if (toxicIdxs.length === 0 && toxicPoolEnv.length > 0) {
-      const nonToxicIdxs = chosenRows
+    // Ensure at least TOXIC_MIN (only if we have toxics available and TOXIC_MIN>0)
+    if (TOXIC_MIN > 0 && toxicIdxs.length < TOXIC_MIN && toxicPoolEnv.length > 0) {
+      const candidates = chosenRows
         .map((r, idx) => ({ r, idx }))
         .filter(o => !isToxicValue(o.r.value));
 
-      if (nonToxicIdxs.length > 0) {
-        const slot = nonToxicIdxs[Math.floor(Math.random() * nonToxicIdxs.length)];
+      while (toxicIdxs.length < TOXIC_MIN && candidates.length > 0) {
+        const slot = candidates.pop();
         const replacement = toxicPoolEnv[Math.floor(Math.random() * toxicPoolEnv.length)];
         chosenRows[slot.idx] = replacement;
-        toxicIdxs = [slot.idx];
+        toxicIdxs.push(slot.idx);
       }
     }
 
-    // Ensure at most 3 toxic (if we somehow padded with extra toxics)
-    if (toxicIdxs.length > 3) {
+    // Ensure at most TOXIC_MAX (prefer replacing with non-toxic)
+    if (toxicIdxs.length > TOXIC_MAX) {
       const nonToxicEnvPool = pool.filter(r => !isToxicValue(r.value));
       let availableNonToxic = nonToxicEnvPool.filter(r => !chosenRows.includes(r));
 
-      const keep      = toxicIdxs.slice(0, 3);
-      const toReplace = toxicIdxs.slice(3);
-
+      const toReplace = toxicIdxs.slice(TOXIC_MAX);
       for (const idx of toReplace) {
         if (!availableNonToxic.length) break;
-        const replacement = availableNonToxic.pop();
-        chosenRows[idx] = replacement;
+        chosenRows[idx] = availableNonToxic.pop();
       }
     }
+
   }
 
   // ---------- NEW: limit zero-value mushrooms to at most 1 + randomize order ----------
@@ -1037,58 +1070,82 @@ function handleCollisions_canvas4() {
 
 // **Handle text interaction logic:**
 async function handleTextInteraction_canvas4() {
-  // fallback to 5 if stageHpThreshold hasn't been set yet
   const neededHP = (typeof stageHpThreshold === 'number' && !isNaN(stageHpThreshold))
     ? stageHpThreshold
     : 30;
 
+  // NEW: latch unlock the first time they ever reach the threshold this room visit
+  if (!roomProceedUnlocked && character.hp >= neededHP) {
+    roomProceedUnlocked = true;
+  }
+
+  const canProceed = roomProceedUnlocked || (character.hp >= neededHP);
+
+  // NEW: if they previously unlocked, and later HP hits 0, auto-advance once
+  if (roomProceedUnlocked && character.hp <= 0 && !roomAutoAdvanceFired) {
+    roomAutoAdvanceFired = true;
+    proceedFromRoom('auto_hp0');
+    return;
+  }
+
   ctx.fillStyle = '#000';
   ctx.font = '16px Arial';
 
-  if (character.hp < neededHP) {
+  if (!canProceed) {
+    // not unlocked and below threshold -> no P prompt
     const text = ``;
     const textWidth = ctx.measureText(text).width;
     const xPos = (canvas.width - textWidth) / 2;
     const yPos = canvas.height / 4;
     ctx.fillText(text, xPos, yPos);
-  } else {
-    const text = `Press P to proceed`;
-    const textWidth = ctx.measureText(text).width;
-    const xPos = (canvas.width - textWidth) / 2;
-    const yPos = canvas.height / 4;
-    ctx.fillText(text, xPos, yPos);
+    return;
+  }
+
+  // can proceed (either currently >= threshold OR previously unlocked)
+  const text = (character.hp >= neededHP)
+    ? `Press P to proceed`
+    : `Press P to proceed (unlocked)`;
+
+  const textWidth = ctx.measureText(text).width;
+  const xPos = (canvas.width - textWidth) / 2;
+  const yPos = canvas.height / 4;
+  ctx.fillText(text, xPos, yPos);
 
   if (keys['p']) {
-    keys['p'] = false; // ✅ consume so we only count once per press
-
-    roomsPassed += 1;
-
-    // +1% bonus for completing a room, excluding sky
-    const r = expNormalizeRoom(currentRoom);
-    if (r && r !== 'sky') {
-      roomsPassedNonSky += 1;
-    }
-
-    checkAndClearRoom(currentRoom); // keep your clearing logic
-    updateExploreProgressUI(true);
-    if (isExploreComplete()) explorationCompleteTriggered = true;
-
-
-    const startHPNext = nextRoomStartHP(character.hp);
-
-    currentCanvas = 1;
-    character.hp = startHPNext;     // carry-over (capped)
-
-    currentQuestion += 1;
-    console.log("Proceeding to next question: " + currentQuestion);
-    roomChoiceStartTime = performance.now();
-    doorsAssigned = false;
-  }
-
-
-
+    keys['p'] = false; // consume
+    proceedFromRoom('p');
+    return;
   }
 }
+
+
+
+
+function proceedFromRoom(reason = 'p') {
+  roomsPassed += 1;
+
+  const r = expNormalizeRoom(currentRoom);
+  if (r && r !== 'sky') roomsPassedNonSky += 1;
+
+  checkAndClearRoom(currentRoom);
+  updateExploreProgressUI(true);
+  if (isExploreComplete()) explorationCompleteTriggered = true;
+
+  const startHPNext = nextRoomStartHP(character.hp);
+
+  // leaving this room -> reset per-room visit state
+  resetRoomVisitState();
+
+  currentCanvas = 1;
+  character.hp  = startHPNext;
+
+  currentQuestion += 1;
+  console.log("Proceeding to next question: " + currentQuestion);
+
+  roomChoiceStartTime = performance.now();
+  doorsAssigned = false;
+}
+
 
 
 const boxImage = new Image();
@@ -1362,6 +1419,11 @@ function getRespawnSpot() {
 let freezeTime = 0; // Variable to track freeze time
 
 async function checkHP_canvas4() {
+  if (currentCanvas !== 4) return;
+
+  // NEW: once exit is unlocked, death should not respawn this room (auto-advance handles it)
+  if (roomProceedUnlocked) return;
+
   if (character.hp <= 0 && freezeTime === 0) {
     freezeTime = 1000;
     currentCanvas = 4;

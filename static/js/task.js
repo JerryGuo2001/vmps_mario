@@ -703,6 +703,11 @@ function updateGame(currentTime) {
       }
       drawBackground_canvas4();
       handleTextInteraction_canvas4();
+      if (currentCanvas !== 4) { 
+        accumulatedTime -= targetTimeStep;
+        continue;
+      }
+
       handleBlockCollision_canvas4();
       drawCharacter_canvas4();
       drawHP_canvas4();

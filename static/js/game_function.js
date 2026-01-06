@@ -91,6 +91,9 @@ async function drawObstacles() {
                 env_deter = leftDoorType;
                 currentRoom = env_deter;
 
+                resetRoomVisitState();
+
+
                 groundPlatforms = generateGroundPlatforms(worldWidth, 200, 400);
                 mushrooms = await generateMushroom(5);
                 handleTextInteraction_canvas4()
@@ -142,6 +145,7 @@ async function drawObstacles() {
 
                 env_deter = rightDoorType;
                 currentRoom = env_deter;
+                resetRoomVisitState();
 
                 groundPlatforms = generateGroundPlatforms(worldWidth, 200, 400);
                 mushrooms = await generateMushroom(5);
