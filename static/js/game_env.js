@@ -1104,7 +1104,7 @@ async function handleTextInteraction_canvas4() {
   // can proceed (either currently >= threshold OR previously unlocked)
   const text = (character.hp >= neededHP)
     ? `Press P to proceed`
-    : `Press P to proceed (unlocked)`;
+    : `Press P to proceed`;
 
   const textWidth = ctx.measureText(text).width;
   const xPos = (canvas.width - textWidth) / 2;
