@@ -656,6 +656,20 @@ function worldToScreenX(xWorld) { return xWorld - cameraOffset; }
 function getCharacterScreenX() { return getCharacterScreenXFromWorld(); }
 function getCharacterWorldX() { ensureWorldPosInit(); return character.worldX; }
 
+function wrapWorldXLeftEdge(xWorld) {
+  const maxX = worldWidth - character.width; // last valid left position
+  if (maxX <= 0) return 0;
+
+  // If you pass the left edge, appear on the far right
+  if (xWorld < 0) return maxX;
+
+  // If you pass the right edge, appear on the far left
+  if (xWorld > maxX) return 0;
+
+  return xWorld;
+}
+
+
 // -----------------------------------------------------------
 
 function generateGroundPlatforms(worldWidth, minHeight, maxHeight, numSections = null) {
@@ -1493,20 +1507,31 @@ function handleMovement_canvas4() {
     else if (character.speed < 0) character.speed = Math.min(0, character.speed + character.deceleration);
   }
 
-  const proposedWorldX = character.worldX + character.speed;
+  const oldWorldX = character.worldX;
+  let proposedWorldX = oldWorldX + character.speed;
+
+  // detect whether we’re wrapping this frame
+  const maxX = worldWidth - character.width;
+  const willWrap = (proposedWorldX < 0) || (proposedWorldX > maxX);
+
+  // apply wrap
+  proposedWorldX = wrapWorldXLeftEdge(proposedWorldX);
 
   function hitsGroundWall(xWorld, yTop) {
     return groundPlatforms.some(p =>
       (
-        (xWorld + character.width > p.startX && character.worldX + character.width <= p.startX) ||
-        (xWorld < p.endX && character.worldX >= p.endX)
+        (xWorld + character.width > p.startX && oldWorldX + character.width <= p.startX) ||
+        (xWorld < p.endX && oldWorldX >= p.endX)
       ) && (yTop + character.height > p.y)
     );
   }
 
-  if (!hitsGroundWall(proposedWorldX, character.y)) {
-    character.worldX = Math.max(0, Math.min(proposedWorldX, worldWidth - character.width));
+  // If we wrapped, do NOT block it with wall collisions at the seam.
+  // Otherwise, keep your normal wall-collision rule.
+  if (willWrap || !hitsGroundWall(proposedWorldX, character.y)) {
+    character.worldX = proposedWorldX;
   }
+
 
   // ---- Gravity & robust vertical resolution (WORLD overlap, continuous landing) ----
 
