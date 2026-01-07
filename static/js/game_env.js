@@ -83,6 +83,44 @@ function nextRoomStartHP(hpEnd) {
 }
 
 
+// --- NEW: robust ground collision helpers (WORLD space) ---
+
+function overlappingGroundPlatformsWorld(xLeft, xRight) {
+  if (!Array.isArray(groundPlatforms)) return [];
+  return groundPlatforms.filter(p => (xRight > p.startX) && (xLeft < p.endX));
+}
+
+// For downward motion: find the FIRST platform top we would hit this frame.
+// (smallest y among those between oldBottom..newBottom)
+function findLandingPlatform(overlaps, oldBottom, newBottom) {
+  let best = null;
+  for (const p of overlaps) {
+    if (oldBottom <= p.y && newBottom >= p.y) {
+      if (!best || p.y < best.y) best = p;
+    }
+  }
+  return best;
+}
+
+// If we ever end up below the platform surface while still overlapping it,
+// snap back on top (prevents "fell under" / "embedded" states).
+function enforceNotBelowOverlappingPlatform(overlaps) {
+  if (!overlaps.length) return;
+
+  // choose the highest (smallest y) overlapping platform as the "local floor"
+  let floor = overlaps[0];
+  for (const p of overlaps) if (p.y < floor.y) floor = p;
+
+  const bottom = character.y + character.height;
+
+  // If Mario overlaps the platform region and his bottom is below the top surface,
+  // clamp to the surface. (This is the "never under local platform" rule.)
+  if (bottom > floor.y && character.y < floor.y) {
+    character.y = floor.y - character.height;
+    if (character.velocityY > 0) character.velocityY = 0;
+  }
+}
+
 
 // ================= Exploration quota + progress =================
 const REQUIRED_SEEN_PER_TYPE = 3;  // each mushroom type must be seen 3x
@@ -1470,30 +1508,48 @@ function handleMovement_canvas4() {
     character.worldX = Math.max(0, Math.min(proposedWorldX, worldWidth - character.width));
   }
 
-  // ---- Gravity & vertical resolution order ----
-  const leftFootXWorld  = character.worldX + 2;
-  const rightFootXWorld = character.worldX + character.width - 2;
-  const groundYLeft  = getGroundY(leftFootXWorld);
-  const groundYRight = getGroundY(rightFootXWorld);
-  const groundY = Math.min(groundYLeft, groundYRight);
+  // ---- Gravity & robust vertical resolution (WORLD overlap, continuous landing) ----
 
-  // apply gravity first
+  // 1) gravity
   character.velocityY += gravity;
 
-  // resolve mys-box first (landing/head-hit/side may set y/velY)
+  // 2) resolve mys-box first (can change y/vel and trigger freezes)
   const _boxCanJump = (typeof drawMysBox === 'function') ? drawMysBox() : false;
 
-  // integrate Y, then clamp to ground if crossing it
-  let newY = character.y + character.velocityY;
-  if (character.y + character.height <= groundY && newY + character.height >= groundY) {
-    character.y = groundY - character.height;
-    character.velocityY = 0;
+  // 3) robust ground: use full horizontal overlap (not just feet)
+  const xL = character.worldX;
+  const xR = character.worldX + character.width;
+  const overlaps = overlappingGroundPlatformsWorld(xL, xR);
+
+  // continuous landing test (works even with big velocity)
+  const oldY = character.y;
+  const oldBottom = oldY + character.height;
+  const newY = oldY + character.velocityY;
+  const newBottom = newY + character.height;
+
+  if (character.velocityY >= 0 && overlaps.length) {
+    const landingPlat = findLandingPlatform(overlaps, oldBottom, newBottom);
+    if (landingPlat) {
+      character.y = landingPlat.y - character.height;
+      character.velocityY = 0;
+    } else {
+      character.y = newY;
+    }
   } else {
+    // going up or no overlaps
     character.y = newY;
   }
 
-  // Jumping allowed if grounded or on box
-  const onGround = (character.y + character.height) >= groundY - 0.01;
+  // 4) safety clamp: if we somehow ended up under an overlapping platform, snap on top
+  if (overlaps.length) {
+    enforceNotBelowOverlappingPlatform(overlaps);
+  }
+
+  // 5) grounded test for jumping (based on overlap platforms)
+  const bottomNow = character.y + character.height;
+  const onGround = overlaps.some(p => Math.abs(bottomNow - p.y) <= 0.75);
+
+
   if (keys['ArrowUp'] && (onGround || _boxCanJump)) {
     character.velocityY = -13;
   }
