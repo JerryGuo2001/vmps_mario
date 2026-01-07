@@ -105,18 +105,20 @@ function findLandingPlatform(overlaps, oldBottom, newBottom) {
 // If we ever end up below the platform surface while still overlapping it,
 // snap back on top (prevents "fell under" / "embedded" states).
 function enforceNotBelowOverlappingPlatform(overlaps) {
-  if (!overlaps.length) return;
+  if (!overlaps || !overlaps.length || !character) return;
 
   // choose the highest (smallest y) overlapping platform as the "local floor"
   let floor = overlaps[0];
   for (const p of overlaps) if (p.y < floor.y) floor = p;
 
+  const EPS = 0.75; // tolerance to avoid jitter at seams
   const bottom = character.y + character.height;
 
-  // If Mario overlaps the platform region and his bottom is below the top surface,
-  // clamp to the surface. (This is the "never under local platform" rule.)
-  if (bottom > floor.y && character.y < floor.y) {
+  // HARD RULE: if bottom is below the top surface while horizontally overlapping,
+  // snap to the surface (even if character.y is already > floor.y).
+  if (bottom > floor.y + EPS) {
     character.y = floor.y - character.height;
+    // kill downward speed; also prevents continuing to tunnel
     if (character.velocityY > 0) character.velocityY = 0;
   }
 }
@@ -1566,9 +1568,15 @@ function handleMovement_canvas4() {
   }
 
   // 4) safety clamp: if we somehow ended up under an overlapping platform, snap on top
-  if (overlaps.length) {
-    enforceNotBelowOverlappingPlatform(overlaps);
+  // (recompute overlaps to be extra safe at platform seams)
+  const overlapsNow = overlappingGroundPlatformsWorld(
+    character.worldX,
+    character.worldX + character.width
+  );
+  if (overlapsNow.length) {
+    enforceNotBelowOverlappingPlatform(overlapsNow);
   }
+
 
   // 5) grounded test for jumping (based on overlap platforms)
   const bottomNow = character.y + character.height;
