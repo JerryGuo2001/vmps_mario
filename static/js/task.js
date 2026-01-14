@@ -29,15 +29,17 @@ function startWithID() {
   // ✅ Hide welcome immediately so instructions are the only thing visible
   const w = document.getElementById('welcome');
   if (w) w.style.display = 'none';
-
+  //debug mode on, delet the following testing code and re make the section below non-commented
+  window.startPostSurvey();
+  //debug mode section end
   // Show OOO instructions first (if configured); otherwise start OOO immediately.
-  if (typeof showPhaseInstructions === 'function' && INSTR_FOLDERS && INSTR_FOLDERS.ooo) {
-    showPhaseInstructions('ooo', () => {
-      initTaskOOO(); // start OOO after instructions
-    });
-  } else {
-    initTaskOOO(); // fallback
-  }
+  // if (typeof showPhaseInstructions === 'function' && INSTR_FOLDERS && INSTR_FOLDERS.ooo) {
+  //   showPhaseInstructions('ooo', () => {
+  //     initTaskOOO(); // start OOO after instructions
+  //   });
+  // } else {
+  //   initTaskOOO(); // fallback
+  // }
 }
 
 

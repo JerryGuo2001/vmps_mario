@@ -310,14 +310,18 @@ function finishTaskOOO() {
     if (typeof startExplore === 'function') startExplore();
     typeOOO++;
   } else if (typeOOO === 1) {
-    const thanks = document.getElementById('thankyou');
-    if (thanks) thanks.style.display = 'block';
-    const id = participantData.id || 'unknown';
+    // Transition to post-survey instead of saving immediately
+    if (typeof window.startPostSurvey === 'function') {
+      window.startPostSurvey();
+    } else {
+      console.error('[OOO] startPostSurvey() not found. Make sure PostSurvey.js is loaded.');
+      alert('Internal error: post-survey not ready. Please contact the researcher.');
 
-    // ⬇️ Download main trial data
-    if (typeof downloadCSV === 'function') {
-      const trialFilename = `data_${id}.csv`;
-      downloadCSV(participantData.trials, trialFilename);
+      // Fallback: if survey missing, save anyway to avoid data loss
+      const id = participantData.id || 'unknown';
+      if (typeof downloadCSV === 'function') {
+        downloadCSV(participantData.trials || [], `data_${id}.csv`);
+      }
     }
   }
 }
