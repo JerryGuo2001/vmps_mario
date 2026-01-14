@@ -5,7 +5,6 @@
 // Assumptions:
 // - participantData exists globally and has participantData.id and participantData.trials (array)
 // - downloadCSV(rowsArray, filename) exists (your existing helper)
-// - You have a container element with id="main" OR we fall back to document.body
 
 (function () {
   // Public API
@@ -39,6 +38,14 @@
     focus: "0 0 0 3px rgba(66, 133, 244, 0.25)"
   };
 
+  // Store previous overflow styles so we can restore
+  const _prev = {
+    htmlOverflow: null,
+    bodyOverflow: null,
+    bodyMinHeight: null,
+    bodyBg: null
+  };
+
   function startPostSurvey() {
     if (_surveyStarted) return;
     _surveyStarted = true;
@@ -47,30 +54,21 @@
     const thanks = document.getElementById("thankyou");
     if (thanks) thanks.style.display = "none";
 
-    // Ensure theme/background is applied
-    applyGlobalSurveyTheme();
+    // Build / show overlay with its OWN scrolling
+    applyOverlayAndLockBackgroundScroll();
 
-    // Create / reuse survey container
-    let surveyDiv = document.getElementById("postSurveyDiv");
-    if (!surveyDiv) {
-      surveyDiv = document.createElement("div");
-      surveyDiv.id = "postSurveyDiv";
+    const overlay = getOrCreateOverlay();
+    overlay.innerHTML = ""; // clear prior content
+    overlay.style.display = "block";
 
-      const host = document.getElementById("main") || document.body;
-      host.appendChild(surveyDiv);
-    } else {
-      surveyDiv.innerHTML = "";
-      surveyDiv.style.display = "block";
-    }
-
-    // Outer layout wrapper (centers content and gives breathing room)
+    // Center-ish layout, but allow scrolling from top if content is tall
     const outer = document.createElement("div");
-    outer.style.minHeight = "100vh";
+    outer.style.minHeight = "100%";
     outer.style.display = "flex";
-    outer.style.alignItems = "center";
+    outer.style.alignItems = "flex-start";     // critical: don't vertically center tall content
     outer.style.justifyContent = "center";
     outer.style.padding = "40px 16px";
-    surveyDiv.appendChild(outer);
+    overlay.appendChild(outer);
 
     // Card container
     const card = document.createElement("div");
@@ -169,7 +167,6 @@
     btnRow.style.marginTop = "22px";
     btnRow.style.display = "flex";
     btnRow.style.justifyContent = "flex-end";
-    btnRow.style.gap = "10px";
 
     const submitBtn = document.createElement("button");
     submitBtn.type = "submit";
@@ -228,14 +225,16 @@
 
       finishAndSaveAllData();
     });
+
+    // Ensure overlay starts at the top
+    overlay.scrollTop = 0;
   }
 
   function finishAndSaveAllData() {
-    const surveyDiv = document.getElementById("postSurveyDiv");
-    if (surveyDiv) surveyDiv.style.display = "none";
+    const overlay = document.getElementById("postSurveyOverlay");
+    if (overlay) overlay.style.display = "none";
 
-    // Restore prior body background (optional)
-    restoreGlobalSurveyTheme();
+    restoreBackgroundScroll();
 
     const thanks = document.getElementById("thankyou");
     if (thanks) thanks.style.display = "block";
@@ -253,23 +252,50 @@
     }
   }
 
-  // -------------------- Theme helpers --------------------
+  // -------------------- Overlay + scroll control --------------------
 
-  let _prevBodyBg = null;
-  let _prevBodyMinHeight = null;
+  function getOrCreateOverlay() {
+    let overlay = document.getElementById("postSurveyOverlay");
+    if (!overlay) {
+      overlay = document.createElement("div");
+      overlay.id = "postSurveyOverlay";
+      overlay.style.position = "fixed";
+      overlay.style.inset = "0";
+      overlay.style.zIndex = "999999";
+      overlay.style.background = THEME.pageBg;
 
-  function applyGlobalSurveyTheme() {
-    // Keep a snapshot so we can restore later if needed
-    if (_prevBodyBg === null) _prevBodyBg = document.body.style.background;
-    if (_prevBodyMinHeight === null) _prevBodyMinHeight = document.body.style.minHeight;
+      // KEY: overlay has its own scroll, independent of body/#main
+      overlay.style.overflowY = "auto";
+      overlay.style.overflowX = "hidden";
+      overlay.style.webkitOverflowScrolling = "touch";
 
+      // Optional: small inner padding already handled in outer wrapper
+      document.body.appendChild(overlay);
+    }
+    return overlay;
+  }
+
+  function applyOverlayAndLockBackgroundScroll() {
+    // Store previous styles once
+    if (_prev.htmlOverflow === null) _prev.htmlOverflow = document.documentElement.style.overflow;
+    if (_prev.bodyOverflow === null) _prev.bodyOverflow = document.body.style.overflow;
+    if (_prev.bodyMinHeight === null) _prev.bodyMinHeight = document.body.style.minHeight;
+    if (_prev.bodyBg === null) _prev.bodyBg = document.body.style.background;
+
+    // Lock background scroll (overlay will scroll)
+    document.documentElement.style.overflow = "hidden";
+    document.body.style.overflow = "hidden";
+
+    // Visual: set body bg too (in case overlay has transparency later)
     document.body.style.background = THEME.pageBg;
     document.body.style.minHeight = "100vh";
   }
 
-  function restoreGlobalSurveyTheme() {
-    if (_prevBodyBg !== null) document.body.style.background = _prevBodyBg;
-    if (_prevBodyMinHeight !== null) document.body.style.minHeight = _prevBodyMinHeight;
+  function restoreBackgroundScroll() {
+    if (_prev.htmlOverflow !== null) document.documentElement.style.overflow = _prev.htmlOverflow;
+    if (_prev.bodyOverflow !== null) document.body.style.overflow = _prev.bodyOverflow;
+    if (_prev.bodyMinHeight !== null) document.body.style.minHeight = _prev.bodyMinHeight;
+    if (_prev.bodyBg !== null) document.body.style.background = _prev.bodyBg;
   }
 
   // -------------------- Question builders --------------------
@@ -280,7 +306,7 @@
     section.style.borderRadius = "14px";
     section.style.padding = "14px 14px";
     section.style.margin = "14px 0";
-    section.style.background = "#FFFCF1"; // subtle warm tint
+    section.style.background = "#FFFCF1";
 
     if (titleText) {
       const title = document.createElement("div");
@@ -343,7 +369,6 @@
       t.style.fontSize = "14px";
       t.style.fontWeight = "600";
 
-      // Subtle focus ring when tabbing
       input.addEventListener("focus", () => (pill.style.outline = THEME.focus));
       input.addEventListener("blur", () => (pill.style.outline = "none"));
 
@@ -392,7 +417,6 @@
     return section;
   }
 
-  // Drag-and-drop ranking question
   function makeColorRankingQuestion({ name, label, colors }) {
     const section = makeSectionCard(label);
 
@@ -427,7 +451,6 @@
       li.style.background = "#FFFFFF";
       li.style.cursor = "grab";
 
-      // Hover affordance
       li.addEventListener("mouseenter", () => (li.style.background = "#FFFCF1"));
       li.addEventListener("mouseleave", () => (li.style.background = "#FFFFFF"));
 
@@ -436,7 +459,6 @@
       handle.style.fontSize = "18px";
       handle.style.opacity = "0.6";
       handle.style.userSelect = "none";
-      handle.style.marginRight = "2px";
 
       const swatch = document.createElement("span");
       swatch.style.width = "18px";
@@ -445,10 +467,7 @@
       swatch.style.display = "inline-block";
       swatch.style.background = c.hex;
       swatch.style.border = "1px solid #999";
-
-      if (c.name === "white") {
-        swatch.style.border = "1px solid #555";
-      }
+      if (c.name === "white") swatch.style.border = "1px solid #555";
 
       const text = document.createElement("span");
       text.textContent = c.name;
@@ -554,26 +573,16 @@
       return { ok: false, msg: "Please complete all required fields.", data: null };
     }
 
-    // Read ranked list (top -> bottom)
     const list = document.getElementById("color_rank_list");
-    if (!list) {
-      return { ok: false, msg: "Internal error: color ranking list not found.", data: null };
-    }
+    if (!list) return { ok: false, msg: "Internal error: color ranking list not found.", data: null };
 
-    const ranked = [...list.querySelectorAll("li")]
-      .map((li) => li.dataset.color)
-      .filter(Boolean);
+    const ranked = [...list.querySelectorAll("li")].map((li) => li.dataset.color).filter(Boolean);
 
     const expected = new Set(RANK_COLORS.map((c) => c.name));
     const rankedSet = new Set(ranked);
 
     if (ranked.length !== expected.size || rankedSet.size !== expected.size) {
       return { ok: false, msg: "Please ensure all 8 colors are ranked.", data: null };
-    }
-    for (const c of expected) {
-      if (!rankedSet.has(c)) {
-        return { ok: false, msg: "Please ensure all 8 colors are included in the ranking.", data: null };
-      }
     }
 
     const data = {
