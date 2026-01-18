@@ -1,11 +1,12 @@
 // ========================== PostSurvey.js ==========================
-// 9-page post-survey:
-//   Pages 1–8: “Build the highest-value mushroom” per COLOR (sliders + live closest-image lookup)
-//   Page 9:    post-survey (enjoyment/difficulty/strategy + color/room ranking)
+// Multi-page post-survey:
+//  - Pages 1–8: “Build the best mushroom” per color (stem + cap sliders + live nearest-image preview)
+//  - Page 9: your existing survey (enjoyment/difficulty/strategy + color rank + room rank)
+// Writes into participantData.postSurvey and participantData.trials, then downloads CSVs.
 
 
 (function () {
-  // -------------------- Public API --------------------
+  // Public API
   window.startPostSurvey = startPostSurvey;
   window.finishAndSaveAllData = finishAndSaveAllData;
 
@@ -13,6 +14,11 @@
   let _surveyStarted = false;
 
   // -------------------- Config --------------------
+
+  // 8-color order for the 8 builder pages
+  const BUILDER_COLORS = ['black','white','red','green','blue','cyan','magenta','yellow'];
+
+  // Color ranking config
   const RANK_COLORS = [
     { name: "cyan", hex: "#00FFFF" },
     { name: "blue", hex: "#0000FF" },
@@ -24,7 +30,7 @@
     { name: "green", hex: "#00AA00" }
   ];
 
-  // ONLY the 5 rooms, exclude sky
+  // Room ranking config (ONLY the 5 rooms, exclude sky)
   const RANK_ROOMS = [
     { name: "lava", imgSrc: "TexturePack/lavaDoor.png" },
     { name: "forest", imgSrc: "TexturePack/forestDoor.png" },
@@ -35,42 +41,33 @@
 
   // Style tokens
   const THEME = {
-    pageBg: "#F3E9C6",      // light khaki
+    pageBg: "#F3E9C6",     // light khaki
     cardBg: "#FFFFFF",
     border: "#E4D8AE",
     text: "#1F2328",
     muted: "#5A5F66",
     shadow: "0 10px 30px rgba(0,0,0,0.10)",
     radius: "16px",
-    focus: "0 0 0 3px rgba(66, 133, 244, 0.25)"
+    focusShadow: "0 0 0 3px rgba(66, 133, 244, 0.25)"
   };
 
   // Store previous overflow styles so we can restore
   const _prev = { htmlOverflow: null, bodyOverflow: null, bodyMinHeight: null, bodyBg: null };
 
-  // -------------------- Wizard state --------------------
-  const WIZ_TOTAL_PAGES = 9;
-  const BUILDER_PAGES = RANK_COLORS.length; // 8
-  const wizard = {
-    pageIndex: 0, // 0..8
-    builderByColor: Object.create(null), // color -> saved selection
-    // current page live values (for builder pages)
-    current: {
-      cap: 50,
-      stem: 50,
-      chosen: null
-    },
-    pageStartTime: null
-  };
+  // -------------------- Multi-page state --------------------
+  const TOTAL_PAGES = 9; // 8 builder + 1 final survey
+  let _pageIndex = 0;    // 0..8
+  let _pageStartT = null;
 
-  // Cache for catalog normalization
-  const _catalogCache = {
-    byColor: Object.create(null), // color -> { entries, capNorm[], stemNorm[], capLabel[], stemLabel[] }
-    source: null
-  };
+  let _catalogRows = null;
+  let _catalogIndex = null;
 
-  // -------------------- Entry point --------------------
-  function startPostSurvey() {
+  // Builder data: color -> selection object
+  const _builderData = Object.create(null);
+
+  // -------------------- Entry --------------------
+
+  async function startPostSurvey() {
     if (_surveyStarted) return;
     _surveyStarted = true;
 
@@ -80,13 +77,11 @@
 
     // Build / show overlay with its OWN scrolling
     applyOverlayAndLockBackgroundScroll();
-
     const overlay = getOrCreateOverlay();
     overlay.innerHTML = "";
     overlay.style.display = "block";
-    overlay.scrollTop = 0;
 
-    // Center-ish layout, but allow scrolling from top if content is tall
+    // Outer layout
     const outer = document.createElement("div");
     outer.style.minHeight = "100%";
     outer.style.display = "flex";
@@ -98,370 +93,551 @@
     // Card container
     const card = document.createElement("div");
     card.style.width = "100%";
-    card.style.maxWidth = "920px";
+    card.style.maxWidth = "900px";
     card.style.background = THEME.cardBg;
     card.style.border = `1px solid ${THEME.border}`;
     card.style.borderRadius = THEME.radius;
     card.style.boxShadow = THEME.shadow;
-    card.style.padding = "22px 22px";
+    card.style.padding = "26px 28px";
     card.style.color = THEME.text;
     card.style.fontFamily = "system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif";
     card.style.lineHeight = "1.45";
     outer.appendChild(card);
 
-    // Wizard frame
+    // Header
     const header = document.createElement("div");
-    header.id = "psHeader";
+    header.style.display = "flex";
+    header.style.alignItems = "baseline";
+    header.style.justifyContent = "space-between";
+    header.style.gap = "12px";
+    header.style.marginBottom = "10px";
     card.appendChild(header);
 
+    const h2 = document.createElement("h2");
+    h2.textContent = "Post-Task Survey";
+    h2.style.margin = "0";
+    h2.style.fontSize = "24px";
+    h2.style.letterSpacing = "0.2px";
+    header.appendChild(h2);
+
+    const progressText = document.createElement("div");
+    progressText.id = "psProgressText";
+    progressText.style.fontSize = "13px";
+    progressText.style.color = THEME.muted;
+    header.appendChild(progressText);
+
+    const sub = document.createElement("div");
+    sub.id = "psSubTitle";
+    sub.textContent = "Loading…";
+    sub.style.margin = "0 0 10px 0";
+    sub.style.color = THEME.muted;
+    sub.style.fontSize = "14px";
+    card.appendChild(sub);
+
+    // Divider
     const divider = document.createElement("div");
     divider.style.height = "1px";
     divider.style.background = "#EFE7C9";
-    divider.style.margin = "14px 0 16px 0";
+    divider.style.margin = "16px 0 18px 0";
     card.appendChild(divider);
 
-    const content = document.createElement("div");
-    content.id = "psContent";
-    card.appendChild(content);
+    // Main page root (we re-render into this)
+    const pageRoot = document.createElement("div");
+    pageRoot.id = "psPageRoot";
+    card.appendChild(pageRoot);
 
-    const footer = document.createElement("div");
-    footer.id = "psFooter";
-    footer.style.marginTop = "18px";
-    footer.style.display = "flex";
-    footer.style.gap = "10px";
-    footer.style.justifyContent = "space-between";
-    footer.style.alignItems = "center";
-    card.appendChild(footer);
+    // Ensure catalog is ready (fixes your “catalog unfound” issue)
+    pageRoot.innerHTML = "";
+    pageRoot.appendChild(makeLoadingBlock("Loading mushroom catalog…"));
 
-    // Init wizard + render
-    wizard.pageIndex = 0;
-    wizard.pageStartTime = performance.now();
-    // Keep builderByColor if they re-open survey within same run; otherwise reset:
-    // wizard.builderByColor = Object.create(null);
-
-    renderWizard();
-  }
-
-  // -------------------- Wizard rendering --------------------
-  function renderWizard() {
-    const header = document.getElementById("psHeader");
-    const content = document.getElementById("psContent");
-    const footer = document.getElementById("psFooter");
-    if (!header || !content || !footer) return;
-
-    header.innerHTML = "";
-    content.innerHTML = "";
-    footer.innerHTML = "";
-
-    // Title + progress
-    const topRow = document.createElement("div");
-    topRow.style.display = "flex";
-    topRow.style.alignItems = "baseline";
-    topRow.style.justifyContent = "space-between";
-    topRow.style.gap = "10px";
-    header.appendChild(topRow);
-
-    const h2 = document.createElement("h2");
-    h2.style.margin = "0";
-    h2.style.fontSize = "22px";
-    h2.style.letterSpacing = "0.2px";
-
-    const pageNum = wizard.pageIndex + 1;
-    const isBuilder = wizard.pageIndex < BUILDER_PAGES;
-
-    if (isBuilder) {
-      const colorName = RANK_COLORS[wizard.pageIndex].name;
-      h2.textContent = `Mushroom Builder (${pageNum} / ${WIZ_TOTAL_PAGES})`;
-      topRow.appendChild(h2);
-
-      const tag = document.createElement("div");
-      tag.textContent = `Color: ${colorName}`;
-      tag.style.fontSize = "13px";
-      tag.style.fontWeight = "700";
-      tag.style.color = THEME.muted;
-      topRow.appendChild(tag);
-
-      const p = document.createElement("p");
-      p.style.margin = "8px 0 0 0";
-      p.style.color = THEME.muted;
-      p.style.fontSize = "13px";
-      p.textContent =
-        "Use the sliders to create the mushroom you think is most rewarding for this color. The preview updates to the closest available mushroom image.";
-      header.appendChild(p);
-
-      renderBuilderPage(content, RANK_COLORS[wizard.pageIndex]);
-      renderBuilderFooter(footer, RANK_COLORS[wizard.pageIndex]);
-    } else {
-      h2.textContent = `Post-Task Survey (${pageNum} / ${WIZ_TOTAL_PAGES})`;
-      topRow.appendChild(h2);
-
-      const p = document.createElement("p");
-      p.style.margin = "8px 0 0 0";
-      p.style.color = THEME.muted;
-      p.style.fontSize = "13px";
-      p.textContent = "Please answer the following questions.";
-      header.appendChild(p);
-
-      renderFinalSurveyPage(content);
-      renderFinalFooter(footer);
-    }
-  }
-
-  // -------------------- Builder page --------------------
-  function renderBuilderPage(parent, colorObj) {
-    const colorName = colorObj.name;
-
-    // Restore previously saved values if they exist
-    const saved = wizard.builderByColor[colorName];
-    if (saved) {
-      wizard.current.cap = clampInt(saved.cap_slider_0_100 ?? 50, 0, 100);
-      wizard.current.stem = clampInt(saved.stem_slider_0_100 ?? 50, 0, 100);
-    } else {
-      wizard.current.cap = clampInt(wizard.current.cap ?? 50, 0, 100);
-      wizard.current.stem = clampInt(wizard.current.stem ?? 50, 0, 100);
-    }
-
-    // Layout: preview card + sliders card
-    const wrap = document.createElement("div");
-    wrap.style.display = "grid";
-    wrap.style.gridTemplateColumns = "1.2fr 1fr";
-    wrap.style.gap = "14px";
-    wrap.style.alignItems = "start";
-    parent.appendChild(wrap);
-
-    if (window.matchMedia && window.matchMedia("(max-width: 820px)").matches) {
-      wrap.style.gridTemplateColumns = "1fr";
-    }
-
-    // Preview panel
-    const previewCard = makePanelCard(`Preview (closest available image)`);
-    wrap.appendChild(previewCard);
-
-    const previewBox = document.createElement("div");
-    previewBox.style.border = "1px dashed #E7DEBF";
-    previewBox.style.borderRadius = "14px";
-    previewBox.style.background = "#FFFCF1";
-    previewBox.style.padding = "12px";
-    previewBox.style.display = "grid";
-    previewBox.style.placeItems = "center";
-    previewBox.style.minHeight = "260px";
-    previewCard.appendChild(previewBox);
-
-    const img = document.createElement("img");
-    img.id = "builderPreviewImg";
-    img.alt = `${colorName} preview`;
-    img.style.width = "240px";
-    img.style.maxWidth = "100%";
-    img.style.height = "auto";
-    img.style.imageRendering = "pixelated";
-    img.style.borderRadius = "12px";
-    img.style.border = "1px solid #E7DEBF";
-    img.style.background = "#FFFFFF";
-    previewBox.appendChild(img);
-
-    const previewMeta = document.createElement("div");
-    previewMeta.id = "builderPreviewMeta";
-    previewMeta.style.marginTop = "10px";
-    previewMeta.style.fontSize = "12px";
-    previewMeta.style.color = THEME.muted;
-    previewMeta.style.width = "100%";
-    previewCard.appendChild(previewMeta);
-
-    // Slider panel
-    const sliderCard = makePanelCard(`Your best ${colorName} mushroom`);
-    wrap.appendChild(sliderCard);
-
-    // Color chip row
-    const chipRow = document.createElement("div");
-    chipRow.style.display = "flex";
-    chipRow.style.alignItems = "center";
-    chipRow.style.gap = "10px";
-    chipRow.style.marginBottom = "10px";
-    sliderCard.appendChild(chipRow);
-
-    const swatch = document.createElement("span");
-    swatch.style.width = "16px";
-    swatch.style.height = "16px";
-    swatch.style.borderRadius = "5px";
-    swatch.style.display = "inline-block";
-    swatch.style.background = colorObj.hex;
-    swatch.style.border = colorName === "white" ? "1px solid #555" : "1px solid #999";
-    chipRow.appendChild(swatch);
-
-    const chipText = document.createElement("div");
-    chipText.textContent = `Adjust cap roundness and stem width`;
-    chipText.style.fontSize = "13px";
-    chipText.style.fontWeight = "700";
-    chipText.style.color = THEME.text;
-    chipRow.appendChild(chipText);
-
-    // Sliders
-    const capSlider = makeSliderRow({
-      id: "capSlider",
-      label: "Cap roundness",
-      value: wizard.current.cap,
-      minLabel: "Less round",
-      maxLabel: "More round",
-      onInput: (v) => {
-        wizard.current.cap = v;
-        updateBuilderPreview(colorName);
-      }
-    });
-
-    const stemSlider = makeSliderRow({
-      id: "stemSlider",
-      label: "Stem width",
-      value: wizard.current.stem,
-      minLabel: "Thinner",
-      maxLabel: "Thicker",
-      onInput: (v) => {
-        wizard.current.stem = v;
-        updateBuilderPreview(colorName);
-      }
-    });
-
-    sliderCard.appendChild(capSlider);
-    sliderCard.appendChild(stemSlider);
-
-    // Note / hint
-    const hint = document.createElement("div");
-    hint.style.marginTop = "10px";
-    hint.style.fontSize = "12px";
-    hint.style.color = THEME.muted;
-    hint.textContent = "The preview always snaps to the closest mushroom that exists in the PNG catalog.";
-    sliderCard.appendChild(hint);
-
-    // Initial preview update
-    updateBuilderPreview(colorName);
-  }
-
-  function renderBuilderFooter(footer, colorObj) {
-    const left = document.createElement("div");
-    left.style.display = "flex";
-    left.style.gap = "10px";
-    left.style.alignItems = "center";
-    footer.appendChild(left);
-
-    const right = document.createElement("div");
-    right.style.display = "flex";
-    right.style.gap = "10px";
-    right.style.alignItems = "center";
-    footer.appendChild(right);
-
-    // Back
-    const backBtn = makeButton("Back", { variant: "secondary" });
-    backBtn.disabled = wizard.pageIndex === 0;
-    backBtn.addEventListener("click", () => {
-      wizard.pageIndex = Math.max(0, wizard.pageIndex - 1);
-      wizard.pageStartTime = performance.now();
-      renderWizard();
-      const overlay = document.getElementById("postSurveyOverlay");
-      if (overlay) overlay.scrollTop = 0;
-    });
-    left.appendChild(backBtn);
-
-    // Page indicator
-    const indicator = document.createElement("div");
-    indicator.style.fontSize = "12px";
-    indicator.style.color = THEME.muted;
-    indicator.textContent = `Page ${wizard.pageIndex + 1} of ${WIZ_TOTAL_PAGES}`;
-    left.appendChild(indicator);
-
-    // Next
-    const nextBtn = makeButton(
-      wizard.pageIndex === BUILDER_PAGES - 1 ? "Next (to survey)" : "Next",
-      { variant: "primary" }
-    );
-
-    nextBtn.addEventListener("click", () => {
-      // Save + log this builder response, then advance
-      saveAndLogBuilderResponse(colorObj.name);
-
-      wizard.pageIndex = Math.min(WIZ_TOTAL_PAGES - 1, wizard.pageIndex + 1);
-      wizard.pageStartTime = performance.now();
-      renderWizard();
-      const overlay = document.getElementById("postSurveyOverlay");
-      if (overlay) overlay.scrollTop = 0;
-    });
-
-    right.appendChild(nextBtn);
-  }
-
-  function updateBuilderPreview(colorName) {
-    const img = document.getElementById("builderPreviewImg");
-    const meta = document.getElementById("builderPreviewMeta");
-    if (!img || !meta) return;
-
-    const cap01 = clamp01(wizard.current.cap / 100);
-    const stem01 = clamp01(wizard.current.stem / 100);
-
-    const chosen = findClosestMushroom(colorName, cap01, stem01);
-    wizard.current.chosen = chosen;
-
-    if (!chosen || chosen.error) {
-      img.removeAttribute("src");
-      meta.textContent =
-        chosen && chosen.error
-          ? chosen.error
-          : "Internal error: could not locate a mushroom catalog for live preview.";
+    _catalogRows = await waitForCatalogRows(12000);
+    if (!_catalogRows || !_catalogRows.length) {
+      pageRoot.innerHTML = "";
+      pageRoot.appendChild(makeErrorBlock(
+        "Catalog not found / not loaded.",
+        [
+          "Confirm mushroom.js loads BEFORE PostSurvey.js in your HTML.",
+          "Confirm the catalog CSV path is valid and reachable:",
+          "  TexturePack/mushroom_pack/mushroom_catalog.csv",
+          "Open DevTools → Network and verify the CSV returns 200.",
+          "Also verify window.mushroomCatalogRows is populated at runtime."
+        ].join("\n")
+      ));
       return;
     }
 
-    const src = resolveImgSrc(chosen.entry);
-    if (src) img.src = src;
+    _catalogIndex = buildCatalogIndex(_catalogRows);
 
-    const capLabel = chosen.capLabel ?? "";
-    const stemLabel = chosen.stemLabel ?? "";
-    const fn = chosen.filename ?? "";
+    // Start at first builder page
+    _pageIndex = 0;
+    renderPage(card, overlay);
 
-    meta.innerHTML = "";
-    meta.appendChild(line(`Your sliders: cap=${wizard.current.cap}/100, stem=${wizard.current.stem}/100`));
-    meta.appendChild(line(`Closest mushroom: cap=${capLabel}, stem=${stemLabel}`));
-    if (fn) meta.appendChild(line(`filename: ${fn}`));
+    // Ensure overlay starts at the top
+    overlay.scrollTop = 0;
   }
 
-  function saveAndLogBuilderResponse(colorName) {
+  function finishAndSaveAllData() {
+    const overlay = document.getElementById("postSurveyOverlay");
+    if (overlay) overlay.style.display = "none";
+    restoreBackgroundScroll();
+
+    const thanks = document.getElementById("thankyou");
+    if (thanks) thanks.style.display = "block";
+
     const id = participantData?.id || "unknown";
-    const now = performance.now();
-    const timeElapsed = now - (participantData?.startTime || now);
-    const rtPage = wizard.pageStartTime ? now - wizard.pageStartTime : null;
+    if (typeof downloadCSV === "function") {
+      downloadCSV(participantData.trials || [], `data_${id}.csv`);
+      if (participantData.postSurvey) {
+        downloadCSV([participantData.postSurvey], `survey_${id}.csv`);
+      }
+    } else {
+      console.warn("[PostSurvey] downloadCSV() not found; cannot save data automatically.");
+      alert("Internal error: downloadCSV() not available. Please contact the researcher.");
+    }
+  }
 
-    const cap = clampInt(wizard.current.cap, 0, 100);
-    const stem = clampInt(wizard.current.stem, 0, 100);
+  // -------------------- Catalog readiness --------------------
 
-    const chosen = wizard.current.chosen && !wizard.current.chosen.error ? wizard.current.chosen : null;
+  function sleep(ms) {
+    return new Promise((r) => setTimeout(r, ms));
+  }
 
-    const saved = {
-      color: colorName,
-      cap_slider_0_100: cap,
-      stem_slider_0_100: stem,
-      chosen_filename: chosen?.filename ?? null,
-      chosen_cap_label: chosen?.capLabel ?? null,
-      chosen_stem_label: chosen?.stemLabel ?? null,
-      chosen_cap_norm_0_1: chosen?.capNorm ?? null,
-      chosen_stem_norm_0_1: chosen?.stemNorm ?? null
+  async function waitForCatalogRows(timeoutMs = 8000) {
+    const t0 = performance.now();
+    while (performance.now() - t0 < timeoutMs) {
+      const rows = window.mushroomCatalogRows;
+      if (Array.isArray(rows) && rows.length > 0) return rows;
+      await sleep(80);
+    }
+    return [];
+  }
+
+  function getStemVal(r) {
+    const v = (r && (r.stem_width ?? r.stem));
+    const n = Number(v);
+    return Number.isFinite(n) ? n : NaN;
+  }
+
+  function getCapVal(r) {
+    const v = (r && (r.cap_roundness ?? r.cap));
+    const n = Number(v);
+    return Number.isFinite(n) ? n : NaN;
+  }
+
+  function getColorVal(r) {
+    const c = (r && (r.color_name ?? r.color));
+    return String(c || "").trim().toLowerCase();
+  }
+
+  function getFilename(r) {
+    const f = (r && (r.filename ?? r.image_relpath ?? r.image_webpath ?? r.image ?? r.img));
+    return String(f || "").trim();
+  }
+
+  function encodeSrc(path) {
+    // your generator uses img.src = r.filename, so we keep that behavior but encode URI safely
+    return encodeURI(String(path || ""));
+  }
+
+  function buildCatalogIndex(rows) {
+    const byColor = Object.create(null);
+    for (const r of rows) {
+      const color = getColorVal(r);
+      const stem = getStemVal(r);
+      const cap = getCapVal(r);
+      const fn = getFilename(r);
+      if (!color || !fn) continue;
+      if (!Number.isFinite(stem) || !Number.isFinite(cap)) continue;
+
+      (byColor[color] ||= []).push({
+        color,
+        stem,
+        cap,
+        filename: fn,
+        value: (r.value ?? r.assigned_value ?? r.reward ?? r.val)
+      });
+    }
+
+    // min/max per color
+    const range = Object.create(null);
+    for (const [c, arr] of Object.entries(byColor)) {
+      let sMin = Infinity, sMax = -Infinity, cMin = Infinity, cMax = -Infinity;
+      for (const x of arr) {
+        if (x.stem < sMin) sMin = x.stem;
+        if (x.stem > sMax) sMax = x.stem;
+        if (x.cap  < cMin) cMin = x.cap;
+        if (x.cap  > cMax) cMax = x.cap;
+      }
+      range[c] = { stemMin: sMin, stemMax: sMax, capMin: cMin, capMax: cMax };
+    }
+
+    return { byColor, range };
+  }
+
+  function nearestRowFor(color, wantStem, wantCap, idx) {
+    const pool = idx?.byColor?.[color] || [];
+    if (!pool.length) return null;
+    let best = null;
+    let bestD = Infinity;
+    for (const r of pool) {
+      const ds = (r.stem - wantStem);
+      const dc = (r.cap  - wantCap);
+      const d2 = ds * ds + dc * dc;
+      if (d2 < bestD) { bestD = d2; best = r; }
+    }
+    return best;
+  }
+
+  // -------------------- Overlay + scroll control --------------------
+
+  function getOrCreateOverlay() {
+    let overlay = document.getElementById("postSurveyOverlay");
+    if (!overlay) {
+      overlay = document.createElement("div");
+      overlay.id = "postSurveyOverlay";
+      overlay.style.position = "fixed";
+      overlay.style.inset = "0";
+      overlay.style.zIndex = "999999";
+      overlay.style.background = THEME.pageBg;
+
+      // Overlay has its own scroll, independent of body/#main
+      overlay.style.overflowY = "auto";
+      overlay.style.overflowX = "hidden";
+      overlay.style.webkitOverflowScrolling = "touch";
+
+      document.body.appendChild(overlay);
+    }
+    return overlay;
+  }
+
+  function applyOverlayAndLockBackgroundScroll() {
+    // Store previous styles once
+    if (_prev.htmlOverflow === null) _prev.htmlOverflow = document.documentElement.style.overflow;
+    if (_prev.bodyOverflow === null) _prev.bodyOverflow = document.body.style.overflow;
+    if (_prev.bodyMinHeight === null) _prev.bodyMinHeight = document.body.style.minHeight;
+    if (_prev.bodyBg === null) _prev.bodyBg = document.body.style.background;
+
+    // Lock background scroll (overlay will scroll)
+    document.documentElement.style.overflow = "hidden";
+    document.body.style.overflow = "hidden";
+
+    // Visual: set body bg too (in case overlay has transparency later)
+    document.body.style.background = THEME.pageBg;
+    document.body.style.minHeight = "100vh";
+  }
+
+  function restoreBackgroundScroll() {
+    if (_prev.htmlOverflow !== null) document.documentElement.style.overflow = _prev.htmlOverflow;
+    if (_prev.bodyOverflow !== null) document.body.style.overflow = _prev.bodyOverflow;
+    if (_prev.bodyMinHeight !== null) document.body.style.minHeight = _prev.bodyMinHeight;
+    if (_prev.bodyBg !== null) document.body.style.background = _prev.bodyBg;
+  }
+
+  // -------------------- Page renderer --------------------
+
+  function renderPage(card, overlay) {
+    const root = document.getElementById("psPageRoot");
+    const sub = document.getElementById("psSubTitle");
+    const prog = document.getElementById("psProgressText");
+    if (!root) return;
+
+    root.innerHTML = "";
+    overlay.scrollTop = 0;
+
+    prog.textContent = `Page ${_pageIndex + 1} of ${TOTAL_PAGES}`;
+
+    _pageStartT = performance.now();
+
+    if (_pageIndex >= 0 && _pageIndex <= 7) {
+      const color = BUILDER_COLORS[_pageIndex];
+      sub.textContent = `Build the highest-value mushroom for: ${color.toUpperCase()}`;
+      root.appendChild(renderBuilderPage(color, card, overlay));
+    } else {
+      sub.textContent = "Please answer the following questions.";
+      root.appendChild(renderFinalSurveyPage(card, overlay));
+    }
+  }
+
+  // -------------------- Builder pages (8 pages) --------------------
+
+  function renderBuilderPage(color, card, overlay) {
+    const wrap = document.createElement("div");
+    wrap.style.display = "grid";
+    wrap.style.gridTemplateColumns = "1fr";
+    wrap.style.gap = "14px";
+
+    const section = makeSectionCard(`Mushroom Builder: ${color.toUpperCase()}`);
+
+    const info = document.createElement("div");
+    info.style.fontSize = "13px";
+    info.style.color = THEME.muted;
+    info.textContent =
+      "Use the sliders to choose stem width and cap roundness. The preview always shows the closest available stimulus in the catalog for this color.";
+    section.appendChild(info);
+
+    const pool = _catalogIndex?.byColor?.[color] || [];
+    const rng = _catalogIndex?.range?.[color] || null;
+
+    if (!pool.length || !rng) {
+      section.appendChild(makeErrorBlock(
+        `No catalog rows found for color: ${color}`,
+        "Check that your catalog rows include columns for color/stem/cap/filename and that color names match exactly."
+      ));
+      wrap.appendChild(section);
+      wrap.appendChild(builderNavRow(color, card, overlay, /*canNext*/ false));
+      return wrap;
+    }
+
+    // Layout: preview + sliders
+    const grid = document.createElement("div");
+    grid.style.display = "grid";
+    grid.style.gridTemplateColumns = "1fr 1fr";
+    grid.style.gap = "14px";
+    grid.style.alignItems = "start";
+    if (window.matchMedia && window.matchMedia("(max-width: 780px)").matches) {
+      grid.style.gridTemplateColumns = "1fr";
+    }
+    section.appendChild(grid);
+
+    // Preview card
+    const prevCard = document.createElement("div");
+    prevCard.style.border = "1px solid #E7DEBF";
+    prevCard.style.borderRadius = "14px";
+    prevCard.style.background = "#FFFFFF";
+    prevCard.style.padding = "12px";
+    prevCard.style.boxSizing = "border-box";
+    grid.appendChild(prevCard);
+
+    const prevTitle = document.createElement("div");
+    prevTitle.textContent = "Closest available mushroom";
+    prevTitle.style.fontWeight = "700";
+    prevTitle.style.fontSize = "13px";
+    prevTitle.style.marginBottom = "10px";
+    prevCard.appendChild(prevTitle);
+
+    const img = document.createElement("img");
+    img.style.width = "220px";
+    img.style.height = "220px";
+    img.style.objectFit = "contain";
+    img.style.borderRadius = "14px";
+    img.style.border = "1px solid #E7DEBF";
+    img.style.background = "#FFFCF1";
+    img.alt = `${color} preview`;
+    prevCard.appendChild(img);
+
+    const meta = document.createElement("div");
+    meta.style.marginTop = "10px";
+    meta.style.fontSize = "13px";
+    meta.style.color = THEME.muted;
+    prevCard.appendChild(meta);
+
+    // Controls card
+    const ctrlCard = document.createElement("div");
+    ctrlCard.style.border = "1px solid #E7DEBF";
+    ctrlCard.style.borderRadius = "14px";
+    ctrlCard.style.background = "#FFFFFF";
+    ctrlCard.style.padding = "12px";
+    ctrlCard.style.boxSizing = "border-box";
+    grid.appendChild(ctrlCard);
+
+    const ctrlTitle = document.createElement("div");
+    ctrlTitle.textContent = "Choose dimensions";
+    ctrlTitle.style.fontWeight = "700";
+    ctrlTitle.style.fontSize = "13px";
+    ctrlTitle.style.marginBottom = "10px";
+    ctrlCard.appendChild(ctrlTitle);
+
+    // Restore prior selection if they revisit (rare, but safe)
+    const prior = _builderData[color] || null;
+
+    // Sliders are 0..100, mapped onto [min..max] per color
+    const stemSlider = makeRangeControl({
+      label: "Stem width",
+      min: 0,
+      max: 100,
+      step: 1,
+      initial: prior ? Number(prior.slider_stem_pct) : 50
+    });
+
+    const capSlider = makeRangeControl({
+      label: "Cap roundness",
+      min: 0,
+      max: 100,
+      step: 1,
+      initial: prior ? Number(prior.slider_cap_pct) : 50
+    });
+
+    ctrlCard.appendChild(stemSlider.root);
+    ctrlCard.appendChild(capSlider.root);
+
+    // Live state
+    const live = {
+      color,
+      wantStem: null,
+      wantCap: null,
+      chosen: null,
+      sliderStemPct: prior ? Number(prior.slider_stem_pct) : 50,
+      sliderCapPct: prior ? Number(prior.slider_cap_pct) : 50
     };
 
-    wizard.builderByColor[colorName] = saved;
+    function pctToValue(pct, vMin, vMax) {
+      if (!Number.isFinite(vMin) || !Number.isFinite(vMax)) return NaN;
+      if (vMax === vMin) return vMin;
+      const t = Math.max(0, Math.min(1, pct / 100));
+      return vMin + (vMax - vMin) * t;
+    }
 
-    // Append a trial row for this builder page
+    function refresh() {
+      const sPct = Number(stemSlider.input.value);
+      const cPct = Number(capSlider.input.value);
+
+      live.sliderStemPct = sPct;
+      live.sliderCapPct = cPct;
+
+      const wantStem = pctToValue(sPct, rng.stemMin, rng.stemMax);
+      const wantCap  = pctToValue(cPct, rng.capMin,  rng.capMax);
+
+      live.wantStem = wantStem;
+      live.wantCap  = wantCap;
+
+      const chosen = nearestRowFor(color, wantStem, wantCap, _catalogIndex);
+      live.chosen = chosen;
+
+      // Update UI numbers
+      stemSlider.value.textContent = `${wantStem.toFixed(2)} (desired)`;
+      capSlider.value.textContent  = `${wantCap.toFixed(2)} (desired)`;
+
+      if (chosen) {
+        img.src = encodeSrc(chosen.filename);
+        meta.textContent = `Closest stimulus: stem=${chosen.stem.toFixed(2)}, cap=${chosen.cap.toFixed(2)}`;
+      } else {
+        img.removeAttribute("src");
+        meta.textContent = "No matching stimulus found for this color.";
+      }
+    }
+
+    stemSlider.input.addEventListener("input", refresh);
+    capSlider.input.addEventListener("input", refresh);
+
+    // Initial render
+    refresh();
+
+    wrap.appendChild(section);
+    wrap.appendChild(builderNavRow(color, card, overlay, /*canNext*/ true, live));
+    return wrap;
+  }
+
+  function builderNavRow(color, card, overlay, canNext, liveState = null) {
+    const row = document.createElement("div");
+    row.style.display = "flex";
+    row.style.justifyContent = "flex-end";
+    row.style.gap = "10px";
+    row.style.marginTop = "6px";
+
+    const nextBtn = document.createElement("button");
+    nextBtn.type = "button";
+    nextBtn.textContent = (_pageIndex === 7) ? "Next: Survey" : "Next";
+    nextBtn.style.border = "none";
+    nextBtn.style.borderRadius = "12px";
+    nextBtn.style.padding = "12px 18px";
+    nextBtn.style.fontSize = "16px";
+    nextBtn.style.fontWeight = "600";
+    nextBtn.style.cursor = canNext ? "pointer" : "not-allowed";
+    nextBtn.style.background = canNext ? "#1F6FEB" : "#9AA4B2";
+    nextBtn.style.color = "#FFFFFF";
+    nextBtn.style.boxShadow = canNext ? "0 6px 16px rgba(31, 111, 235, 0.25)" : "none";
+
+    nextBtn.addEventListener("click", () => {
+      if (!canNext) return;
+
+      // Save builder data + log trial
+      const rt = performance.now() - (_pageStartT || performance.now());
+      if (liveState && liveState.chosen) {
+        saveBuilderSelection(color, liveState, rt);
+      } else {
+        // still store something so page isn't “missing” in the dataset
+        saveBuilderSelection(color, {
+          color,
+          sliderStemPct: Number(liveState?.sliderStemPct ?? 50),
+          sliderCapPct: Number(liveState?.sliderCapPct ?? 50),
+          wantStem: Number(liveState?.wantStem ?? NaN),
+          wantCap: Number(liveState?.wantCap ?? NaN),
+          chosen: null
+        }, rt);
+      }
+
+      // Advance page
+      _pageIndex = Math.min(_pageIndex + 1, TOTAL_PAGES - 1);
+      renderPage(card, overlay);
+    });
+
+    row.appendChild(nextBtn);
+    return row;
+  }
+
+  function saveBuilderSelection(color, liveState, rt) {
+    const chosen = liveState.chosen;
+
+    const payload = {
+      color: color,
+      slider_stem_pct: Number(liveState.sliderStemPct),
+      slider_cap_pct: Number(liveState.sliderCapPct),
+      desired_stem: Number(liveState.wantStem),
+      desired_cap: Number(liveState.wantCap),
+      chosen_filename: chosen ? String(chosen.filename) : "",
+      chosen_stem: chosen ? Number(chosen.stem) : NaN,
+      chosen_cap: chosen ? Number(chosen.cap) : NaN
+    };
+
+    _builderData[color] = payload;
+
+    const id = participantData?.id || "unknown";
+    const timeElapsed = performance.now() - (participantData?.startTime || performance.now());
+
     (participantData.trials ||= []).push({
       id,
       trial_index: (participantData.trials.length + 1),
       trial_type: "post_survey_builder",
-      ...saved,
-      rt: rtPage,
+      color: payload.color,
+      slider_stem_pct: payload.slider_stem_pct,
+      slider_cap_pct: payload.slider_cap_pct,
+      desired_stem: payload.desired_stem,
+      desired_cap: payload.desired_cap,
+      chosen_filename: payload.chosen_filename,
+      chosen_stem: payload.chosen_stem,
+      chosen_cap: payload.chosen_cap,
+      rt: rt,
       time_elapsed: timeElapsed
     });
   }
 
-  // -------------------- Final survey page (your original) --------------------
-  function renderFinalSurveyPage(parent) {
-    // Form container
+  function flattenBuilderData(builderData) {
+    const out = {};
+    out.builder_color_order = BUILDER_COLORS.join(">");
+    out.builder_json = JSON.stringify(builderData || {});
+
+    for (const c of BUILDER_COLORS) {
+      const d = builderData?.[c] || null;
+      out[`builder_${c}_slider_stem_pct`] = d ? String(d.slider_stem_pct) : "";
+      out[`builder_${c}_slider_cap_pct`]  = d ? String(d.slider_cap_pct)  : "";
+      out[`builder_${c}_desired_stem`]    = d ? String(d.desired_stem)    : "";
+      out[`builder_${c}_desired_cap`]     = d ? String(d.desired_cap)     : "";
+      out[`builder_${c}_filename`]        = d ? String(d.chosen_filename) : "";
+      out[`builder_${c}_stem`]            = d && Number.isFinite(d.chosen_stem) ? String(d.chosen_stem) : "";
+      out[`builder_${c}_cap`]             = d && Number.isFinite(d.chosen_cap)  ? String(d.chosen_cap)  : "";
+    }
+    return out;
+  }
+
+  // -------------------- Final survey page (your existing page) --------------------
+
+  function renderFinalSurveyPage(card, overlay) {
+    const container = document.createElement("div");
+
     const form = document.createElement("form");
     form.id = "postSurveyForm";
     form.autocomplete = "off";
-    parent.appendChild(form);
+    container.appendChild(form);
 
     // Q1: enjoyment (1–7)
     form.appendChild(
@@ -501,7 +677,7 @@
 
     // Q4: color ranking
     form.appendChild(
-      makeRankingQuestion({
+      makeColorRankingQuestion({
         name: "color_rank",
         label: "4) Rank the mushroom colors from MOST rewarding (highest value) to LEAST rewarding (lowest value).",
         items: RANK_COLORS,
@@ -514,7 +690,7 @@
 
     // Q5: room ranking
     form.appendChild(
-      makeRankingQuestion({
+      makeColorRankingQuestion({
         name: "room_rank",
         label: "5) Rank the rooms from EASIEST to HARDEST. (1 = easiest, 5 = hardest)",
         items: RANK_ROOMS,
@@ -525,29 +701,42 @@
       })
     );
 
-    // Submit row (Back + Submit)
+    // Submit button row
     const btnRow = document.createElement("div");
     btnRow.style.marginTop = "22px";
     btnRow.style.display = "flex";
-    btnRow.style.justifyContent = "space-between";
-    btnRow.style.gap = "10px";
-    btnRow.style.alignItems = "center";
+    btnRow.style.justifyContent = "flex-end";
 
-    const backBtn = makeButton("Back", { variant: "secondary" });
-    backBtn.addEventListener("click", (e) => {
-      e.preventDefault();
-      wizard.pageIndex = Math.max(0, wizard.pageIndex - 1);
-      wizard.pageStartTime = performance.now();
-      renderWizard();
-      const overlay = document.getElementById("postSurveyOverlay");
-      if (overlay) overlay.scrollTop = 0;
-    });
-    btnRow.appendChild(backBtn);
-
-    const submitBtn = makeButton("Submit Survey", { variant: "primary" });
+    const submitBtn = document.createElement("button");
     submitBtn.type = "submit";
-    btnRow.appendChild(submitBtn);
+    submitBtn.textContent = "Submit Survey";
+    submitBtn.style.border = "none";
+    submitBtn.style.borderRadius = "12px";
+    submitBtn.style.padding = "12px 18px";
+    submitBtn.style.fontSize = "16px";
+    submitBtn.style.fontWeight = "600";
+    submitBtn.style.cursor = "pointer";
+    submitBtn.style.background = "#1F6FEB";
+    submitBtn.style.color = "#FFFFFF";
+    submitBtn.style.boxShadow = "0 6px 16px rgba(31, 111, 235, 0.25)";
 
+    submitBtn.addEventListener("mouseenter", () => {
+      submitBtn.style.transform = "translateY(-1px)";
+      submitBtn.style.boxShadow = "0 8px 18px rgba(31, 111, 235, 0.28)";
+    });
+    submitBtn.addEventListener("mouseleave", () => {
+      submitBtn.style.transform = "translateY(0px)";
+      submitBtn.style.boxShadow = "0 6px 16px rgba(31, 111, 235, 0.25)";
+    });
+    submitBtn.addEventListener("focus", () => {
+      submitBtn.style.outline = "none";
+      submitBtn.style.boxShadow = THEME.focusShadow;
+    });
+    submitBtn.addEventListener("blur", () => {
+      submitBtn.style.boxShadow = "0 6px 16px rgba(31, 111, 235, 0.25)";
+    });
+
+    btnRow.appendChild(submitBtn);
     form.appendChild(btnRow);
 
     // Hook submit
@@ -560,18 +749,17 @@
         return;
       }
 
-      // Ensure builder pages are all logged at least once
-      // (If someone never clicked Next somehow, you still get whatever is in wizard.builderByColor.)
-      const builderJson = JSON.stringify(wizard.builderByColor || {});
-
       const now = performance.now();
       const id = participantData?.id || "unknown";
       const timeElapsed = now - (participantData?.startTime || now);
 
+      // Merge builder data into the survey data (DO NOT forget to record it)
+      const builderFlat = flattenBuilderData(_builderData);
+
       participantData.postSurvey = {
         id,
         ...result.data,
-        best_mushroom_builder_json: builderJson,
+        ...builderFlat,
         time_elapsed: timeElapsed
       };
 
@@ -580,201 +768,55 @@
         trial_index: (participantData.trials.length + 1),
         trial_type: "post_survey",
         ...result.data,
-        best_mushroom_builder_json: builderJson,
+        ...builderFlat,
         rt: null,
         time_elapsed: timeElapsed
       });
 
       finishAndSaveAllData();
     });
-  }
 
-  function renderFinalFooter(footer) {
-    // Footer handled inside the form (Back + Submit).
-    // Keep footer empty to avoid double controls.
-    footer.innerHTML = "";
-  }
-
-  // -------------------- Finish + save (unchanged behavior, corrected quoting) --------------------
-  function finishAndSaveAllData() {
-    const overlay = document.getElementById("postSurveyOverlay");
-    if (overlay) overlay.style.display = "none";
-    restoreBackgroundScroll();
-
-    const thanks = document.getElementById("thankyou");
-    if (thanks) thanks.style.display = "block";
-
-    const id = participantData?.id || "unknown";
-    if (typeof downloadCSV === "function") {
-      downloadCSV(participantData.trials || [], `data_${id}.csv`);
-      if (participantData.postSurvey) {
-        downloadCSV([participantData.postSurvey], `survey_${id}.csv`);
-      }
-    } else {
-      console.warn("[PostSurvey] downloadCSV() not found; cannot save data automatically.");
-      alert("Internal error: downloadCSV() not available. Please contact the researcher.");
-    }
-  }
-
-  // -------------------- Overlay + scroll control --------------------
-  function getOrCreateOverlay() {
-    let overlay = document.getElementById("postSurveyOverlay");
-    if (!overlay) {
-      overlay = document.createElement("div");
-      overlay.id = "postSurveyOverlay";
-      overlay.style.position = "fixed";
-      overlay.style.inset = "0";
-      overlay.style.zIndex = "999999";
-      overlay.style.background = THEME.pageBg;
-      overlay.style.overflowY = "auto";
-      overlay.style.overflowX = "hidden";
-      overlay.style.webkitOverflowScrolling = "touch";
-      document.body.appendChild(overlay);
-    }
-    return overlay;
-  }
-
-  function applyOverlayAndLockBackgroundScroll() {
-    if (_prev.htmlOverflow === null) _prev.htmlOverflow = document.documentElement.style.overflow;
-    if (_prev.bodyOverflow === null) _prev.bodyOverflow = document.body.style.overflow;
-    if (_prev.bodyMinHeight === null) _prev.bodyMinHeight = document.body.style.minHeight;
-    if (_prev.bodyBg === null) _prev.bodyBg = document.body.style.background;
-
-    document.documentElement.style.overflow = "hidden";
-    document.body.style.overflow = "hidden";
-    document.body.style.background = THEME.pageBg;
-    document.body.style.minHeight = "100vh";
-  }
-
-  function restoreBackgroundScroll() {
-    if (_prev.htmlOverflow !== null) document.documentElement.style.overflow = _prev.htmlOverflow;
-    if (_prev.bodyOverflow !== null) document.body.style.overflow = _prev.bodyOverflow;
-    if (_prev.bodyMinHeight !== null) document.body.style.minHeight = _prev.bodyMinHeight;
-    if (_prev.bodyBg !== null) document.body.style.background = _prev.bodyBg;
+    return container;
   }
 
   // -------------------- UI helpers --------------------
-  function makePanelCard(titleText) {
-    const section = document.createElement("div");
-    section.style.border = "1px solid #EFE7C9";
-    section.style.borderRadius = "14px";
-    section.style.padding = "14px 14px";
-    section.style.margin = "0";
-    section.style.background = "#FFFCF1";
-    section.style.boxSizing = "border-box";
 
-    if (titleText) {
-      const title = document.createElement("div");
-      title.textContent = titleText;
-      title.style.fontWeight = "800";
-      title.style.marginBottom = "10px";
-      title.style.fontSize = "13px";
-      section.appendChild(title);
-    }
-    return section;
-  }
-
-  function makeButton(text, { variant }) {
-    const btn = document.createElement("button");
-    btn.textContent = text;
-    btn.style.border = "none";
-    btn.style.borderRadius = "12px";
-    btn.style.padding = "12px 16px";
-    btn.style.fontSize = "15px";
-    btn.style.fontWeight = "700";
-    btn.style.cursor = "pointer";
-
-    if (variant === "secondary") {
-      btn.style.background = "#FFFFFF";
-      btn.style.color = THEME.text;
-      btn.style.border = "1px solid #E7DEBF";
-      btn.style.boxShadow = "0 2px 10px rgba(0,0,0,0.05)";
-    } else {
-      btn.style.background = "#1F6FEB";
-      btn.style.color = "#FFFFFF";
-      btn.style.boxShadow = "0 6px 16px rgba(31, 111, 235, 0.25)";
-    }
-
-    btn.addEventListener("mouseenter", () => {
-      if (btn.disabled) return;
-      btn.style.transform = "translateY(-1px)";
-    });
-    btn.addEventListener("mouseleave", () => {
-      btn.style.transform = "translateY(0px)";
-    });
-    btn.addEventListener("focus", () => (btn.style.outline = THEME.focus));
-    btn.addEventListener("blur", () => (btn.style.outline = "none"));
-
-    return btn;
-  }
-
-  function makeSliderRow({ id, label, value, minLabel, maxLabel, onInput }) {
-    const row = document.createElement("div");
-    row.style.marginTop = "10px";
-    row.style.padding = "12px";
-    row.style.borderRadius = "14px";
-    row.style.border = "1px solid #E7DEBF";
-    row.style.background = "#FFFFFF";
-    row.style.boxSizing = "border-box";
-
-    const top = document.createElement("div");
-    top.style.display = "flex";
-    top.style.justifyContent = "space-between";
-    top.style.alignItems = "baseline";
-    top.style.gap = "10px";
-    row.appendChild(top);
-
-    const left = document.createElement("div");
-    left.textContent = label;
-    left.style.fontSize = "13px";
-    left.style.fontWeight = "800";
-    top.appendChild(left);
-
-    const val = document.createElement("div");
-    val.id = `${id}Val`;
-    val.textContent = `${value} / 100`;
-    val.style.fontSize = "12px";
-    val.style.fontWeight = "800";
-    val.style.color = THEME.muted;
-    top.appendChild(val);
-
-    const slider = document.createElement("input");
-    slider.id = id;
-    slider.type = "range";
-    slider.min = "0";
-    slider.max = "100";
-    slider.step = "1";
-    slider.value = String(value);
-    slider.style.width = "100%";
-    slider.style.marginTop = "10px";
-    row.appendChild(slider);
-
-    const labels = document.createElement("div");
-    labels.style.display = "flex";
-    labels.style.justifyContent = "space-between";
-    labels.style.marginTop = "6px";
-    labels.style.fontSize = "11px";
-    labels.style.color = THEME.muted;
-    labels.innerHTML = `<span>${escapeHtml(minLabel || "")}</span><span>${escapeHtml(maxLabel || "")}</span>`;
-    row.appendChild(labels);
-
-    slider.addEventListener("input", () => {
-      const v = clampInt(parseInt(slider.value, 10), 0, 100);
-      val.textContent = `${v} / 100`;
-      onInput(v);
-    });
-
-    return row;
-  }
-
-  function line(text) {
+  function makeLoadingBlock(text) {
     const d = document.createElement("div");
-    d.textContent = text;
-    d.style.marginTop = "4px";
+    d.style.padding = "16px";
+    d.style.border = "1px solid #EFE7C9";
+    d.style.borderRadius = "14px";
+    d.style.background = "#FFFCF1";
+    d.style.color = THEME.muted;
+    d.style.fontSize = "14px";
+    d.textContent = text || "Loading…";
     return d;
   }
 
-  // -------------------- Original question builders (kept) --------------------
+  function makeErrorBlock(title, details) {
+    const box = document.createElement("div");
+    box.style.padding = "16px";
+    box.style.border = "1px solid #E7B5B5";
+    box.style.borderRadius = "14px";
+    box.style.background = "#FFF5F5";
+    box.style.color = "#7A1F1F";
+
+    const t = document.createElement("div");
+    t.style.fontWeight = "800";
+    t.style.marginBottom = "8px";
+    t.textContent = title || "Error";
+    box.appendChild(t);
+
+    const pre = document.createElement("pre");
+    pre.style.margin = "0";
+    pre.style.whiteSpace = "pre-wrap";
+    pre.style.fontSize = "12px";
+    pre.textContent = details || "";
+    box.appendChild(pre);
+
+    return box;
+  }
+
   function makeSectionCard(titleText) {
     const section = document.createElement("div");
     section.style.border = "1px solid #EFE7C9";
@@ -782,6 +824,7 @@
     section.style.padding = "14px 14px";
     section.style.margin = "14px 0";
     section.style.background = "#FFFCF1";
+
     if (titleText) {
       const title = document.createElement("div");
       title.textContent = titleText;
@@ -793,8 +836,50 @@
     return section;
   }
 
+  function makeRangeControl({ label, min, max, step, initial }) {
+    const root = document.createElement("div");
+    root.style.display = "grid";
+    root.style.gridTemplateColumns = "140px 1fr";
+    root.style.alignItems = "center";
+    root.style.gap = "12px";
+    root.style.marginBottom = "12px";
+
+    const lab = document.createElement("div");
+    lab.textContent = label || "Slider";
+    lab.style.fontSize = "13px";
+    lab.style.fontWeight = "700";
+    lab.style.color = THEME.text;
+
+    const right = document.createElement("div");
+
+    const input = document.createElement("input");
+    input.type = "range";
+    input.min = String(min);
+    input.max = String(max);
+    input.step = String(step);
+    input.value = String(initial);
+    input.style.width = "100%";
+
+    const value = document.createElement("div");
+    value.style.marginTop = "6px";
+    value.style.fontSize = "12px";
+    value.style.color = THEME.muted;
+    value.textContent = "";
+
+    right.appendChild(input);
+    right.appendChild(value);
+
+    root.appendChild(lab);
+    root.appendChild(right);
+
+    return { root, input, value };
+  }
+
+  // -------------------- Existing question builders --------------------
+
   function makeLikertQuestion({ name, label, minLabel, maxLabel, scaleMin, scaleMax, required }) {
     const section = makeSectionCard(label);
+
     const row = document.createElement("div");
     row.style.display = "grid";
     row.style.gridTemplateColumns = "90px 1fr 90px";
@@ -837,13 +922,18 @@
       input.value = String(v);
       if (required) input.required = true;
 
+      input.addEventListener("focus", () => {
+        pill.style.outline = "none";
+        pill.style.boxShadow = THEME.focusShadow;
+      });
+      input.addEventListener("blur", () => {
+        pill.style.boxShadow = "none";
+      });
+
       const t = document.createElement("span");
       t.textContent = String(v);
       t.style.fontSize = "14px";
       t.style.fontWeight = "600";
-
-      input.addEventListener("focus", () => (pill.style.outline = THEME.focus));
-      input.addEventListener("blur", () => (pill.style.outline = "none"));
 
       pill.appendChild(input);
       pill.appendChild(t);
@@ -859,6 +949,7 @@
 
   function makeTextArea({ name, label, placeholder, required }) {
     const section = makeSectionCard(label);
+
     const ta = document.createElement("textarea");
     ta.name = name;
     ta.placeholder = placeholder || "";
@@ -879,7 +970,7 @@
 
     ta.addEventListener("focus", () => {
       ta.style.outline = "none";
-      ta.style.boxShadow = THEME.focus;
+      ta.style.boxShadow = THEME.focusShadow;
       ta.style.borderColor = "#CBBE8C";
     });
     ta.addEventListener("blur", () => {
@@ -888,12 +979,13 @@
     });
 
     if (required) ta.required = true;
+
     section.appendChild(ta);
     return section;
   }
 
-  // Generic drag-into-slots ranking question
-  function makeRankingQuestion({ name, label, items, expectedNames, itemRenderer, instructionText }) {
+  // Generic drag-into-slots ranking question (unchanged behavior)
+  function makeColorRankingQuestion({ name, label, items, expectedNames, itemRenderer, instructionText }) {
     const section = makeSectionCard(label);
 
     const instruction = document.createElement("div");
@@ -1011,6 +1103,7 @@
 
     attachDragToRank(bank, slots);
 
+    // Responsive stacking for narrow widths
     if (window.matchMedia && window.matchMedia("(max-width: 720px)").matches) {
       wrap.style.gridTemplateColumns = "1fr";
     }
@@ -1018,7 +1111,8 @@
     return section;
   }
 
-  // Item renderers
+  // -------------------- Item renderers --------------------
+
   function makeColorTile(c) {
     const tile = document.createElement("div");
     tile.className = "rank-item";
@@ -1045,7 +1139,8 @@
     swatch.style.borderRadius = "5px";
     swatch.style.display = "inline-block";
     swatch.style.background = c.hex;
-    swatch.style.border = c.name === "white" ? "1px solid #555" : "1px solid #999";
+    swatch.style.border = "1px solid #999";
+    if (c.name === "white") swatch.style.border = "1px solid #555";
 
     const text = document.createElement("span");
     text.textContent = c.name;
@@ -1055,7 +1150,6 @@
 
     tile.appendChild(swatch);
     tile.appendChild(text);
-
     return tile;
   }
 
@@ -1097,11 +1191,11 @@
 
     tile.appendChild(img);
     tile.appendChild(text);
-
     return tile;
   }
 
-  // Drag logic
+  // -------------------- Drag logic --------------------
+
   function attachDragToRank(bankEl, slotsEl) {
     let draggingItem = null;
     let dragSource = null;
@@ -1157,18 +1251,23 @@
     slotsEl.addEventListener("drop", (e) => {
       e.preventDefault();
       if (!draggingItem) return;
+
       const slot = e.target.closest(".rank-slot");
       if (!slot) return;
+
       const drop = slot.querySelector(".rank-drop");
       if (!drop) return;
 
       const existing = drop.querySelector(".rank-item");
+
+      // swap if needed
       if (existing && existing !== draggingItem) {
         dragSource.appendChild(existing);
         if (dragSource.classList && dragSource.classList.contains("rank-drop")) {
           normalizeDrop(dragSource);
         }
       }
+
       drop.appendChild(draggingItem);
       normalizeDrop(drop);
 
@@ -1189,8 +1288,10 @@
   }
 
   // -------------------- Read form values --------------------
+
   function readSurveyForm(form) {
     const fd = new FormData(form);
+
     const enjoyment = fd.get("enjoyment");
     const difficulty = fd.get("difficulty");
     if (!enjoyment || !difficulty) {
@@ -1212,7 +1313,6 @@
       room_rank_easiest_to_hardest: roomRank.ranked.join(">"),
       room_rank_array: JSON.stringify(roomRank.ranked)
     };
-
     return { ok: true, data };
   }
 
@@ -1221,6 +1321,7 @@
     if (!slots) {
       return { ok: false, msg: `Internal error: ${labelForMsg} ranking slots not found.`, data: null };
     }
+
     const ranked = [...slots.querySelectorAll(".rank-slot")].map((slot) => {
       const item = slot.querySelector(".rank-drop .rank-item");
       return item ? item.dataset.item : null;
@@ -1232,302 +1333,12 @@
 
     const expected = new Set(expectedNames);
     const rankedSet = new Set(ranked);
+
     if (ranked.length !== expected.size || rankedSet.size !== expected.size) {
       return { ok: false, msg: `Please ensure all ${expectedNames.length} ${labelForMsg} are ranked exactly once.`, data: null };
     }
+
     return { ok: true, ranked };
   }
 
-  // -------------------- Closest mushroom lookup --------------------
-  function findClosestMushroom(colorName, capTarget01, stemTarget01) {
-    // Optional hook: if you already have a helper, use it.
-    if (typeof window.getClosestMushroom === "function") {
-      try {
-        const entry = window.getClosestMushroom(colorName, capTarget01, stemTarget01);
-        if (entry) {
-          const filename = entry.filename || entry.imgSrc || entry.src || (entry.image && entry.image.src) || null;
-          return {
-            entry,
-            filename,
-            capLabel: getCapLabel(entry),
-            stemLabel: getStemLabel(entry),
-            capNorm: null,
-            stemNorm: null
-          };
-        }
-      } catch (_) {
-        // fall through
-      }
-    }
-
-    const cache = getNormalizedCatalogForColor(colorName);
-    if (!cache || cache.error) return cache || { error: "Internal error: mushroom catalog not found." };
-
-    const { entries, capNorms, stemNorms, capLabels, stemLabels } = cache;
-
-    let bestIdx = -1;
-    let bestD = Infinity;
-
-    for (let i = 0; i < entries.length; i++) {
-      const dc = capNorms[i] - capTarget01;
-      const ds = stemNorms[i] - stemTarget01;
-      const d = dc * dc + ds * ds;
-      if (d < bestD) {
-        bestD = d;
-        bestIdx = i;
-      }
-    }
-
-    if (bestIdx < 0) return { error: `No mushrooms found for color "${colorName}".` };
-
-    const entry = entries[bestIdx];
-    const filename =
-      entry.filename ||
-      entry.imgSrc ||
-      entry.src ||
-      (entry.image && entry.image.src) ||
-      null;
-
-    return {
-      entry,
-      filename,
-      capLabel: capLabels[bestIdx] ?? getCapLabel(entry),
-      stemLabel: stemLabels[bestIdx] ?? getStemLabel(entry),
-      capNorm: capNorms[bestIdx],
-      stemNorm: stemNorms[bestIdx]
-    };
-  }
-
-  function getNormalizedCatalogForColor(colorName) {
-    const c = normalizeColor(colorName);
-    if (_catalogCache.byColor[c]) return _catalogCache.byColor[c];
-
-    const catalog = getMushroomCatalog();
-    if (!catalog) return { error: "Internal error: mushroom catalog not found (window.MUSHROOM_CATALOG / window.getMushroomCatalog())." };
-
-    const entries = catalog.filter((e) => normalizeColor(e.color || e.colour || e.Color) === c);
-    if (!entries.length) return { error: `No mushrooms found for color "${colorName}" in catalog.` };
-
-    // Extract cap/stem raw values
-    const capRaw = entries.map((e) => getCapRaw(e));
-    const stemRaw = entries.map((e) => getStemRaw(e));
-
-    const capIsNumeric = capRaw.every((v) => isFiniteNumber(v));
-    const stemIsNumeric = stemRaw.every((v) => isFiniteNumber(v));
-
-    const capNorms = [];
-    const stemNorms = [];
-    const capLabels = [];
-    const stemLabels = [];
-
-    // Cap normalization
-    if (capIsNumeric) {
-      const vals = capRaw.map((v) => Number(v));
-      const mn = Math.min(...vals);
-      const mx = Math.max(...vals);
-      const denom = mx - mn || 1;
-      for (let i = 0; i < vals.length; i++) {
-        capNorms.push(clamp01((vals[i] - mn) / denom));
-        capLabels.push(String(vals[i]));
-      }
-    } else {
-      const mapping = makeOrdinalMapping(capRaw.map(String));
-      for (let i = 0; i < capRaw.length; i++) {
-        capNorms.push(mapping.norm(capRaw[i]));
-        capLabels.push(String(capRaw[i]));
-      }
-    }
-
-    // Stem normalization
-    if (stemIsNumeric) {
-      const vals = stemRaw.map((v) => Number(v));
-      const mn = Math.min(...vals);
-      const mx = Math.max(...vals);
-      const denom = mx - mn || 1;
-      for (let i = 0; i < vals.length; i++) {
-        stemNorms.push(clamp01((vals[i] - mn) / denom));
-        stemLabels.push(String(vals[i]));
-      }
-    } else {
-      const mapping = makeOrdinalMapping(stemRaw.map(String));
-      for (let i = 0; i < stemRaw.length; i++) {
-        stemNorms.push(mapping.norm(stemRaw[i]));
-        stemLabels.push(String(stemRaw[i]));
-      }
-    }
-
-    const packed = { entries, capNorms, stemNorms, capLabels, stemLabels };
-    _catalogCache.byColor[c] = packed;
-    return packed;
-  }
-
-  function getMushroomCatalog() {
-    if (_catalogCache.source) return _catalogCache.source;
-
-    const candidates = [
-      "MUSHROOM_CATALOG",
-      "mushroomCatalog",
-      "CATALOG",
-      "MUSHROOMS",
-      "MUSHROOM_META",
-      "mushrooms"
-    ];
-
-    for (const k of candidates) {
-      if (Array.isArray(window[k])) {
-        _catalogCache.source = window[k];
-        return _catalogCache.source;
-      }
-    }
-
-    if (typeof window.getMushroomCatalog === "function") {
-      try {
-        const v = window.getMushroomCatalog();
-        if (Array.isArray(v)) {
-          _catalogCache.source = v;
-          return _catalogCache.source;
-        }
-      } catch (_) {}
-    }
-
-    return null;
-  }
-
-  function resolveImgSrc(entry) {
-    if (!entry) return null;
-    const src =
-      entry.imgSrc ||
-      entry.src ||
-      (entry.image && entry.image.src) ||
-      entry.filename ||
-      null;
-
-    if (!src) return null;
-
-    // If already a path, use it
-    if (typeof src === "string" && src.includes("/")) return src;
-
-    // Optional base path hook
-    const base = window.MUSHROOM_IMAGE_BASEPATH;
-    if (base && typeof base === "string") {
-      return `${base.replace(/\/$/, "")}/${String(src).replace(/^\//, "")}`;
-    }
-
-    return src;
-  }
-
-  // Cap/stem raw extraction (numeric or string)
-  function getCapRaw(e) {
-    const v =
-      pickFirst(e, ["cap_roundness", "capRoundness", "cap", "cap_zone", "capZone", "cap_idx", "capIndex"]) ??
-      parseDimsFromFilename(e.filename || e.imgSrc || e.src)?.cap ??
-      null;
-
-    return coerceNumberIfPossible(v);
-  }
-
-  function getStemRaw(e) {
-    const v =
-      pickFirst(e, ["stem_width", "stemWidth", "stem", "stem_zone", "stemZone", "stem_idx", "stemIndex"]) ??
-      parseDimsFromFilename(e.filename || e.imgSrc || e.src)?.stem ??
-      null;
-
-    return coerceNumberIfPossible(v);
-  }
-
-  function getCapLabel(e) {
-    const v = pickFirst(e, ["cap_roundness", "capRoundness", "cap", "cap_zone", "capZone", "cap_idx", "capIndex"]);
-    return v != null ? String(v) : "";
-  }
-
-  function getStemLabel(e) {
-    const v = pickFirst(e, ["stem_width", "stemWidth", "stem", "stem_zone", "stemZone", "stem_idx", "stemIndex"]);
-    return v != null ? String(v) : "";
-  }
-
-  function parseDimsFromFilename(filename) {
-    if (!filename || typeof filename !== "string") return null;
-    // Heuristic patterns; customize if your naming differs:
-    // e.g., "...cap0.75...stem0.30..." or "...cap_2...stem_1..."
-    const capMatch = filename.match(/cap[_-]?([0-9]+(?:\.[0-9]+)?)/i);
-    const stemMatch = filename.match(/stem[_-]?([0-9]+(?:\.[0-9]+)?)/i);
-    if (!capMatch && !stemMatch) return null;
-    return {
-      cap: capMatch ? capMatch[1] : null,
-      stem: stemMatch ? stemMatch[1] : null
-    };
-  }
-
-  // Ordinal mapping with light heuristics for common labels
-  function makeOrdinalMapping(values) {
-    const uniq = [...new Set(values.map((v) => String(v)))];
-
-    // Heuristic ordering if known labels exist
-    const lower = uniq.map((v) => v.toLowerCase());
-    const hasLowMidHigh = ["low", "mid", "medium", "high"].some((k) => lower.includes(k));
-    const hasSmallMedLarge = ["small", "medium", "large"].some((k) => lower.includes(k));
-
-    let ordered = uniq.slice();
-
-    if (hasLowMidHigh) {
-      const order = ["low", "mid", "medium", "high"];
-      ordered.sort((a, b) => order.indexOf(a.toLowerCase()) - order.indexOf(b.toLowerCase()));
-    } else if (hasSmallMedLarge) {
-      const order = ["small", "medium", "large"];
-      ordered.sort((a, b) => order.indexOf(a.toLowerCase()) - order.indexOf(b.toLowerCase()));
-    } else {
-      ordered.sort(); // stable default
-    }
-
-    const idx = new Map();
-    ordered.forEach((v, i) => idx.set(String(v), i));
-    const denom = (ordered.length - 1) || 1;
-
-    return {
-      norm: (v) => clamp01((idx.get(String(v)) ?? 0) / denom)
-    };
-  }
-
-  // -------------------- Small utilities --------------------
-  function pickFirst(obj, keys) {
-    if (!obj) return null;
-    for (const k of keys) {
-      if (obj[k] != null) return obj[k];
-    }
-    return null;
-  }
-
-  function normalizeColor(s) {
-    return String(s || "").trim().toLowerCase();
-  }
-
-  function isFiniteNumber(v) {
-    return typeof v === "number" && Number.isFinite(v);
-  }
-
-  function coerceNumberIfPossible(v) {
-    if (v == null) return v;
-    if (typeof v === "number") return v;
-    const n = Number(v);
-    return Number.isFinite(n) ? n : v;
-  }
-
-  function clamp01(x) {
-    return Math.max(0, Math.min(1, x));
-  }
-
-  function clampInt(x, a, b) {
-    const n = Number.isFinite(x) ? x : parseInt(x, 10);
-    if (!Number.isFinite(n)) return a;
-    return Math.max(a, Math.min(b, Math.round(n)));
-  }
-
-  function escapeHtml(s) {
-    return String(s)
-      .replaceAll("&", "&amp;")
-      .replaceAll("<", "&lt;")
-      .replaceAll(">", "&gt;")
-      .replaceAll('"', "&quot;")
-      .replaceAll("'", "&#039;");
-  }
 })();
