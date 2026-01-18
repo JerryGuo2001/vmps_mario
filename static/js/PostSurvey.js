@@ -26,6 +26,15 @@
     { name: "green",   hex: "#00AA00" }
   ];
 
+  // NEW: room ranking config (ONLY the 5 rooms, exclude sky)
+  const RANK_ROOMS = [
+    { name: "lava",   imgSrc: "TexturePack/lavaDoor.png" },
+    { name: "forest", imgSrc: "TexturePack/forestDoor.png" },
+    { name: "ocean",  imgSrc: "TexturePack/oceanDoor.png" },
+    { name: "desert", imgSrc: "TexturePack/desertDoor.png" },
+    { name: "cave",   imgSrc: "TexturePack/caveDoor.png" }
+  ];
+
   // Style tokens
   const THEME = {
     pageBg: "#F3E9C6",        // light khaki
@@ -152,13 +161,31 @@
       })
     );
 
-    // Q4: color ranking (drag tiles into rank slots)
+    // Q4: color ranking (highest value -> lowest value)
     form.appendChild(
       makeColorRankingQuestion({
         name: "color_rank",
         label:
           "4) Rank the mushroom colors from MOST rewarding (highest value) to LEAST rewarding (lowest value).",
-        colors: RANK_COLORS
+        items: RANK_COLORS,
+        expectedNames: RANK_COLORS.map((c) => c.name),
+        itemRenderer: makeColorTile,
+        instructionText:
+          "Drag the color options into the ranking slots and order them from highest to lowest value (1 = highest, 8 = lowest)."
+      })
+    );
+
+    // NEW Q5: room ranking (easiest -> hardest)
+    form.appendChild(
+      makeColorRankingQuestion({
+        name: "room_rank",
+        label:
+          "5) Rank the rooms from EASIEST to HARDEST. (1 = easiest, 5 = hardest)",
+        items: RANK_ROOMS,
+        expectedNames: RANK_ROOMS.map((r) => r.name),
+        itemRenderer: makeRoomTile,
+        instructionText:
+          "Drag the room options into the ranking slots and order them from easiest to hardest (1 = easiest, 5 = hardest)."
       })
     );
 
@@ -416,15 +443,22 @@
     return section;
   }
 
-  // -------------------- NEW Q4: Drag tiles into rank slots --------------------
+  // -------------- Generic drag-into-slots ranking question --------------
 
-  function makeColorRankingQuestion({ name, label, colors }) {
+  /**
+   * Generic rank question builder:
+   * - items: array of objects with at least {name: string}
+   * - expectedNames: array of expected names (for validation)
+   * - itemRenderer: (itemObj) => HTMLElement (draggable with dataset.item = name)
+   * Saves DOM ids:
+   *  - `${name}_bank`
+   *  - `${name}_slots`
+   */
+  function makeColorRankingQuestion({ name, label, items, expectedNames, itemRenderer, instructionText }) {
     const section = makeSectionCard(label);
 
-    // NEW: instruction sentence (your request)
     const instruction = document.createElement("div");
-    instruction.textContent =
-      "Drag the color options into the ranking slots and order them from highest to lowest value (1 = highest, 8 = lowest).";
+    instruction.textContent = instructionText || "Drag the options into the slots and rank them.";
     instruction.style.fontSize = "13px";
     instruction.style.color = THEME.muted;
     instruction.style.marginBottom = "10px";
@@ -448,15 +482,16 @@
     bankCard.style.boxSizing = "border-box";
 
     const bankTitle = document.createElement("div");
-    bankTitle.textContent = "Available colors";
+    bankTitle.textContent = "Options";
     bankTitle.style.fontWeight = "700";
     bankTitle.style.fontSize = "13px";
     bankTitle.style.marginBottom = "10px";
     bankCard.appendChild(bankTitle);
 
     const bank = document.createElement("div");
-    bank.id = `${name}_bank`; // e.g., color_rank_bank
+    bank.id = `${name}_bank`;
     bank.dataset.field = name;
+    bank.dataset.expected = JSON.stringify(expectedNames || items.map((x) => x.name));
     bank.style.display = "flex";
     bank.style.flexWrap = "wrap";
     bank.style.gap = "10px";
@@ -485,7 +520,7 @@
     slotsCard.appendChild(slotsTitle);
 
     const slots = document.createElement("div");
-    slots.id = `${name}_slots`; // e.g., color_rank_slots
+    slots.id = `${name}_slots`;
     slots.style.display = "flex";
     slots.style.flexDirection = "column";
     slots.style.gap = "10px";
@@ -493,11 +528,12 @@
 
     wrap.appendChild(slotsCard);
 
-    // Add tiles to bank
-    colors.forEach((c) => bank.appendChild(makeColorTile(c)));
+    // Add items to bank
+    items.forEach((it) => bank.appendChild(itemRenderer(it)));
 
-    // Create rank slots (1..N)
-    for (let i = 1; i <= colors.length; i++) {
+    // Create slots (1..N)
+    const n = items.length;
+    for (let i = 1; i <= n; i++) {
       const slot = document.createElement("div");
       slot.className = "rank-slot";
       slot.dataset.rank = String(i);
@@ -512,8 +548,8 @@
       slot.style.border = "1px dashed #E7DEBF";
 
       const leftLabel = document.createElement("div");
-      leftLabel.textContent =
-        i === 1 ? "1 (highest)" : (i === colors.length ? `${i} (lowest)` : String(i));
+      // If they wrote (1=easy, 5=hard), keep it generic: 1...N
+      leftLabel.textContent = String(i);
       leftLabel.style.fontSize = "12px";
       leftLabel.style.fontWeight = "700";
       leftLabel.style.color = THEME.muted;
@@ -527,7 +563,7 @@
 
       const placeholder = document.createElement("div");
       placeholder.className = "rank-placeholder";
-      placeholder.textContent = "Drop a color here";
+      placeholder.textContent = "Drop an option here";
       placeholder.style.fontSize = "12px";
       placeholder.style.color = THEME.muted;
       placeholder.style.opacity = "0.8";
@@ -539,12 +575,9 @@
       slots.appendChild(slot);
     }
 
-    // Enable drag interactions
     attachDragToRank(bank, slots);
 
     // Simple responsive stacking for narrow widths
-    // (safe: only affects this UI block)
-    wrap.style.gridAutoFlow = "row";
     if (window.matchMedia && window.matchMedia("(max-width: 720px)").matches) {
       wrap.style.gridTemplateColumns = "1fr";
     }
@@ -552,11 +585,13 @@
     return section;
   }
 
+  // -------------------- Item renderers --------------------
+
   function makeColorTile(c) {
     const tile = document.createElement("div");
     tile.className = "rank-item";
     tile.draggable = true;
-    tile.dataset.color = c.name;
+    tile.dataset.item = c.name;
 
     tile.style.display = "inline-flex";
     tile.style.alignItems = "center";
@@ -593,6 +628,51 @@
     return tile;
   }
 
+  function makeRoomTile(r) {
+    const tile = document.createElement("div");
+    tile.className = "rank-item";
+    tile.draggable = true;
+    tile.dataset.item = r.name;
+
+    // Slightly more "card-like" for images
+    tile.style.display = "inline-flex";
+    tile.style.alignItems = "center";
+    tile.style.gap = "10px";
+    tile.style.padding = "10px 12px";
+    tile.style.border = "1px solid #E7DEBF";
+    tile.style.borderRadius = "14px";
+    tile.style.background = "#FFFFFF";
+    tile.style.cursor = "grab";
+    tile.style.userSelect = "none";
+    tile.style.boxShadow = "0 2px 10px rgba(0,0,0,0.06)";
+
+    tile.addEventListener("mouseenter", () => (tile.style.background = "#FFFCF1"));
+    tile.addEventListener("mouseleave", () => (tile.style.background = "#FFFFFF"));
+
+    const img = document.createElement("img");
+    img.src = r.imgSrc;
+    img.alt = r.name;
+    img.style.width = "34px";
+    img.style.height = "34px";
+    img.style.objectFit = "contain";
+    img.style.borderRadius = "8px";
+    img.style.border = "1px solid #E7DEBF";
+    img.draggable = false; // important so the parent tile is the drag object
+
+    const text = document.createElement("span");
+    text.textContent = r.name;
+    text.style.fontSize = "13px";
+    text.style.fontWeight = "700";
+    text.style.color = THEME.text;
+
+    tile.appendChild(img);
+    tile.appendChild(text);
+
+    return tile;
+  }
+
+  // -------------------- Drag logic (bank <-> slots, swap support) --------------------
+
   function attachDragToRank(bankEl, slotsEl) {
     let draggingItem = null;
     let dragSource = null;
@@ -611,7 +691,7 @@
       if (!hasItem && !placeholder) {
         const ph = document.createElement("div");
         ph.className = "rank-placeholder";
-        ph.textContent = "Drop a color here";
+        ph.textContent = "Drop an option here";
         ph.style.fontSize = "12px";
         ph.style.color = THEME.muted;
         ph.style.opacity = "0.8";
@@ -629,7 +709,7 @@
       setDraggingStyles(true);
 
       e.dataTransfer.effectAllowed = "move";
-      e.dataTransfer.setData("text/plain", item.dataset.color || "");
+      e.dataTransfer.setData("text/plain", item.dataset.item || "");
     }
 
     function onDragEnd() {
@@ -637,17 +717,14 @@
       draggingItem = null;
       dragSource = null;
 
-      // Normalize placeholders
       slotsEl.querySelectorAll(".rank-drop").forEach(normalizeDrop);
     }
 
-    // Delegate drag events from bank + slots
     bankEl.addEventListener("dragstart", onDragStart);
     slotsEl.addEventListener("dragstart", onDragStart);
     bankEl.addEventListener("dragend", onDragEnd);
     slotsEl.addEventListener("dragend", onDragEnd);
 
-    // Allow drop
     bankEl.addEventListener("dragover", (e) => e.preventDefault());
     slotsEl.addEventListener("dragover", (e) => e.preventDefault());
 
@@ -664,7 +741,7 @@
 
       const existing = drop.querySelector(".rank-item");
 
-      // If slot already has an item, swap it back to the source container
+      // swap if needed
       if (existing && existing !== draggingItem) {
         dragSource.appendChild(existing);
         if (dragSource.classList && dragSource.classList.contains("rank-drop")) {
@@ -672,10 +749,8 @@
         }
       }
 
-      // Move dragged item into this drop zone
       drop.appendChild(draggingItem);
 
-      // Normalize placeholders
       normalizeDrop(drop);
       if (dragSource && dragSource.classList && dragSource.classList.contains("rank-drop")) {
         normalizeDrop(dragSource);
@@ -707,34 +782,49 @@
       return { ok: false, msg: "Please complete all required fields.", data: null };
     }
 
-    // NEW: read ranked order from the slots (1..8)
-    const slots = document.getElementById("color_rank_slots");
-    if (!slots) return { ok: false, msg: "Internal error: ranking slots not found.", data: null };
+    // Read color rank from slots (1..8)
+    const colorRank = readRankFromSlots("color_rank_slots", RANK_COLORS.map((c) => c.name), "colors");
+    if (!colorRank.ok) return colorRank;
 
-    const ranked = [...slots.querySelectorAll(".rank-slot")].map((slot) => {
-      const item = slot.querySelector(".rank-drop .rank-item");
-      return item ? item.dataset.color : null;
-    });
-
-    if (ranked.some((x) => !x)) {
-      return { ok: false, msg: "Please place all 8 colors into the ranking slots.", data: null };
-    }
-
-    const expected = new Set(RANK_COLORS.map((c) => c.name));
-    const rankedSet = new Set(ranked);
-
-    if (ranked.length !== expected.size || rankedSet.size !== expected.size) {
-      return { ok: false, msg: "Please ensure all 8 colors are ranked exactly once.", data: null };
-    }
+    // Read room rank from slots (1..5)
+    const roomRank = readRankFromSlots("room_rank_slots", RANK_ROOMS.map((r) => r.name), "rooms");
+    if (!roomRank.ok) return roomRank;
 
     const data = {
       enjoyment: String(enjoyment),
       difficulty: String(difficulty),
       strategy: String(fd.get("strategy") || ""),
-      color_rank_most_to_least: ranked.join(">"),
-      color_rank_array: JSON.stringify(ranked)
+
+      color_rank_most_to_least: colorRank.ranked.join(">"),
+      color_rank_array: JSON.stringify(colorRank.ranked),
+
+      room_rank_easiest_to_hardest: roomRank.ranked.join(">"),
+      room_rank_array: JSON.stringify(roomRank.ranked)
     };
 
     return { ok: true, data };
+  }
+
+  function readRankFromSlots(slotsId, expectedNames, labelForMsg) {
+    const slots = document.getElementById(slotsId);
+    if (!slots) return { ok: false, msg: `Internal error: ${labelForMsg} ranking slots not found.`, data: null };
+
+    const ranked = [...slots.querySelectorAll(".rank-slot")].map((slot) => {
+      const item = slot.querySelector(".rank-drop .rank-item");
+      return item ? item.dataset.item : null;
+    });
+
+    if (ranked.some((x) => !x)) {
+      return { ok: false, msg: `Please place all ${expectedNames.length} ${labelForMsg} into the ranking slots.`, data: null };
+    }
+
+    const expected = new Set(expectedNames);
+    const rankedSet = new Set(ranked);
+
+    if (ranked.length !== expected.size || rankedSet.size !== expected.size) {
+      return { ok: false, msg: `Please ensure all ${expectedNames.length} ${labelForMsg} are ranked exactly once.`, data: null };
+    }
+
+    return { ok: true, ranked };
   }
 })();
