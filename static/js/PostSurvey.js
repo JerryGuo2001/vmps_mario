@@ -345,187 +345,291 @@
     overlay.scrollTop = 0;
 
     prog.textContent = `Page ${_pageIndex + 1} of ${TOTAL_PAGES}`;
-
     _pageStartT = performance.now();
 
-    if (_pageIndex >= 0 && _pageIndex <= 7) {
+    const isBuilder = (_pageIndex >= 0 && _pageIndex <= 7);
+
+    // Make the page prompt ("question") much more visible on builder pages
+    if (sub) {
+      sub.style.margin = "0 0 12px 0";
+      sub.style.fontSize = isBuilder ? "18px" : "14px";
+      sub.style.fontWeight = isBuilder ? "800" : "600";
+      sub.style.color = isBuilder ? THEME.text : THEME.muted;
+      sub.style.letterSpacing = isBuilder ? "0.2px" : "0px";
+    }
+
+    if (isBuilder) {
       const color = BUILDER_COLORS[_pageIndex];
-      sub.textContent = `Build the highest-value mushroom for: ${color.toUpperCase()}`;
+      sub.textContent = `Builder (Page ${_pageIndex + 1}/8): Create the highest-value ${color.toUpperCase()} mushroom`;
       root.appendChild(renderBuilderPage(color, card, overlay));
     } else {
-      sub.textContent = "Please answer the following questions.";
+      sub.textContent = "Final survey: please answer the following questions.";
       root.appendChild(renderFinalSurveyPage(card, overlay));
     }
   }
 
+
   // -------------------- Builder pages (8 pages) --------------------
 
-  function renderBuilderPage(color, card, overlay) {
-    const wrap = document.createElement("div");
-    wrap.style.display = "grid";
-    wrap.style.gridTemplateColumns = "1fr";
-    wrap.style.gap = "14px";
+function renderBuilderPage(color, card, overlay) {
+  const wrap = document.createElement("div");
+  wrap.style.display = "grid";
+  wrap.style.gridTemplateColumns = "1fr";
+  wrap.style.gap = "14px";
 
-    const section = makeSectionCard(`Mushroom Builder: ${color.toUpperCase()}`);
+  // Strong, clear instruction banner
+  const banner = document.createElement("div");
+  banner.style.padding = "14px 14px";
+  banner.style.borderRadius = "14px";
+  banner.style.border = "1px solid #E7DEBF";
+  banner.style.background = "#FFF6D8";
+  banner.style.color = THEME.text;
 
-    const info = document.createElement("div");
-    info.style.fontSize = "13px";
-    info.style.color = THEME.muted;
-    info.textContent =
-      "Use the sliders to choose stem width and cap roundness. The preview always shows the closest available stimulus in the catalog for this color.";
-    section.appendChild(info);
+  const bannerTitle = document.createElement("div");
+  bannerTitle.textContent = `Task: Build the best ${color.toUpperCase()} mushroom`;
+  bannerTitle.style.fontSize = "18px";
+  bannerTitle.style.fontWeight = "900";
+  bannerTitle.style.marginBottom = "6px";
 
-    const pool = _catalogIndex?.byColor?.[color] || [];
-    const rng = _catalogIndex?.range?.[color] || null;
+  const bannerText = document.createElement("div");
+  bannerText.style.fontSize = "14px";
+  bannerText.style.fontWeight = "600";
+  bannerText.style.lineHeight = "1.35";
+  bannerText.innerHTML = [
+    "1) Click or drag <b>both</b> sliders to begin (stem width and cap roundness).",
+    "2) The preview appears only after you interact with both sliders.",
+    "3) Use the sliders (shown in <b>%</b>) to select your ideal mushroom, then click <b>Next</b>."
+  ].join("<br>");
 
-    if (!pool.length || !rng) {
-      section.appendChild(makeErrorBlock(
-        `No catalog rows found for color: ${color}`,
-        "Check that your catalog rows include columns for color/stem/cap/filename and that color names match exactly."
-      ));
-      wrap.appendChild(section);
-      wrap.appendChild(builderNavRow(color, card, overlay, /*canNext*/ false));
-      return wrap;
-    }
+  banner.appendChild(bannerTitle);
+  banner.appendChild(bannerText);
+  wrap.appendChild(banner);
 
-    // Layout: preview + sliders
-    const grid = document.createElement("div");
-    grid.style.display = "grid";
-    grid.style.gridTemplateColumns = "1fr 1fr";
-    grid.style.gap = "14px";
-    grid.style.alignItems = "start";
-    if (window.matchMedia && window.matchMedia("(max-width: 780px)").matches) {
-      grid.style.gridTemplateColumns = "1fr";
-    }
-    section.appendChild(grid);
+  const section = makeSectionCard(`Mushroom Builder: ${color.toUpperCase()}`);
 
-    // Preview card
-    const prevCard = document.createElement("div");
-    prevCard.style.border = "1px solid #E7DEBF";
-    prevCard.style.borderRadius = "14px";
-    prevCard.style.background = "#FFFFFF";
-    prevCard.style.padding = "12px";
-    prevCard.style.boxSizing = "border-box";
-    grid.appendChild(prevCard);
+  const info = document.createElement("div");
+  info.style.fontSize = "13px";
+  info.style.fontWeight = "650";
+  info.style.color = THEME.muted;
+  info.textContent =
+    "Sliders are shown in percentages (0–100%). Internally, we map them to the catalog range for this color to find the closest available stimulus.";
+  section.appendChild(info);
 
-    const prevTitle = document.createElement("div");
-    prevTitle.textContent = "Closest available mushroom";
-    prevTitle.style.fontWeight = "700";
-    prevTitle.style.fontSize = "13px";
-    prevTitle.style.marginBottom = "10px";
-    prevCard.appendChild(prevTitle);
+  const pool = _catalogIndex?.byColor?.[color] || [];
+  const rng = _catalogIndex?.range?.[color] || null;
 
-    const img = document.createElement("img");
-    img.style.width = "220px";
-    img.style.height = "220px";
-    img.style.objectFit = "contain";
-    img.style.borderRadius = "14px";
-    img.style.border = "1px solid #E7DEBF";
-    img.style.background = "#FFFCF1";
-    img.alt = `${color} preview`;
-    prevCard.appendChild(img);
-
-    const meta = document.createElement("div");
-    meta.style.marginTop = "10px";
-    meta.style.fontSize = "13px";
-    meta.style.color = THEME.muted;
-    prevCard.appendChild(meta);
-
-    // Controls card
-    const ctrlCard = document.createElement("div");
-    ctrlCard.style.border = "1px solid #E7DEBF";
-    ctrlCard.style.borderRadius = "14px";
-    ctrlCard.style.background = "#FFFFFF";
-    ctrlCard.style.padding = "12px";
-    ctrlCard.style.boxSizing = "border-box";
-    grid.appendChild(ctrlCard);
-
-    const ctrlTitle = document.createElement("div");
-    ctrlTitle.textContent = "Choose dimensions";
-    ctrlTitle.style.fontWeight = "700";
-    ctrlTitle.style.fontSize = "13px";
-    ctrlTitle.style.marginBottom = "10px";
-    ctrlCard.appendChild(ctrlTitle);
-
-    // Restore prior selection if they revisit (rare, but safe)
-    const prior = _builderData[color] || null;
-
-    // Sliders are 0..100, mapped onto [min..max] per color
-    const stemSlider = makeRangeControl({
-      label: "Stem width",
-      min: 0,
-      max: 100,
-      step: 1,
-      initial: prior ? Number(prior.slider_stem_pct) : 50
-    });
-
-    const capSlider = makeRangeControl({
-      label: "Cap roundness",
-      min: 0,
-      max: 100,
-      step: 1,
-      initial: prior ? Number(prior.slider_cap_pct) : 50
-    });
-
-    ctrlCard.appendChild(stemSlider.root);
-    ctrlCard.appendChild(capSlider.root);
-
-    // Live state
-    const live = {
-      color,
-      wantStem: null,
-      wantCap: null,
-      chosen: null,
-      sliderStemPct: prior ? Number(prior.slider_stem_pct) : 50,
-      sliderCapPct: prior ? Number(prior.slider_cap_pct) : 50
-    };
-
-    function pctToValue(pct, vMin, vMax) {
-      if (!Number.isFinite(vMin) || !Number.isFinite(vMax)) return NaN;
-      if (vMax === vMin) return vMin;
-      const t = Math.max(0, Math.min(1, pct / 100));
-      return vMin + (vMax - vMin) * t;
-    }
-
-    function refresh() {
-      const sPct = Number(stemSlider.input.value);
-      const cPct = Number(capSlider.input.value);
-
-      live.sliderStemPct = sPct;
-      live.sliderCapPct = cPct;
-
-      const wantStem = pctToValue(sPct, rng.stemMin, rng.stemMax);
-      const wantCap  = pctToValue(cPct, rng.capMin,  rng.capMax);
-
-      live.wantStem = wantStem;
-      live.wantCap  = wantCap;
-
-      const chosen = nearestRowFor(color, wantStem, wantCap, _catalogIndex);
-      live.chosen = chosen;
-
-      // Update UI numbers
-      stemSlider.value.textContent = `${wantStem.toFixed(2)} (desired)`;
-      capSlider.value.textContent  = `${wantCap.toFixed(2)} (desired)`;
-
-      if (chosen) {
-        img.src = encodeSrc(chosen.filename);
-        meta.textContent = `Closest stimulus: stem=${chosen.stem.toFixed(2)}, cap=${chosen.cap.toFixed(2)}`;
-      } else {
-        img.removeAttribute("src");
-        meta.textContent = "No matching stimulus found for this color.";
-      }
-    }
-
-    stemSlider.input.addEventListener("input", refresh);
-    capSlider.input.addEventListener("input", refresh);
-
-    // Initial render
-    refresh();
-
+  if (!pool.length || !rng) {
+    section.appendChild(makeErrorBlock(
+      `No catalog rows found for color: ${color}`,
+      "Check that your catalog rows include columns for color/stem/cap/filename and that color names match exactly."
+    ));
     wrap.appendChild(section);
-    wrap.appendChild(builderNavRow(color, card, overlay, /*canNext*/ true, live));
+
+    const nav = builderNavRow(color, card, overlay, /*canNext*/ false);
+    wrap.appendChild(nav.row);
     return wrap;
   }
+
+  // Layout: preview + sliders
+  const grid = document.createElement("div");
+  grid.style.display = "grid";
+  grid.style.gridTemplateColumns = "1fr 1fr";
+  grid.style.gap = "14px";
+  grid.style.alignItems = "start";
+  if (window.matchMedia && window.matchMedia("(max-width: 780px)").matches) {
+    grid.style.gridTemplateColumns = "1fr";
+  }
+  section.appendChild(grid);
+
+  // Preview card
+  const prevCard = document.createElement("div");
+  prevCard.style.border = "1px solid #E7DEBF";
+  prevCard.style.borderRadius = "14px";
+  prevCard.style.background = "#FFFFFF";
+  prevCard.style.padding = "12px";
+  prevCard.style.boxSizing = "border-box";
+  grid.appendChild(prevCard);
+
+  const prevTitle = document.createElement("div");
+  prevTitle.textContent = "Closest available mushroom (preview)";
+  prevTitle.style.fontWeight = "800";
+  prevTitle.style.fontSize = "13px";
+  prevTitle.style.marginBottom = "10px";
+  prevCard.appendChild(prevTitle);
+
+  const previewPlaceholder = document.createElement("div");
+  previewPlaceholder.style.padding = "14px";
+  previewPlaceholder.style.borderRadius = "14px";
+  previewPlaceholder.style.border = "1px dashed #E7DEBF";
+  previewPlaceholder.style.background = "#FFFCF1";
+  previewPlaceholder.style.color = THEME.muted;
+  previewPlaceholder.style.fontSize = "13px";
+  previewPlaceholder.style.fontWeight = "650";
+  previewPlaceholder.style.lineHeight = "1.35";
+  previewPlaceholder.textContent =
+    "Preview is hidden until you interact with BOTH sliders. Click/drag the stem slider and the cap slider to begin.";
+  prevCard.appendChild(previewPlaceholder);
+
+  const img = document.createElement("img");
+  img.style.width = "220px";
+  img.style.height = "220px";
+  img.style.objectFit = "contain";
+  img.style.borderRadius = "14px";
+  img.style.border = "1px solid #E7DEBF";
+  img.style.background = "#FFFCF1";
+  img.alt = `${color} preview`;
+  img.style.display = "none"; // IMPORTANT: hidden until both sliders interacted
+  prevCard.appendChild(img);
+
+  const meta = document.createElement("div");
+  meta.style.marginTop = "10px";
+  meta.style.fontSize = "13px";
+  meta.style.color = THEME.muted;
+  meta.textContent = "";
+  prevCard.appendChild(meta);
+
+  // Controls card
+  const ctrlCard = document.createElement("div");
+  ctrlCard.style.border = "1px solid #E7DEBF";
+  ctrlCard.style.borderRadius = "14px";
+  ctrlCard.style.background = "#FFFFFF";
+  ctrlCard.style.padding = "12px";
+  ctrlCard.style.boxSizing = "border-box";
+  grid.appendChild(ctrlCard);
+
+  const ctrlTitle = document.createElement("div");
+  ctrlTitle.textContent = "Choose dimensions (percent sliders)";
+  ctrlTitle.style.fontWeight = "800";
+  ctrlTitle.style.fontSize = "13px";
+  ctrlTitle.style.marginBottom = "10px";
+  ctrlCard.appendChild(ctrlTitle);
+
+  // Restore prior selection if revisit (safe)
+  const prior = _builderData[color] || null;
+
+  const stemSlider = makeRangeControl({
+    label: "Stem width (%)",
+    min: 0,
+    max: 100,
+    step: 1,
+    initial: prior ? Number(prior.slider_stem_pct) : 50
+  });
+
+  const capSlider = makeRangeControl({
+    label: "Cap roundness (%)",
+    min: 0,
+    max: 100,
+    step: 1,
+    initial: prior ? Number(prior.slider_cap_pct) : 50
+  });
+
+  ctrlCard.appendChild(stemSlider.root);
+  ctrlCard.appendChild(capSlider.root);
+
+  // Live state
+  const live = {
+    color,
+    wantStem: null,
+    wantCap: null,
+    chosen: null,
+    sliderStemPct: prior ? Number(prior.slider_stem_pct) : 50,
+    sliderCapPct: prior ? Number(prior.slider_cap_pct) : 50,
+
+    // Gatekeeping:
+    touchedStem: false,
+    touchedCap: false,
+    ready: false
+  };
+
+  // Navigation row: start disabled until BOTH sliders touched
+  const nav = builderNavRow(color, card, overlay, /*canNext*/ true, live);
+
+  function pctToValue(pct, vMin, vMax) {
+    if (!Number.isFinite(vMin) || !Number.isFinite(vMax)) return NaN;
+    if (vMax === vMin) return vMin;
+    const t = Math.max(0, Math.min(1, pct / 100));
+    return vMin + (vMax - vMin) * t;
+  }
+
+  function updateGatingAndUI() {
+    live.ready = !!(live.touchedStem && live.touchedCap);
+    nav.setEnabled(live.ready);
+
+    if (!live.ready) {
+      // Hide preview entirely
+      previewPlaceholder.style.display = "block";
+      img.style.display = "none";
+      img.removeAttribute("src");
+      meta.textContent = "Interact with BOTH sliders to reveal the preview and unlock Next.";
+      live.chosen = null;
+      return;
+    }
+
+    // Show preview
+    previewPlaceholder.style.display = "none";
+    img.style.display = "block";
+  }
+
+  function refresh() {
+    const sPct = Number(stemSlider.input.value);
+    const cPct = Number(capSlider.input.value);
+
+    live.sliderStemPct = sPct;
+    live.sliderCapPct = cPct;
+
+    // Requirement #2: show PERCENT only (no real-value display)
+    stemSlider.value.textContent = `${sPct}% selected`;
+    capSlider.value.textContent = `${cPct}% selected`;
+
+    // Still compute mapped values internally for nearest lookup
+    const wantStem = pctToValue(sPct, rng.stemMin, rng.stemMax);
+    const wantCap  = pctToValue(cPct, rng.capMin,  rng.capMax);
+    live.wantStem = wantStem;
+    live.wantCap  = wantCap;
+
+    updateGatingAndUI();
+    if (!live.ready) return;
+
+    const chosen = nearestRowFor(color, wantStem, wantCap, _catalogIndex);
+    live.chosen = chosen;
+
+    if (chosen) {
+      img.src = encodeSrc(chosen.filename);
+      meta.textContent = `Preview unlocked. Closest stimulus selected from catalog.`;
+    } else {
+      img.removeAttribute("src");
+      meta.textContent = "No matching stimulus found for this color.";
+    }
+  }
+
+  function markTouched(which) {
+    if (which === "stem") live.touchedStem = true;
+    if (which === "cap")  live.touchedCap  = true;
+    refresh();
+  }
+
+  // Mark “interaction” even if the value doesn't change
+  ["pointerdown", "mousedown", "touchstart", "keydown"].forEach((evt) => {
+    stemSlider.input.addEventListener(evt, () => markTouched("stem"), { passive: true });
+    capSlider.input.addEventListener(evt, () => markTouched("cap"), { passive: true });
+  });
+
+  // Normal live updates
+  stemSlider.input.addEventListener("input", refresh);
+  capSlider.input.addEventListener("input", refresh);
+
+  // Initial state: locked, no preview
+  updateGatingAndUI();
+  // Also show initial % values in the UI text
+  stemSlider.value.textContent = `${Number(stemSlider.input.value)}% selected`;
+  capSlider.value.textContent  = `${Number(capSlider.input.value)}% selected`;
+  meta.textContent = "Interact with BOTH sliders to reveal the preview and unlock Next.";
+
+  wrap.appendChild(section);
+  wrap.appendChild(nav.row);
+  return wrap;
+}
+
 
 function builderNavRow(color, card, overlay, canNext, liveState = null) {
   const row = document.createElement("div");
@@ -541,16 +645,28 @@ function builderNavRow(color, card, overlay, canNext, liveState = null) {
   nextBtn.style.borderRadius = "12px";
   nextBtn.style.padding = "12px 18px";
   nextBtn.style.fontSize = "16px";
-  nextBtn.style.fontWeight = "600";
-  nextBtn.style.cursor = canNext ? "pointer" : "not-allowed";
-  nextBtn.style.background = canNext ? "#1F6FEB" : "#9AA4B2";
-  nextBtn.style.color = "#FFFFFF";
-  nextBtn.style.boxShadow = canNext ? "0 6px 16px rgba(31, 111, 235, 0.25)" : "none";
+  nextBtn.style.fontWeight = "700";
+
+  function applyEnabled(enabled) {
+    const on = !!enabled && !!canNext;
+    nextBtn.disabled = !on;
+    nextBtn.style.cursor = on ? "pointer" : "not-allowed";
+    nextBtn.style.background = on ? "#1F6FEB" : "#9AA4B2";
+    nextBtn.style.color = "#FFFFFF";
+    nextBtn.style.boxShadow = on ? "0 6px 16px rgba(31, 111, 235, 0.25)" : "none";
+    nextBtn.style.opacity = on ? "1" : "0.85";
+  }
+
+  // Initial state: if builder page, default locked until liveState.ready
+  const initialEnabled = (liveState ? !!liveState.ready : true);
+  applyEnabled(initialEnabled);
 
   nextBtn.addEventListener("click", () => {
-    if (!canNext) return;
+    if (nextBtn.disabled) return;
+    if (liveState && !liveState.ready) return; // extra guard
 
     const rt = performance.now() - (_pageStartT || performance.now());
+
     if (liveState && liveState.chosen) {
       saveBuilderSelection(color, liveState, rt);
     } else {
@@ -569,7 +685,7 @@ function builderNavRow(color, card, overlay, canNext, liveState = null) {
   });
 
   row.appendChild(nextBtn);
-  return row;
+  return { row, nextBtn, setEnabled: applyEnabled };
 }
 
 
@@ -844,9 +960,10 @@ function builderNavRow(color, card, overlay, canNext, liveState = null) {
 
     const lab = document.createElement("div");
     lab.textContent = label || "Slider";
-    lab.style.fontSize = "13px";
-    lab.style.fontWeight = "700";
+    lab.style.fontSize = "14px";
+    lab.style.fontWeight = "900";
     lab.style.color = THEME.text;
+
 
     const right = document.createElement("div");
 
