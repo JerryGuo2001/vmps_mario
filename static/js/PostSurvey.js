@@ -152,12 +152,12 @@
       })
     );
 
-    // Q4: color ranking (drag-and-drop)
+    // Q4: color ranking (drag tiles into rank slots)
     form.appendChild(
       makeColorRankingQuestion({
         name: "color_rank",
         label:
-          "4) Rank the mushroom colors from MOST rewarding (top) to LEAST rewarding (bottom). Drag to reorder.",
+          "4) Rank the mushroom colors from MOST rewarding (highest value) to LEAST rewarding (lowest value).",
         colors: RANK_COLORS
       })
     );
@@ -269,7 +269,6 @@
       overlay.style.overflowX = "hidden";
       overlay.style.webkitOverflowScrolling = "touch";
 
-      // Optional: small inner padding already handled in outer wrapper
       document.body.appendChild(overlay);
     }
     return overlay;
@@ -417,151 +416,286 @@
     return section;
   }
 
+  // -------------------- NEW Q4: Drag tiles into rank slots --------------------
+
   function makeColorRankingQuestion({ name, label, colors }) {
     const section = makeSectionCard(label);
 
-    const hint = document.createElement("div");
-    hint.textContent = "Top = most rewarding. Bottom = least rewarding.";
-    hint.style.fontSize = "12px";
-    hint.style.color = THEME.muted;
-    hint.style.marginBottom = "10px";
-    section.appendChild(hint);
+    // NEW: instruction sentence (your request)
+    const instruction = document.createElement("div");
+    instruction.textContent =
+      "Drag the color options into the ranking slots and order them from highest to lowest value (1 = highest, 8 = lowest).";
+    instruction.style.fontSize = "13px";
+    instruction.style.color = THEME.muted;
+    instruction.style.marginBottom = "10px";
+    section.appendChild(instruction);
 
-    const list = document.createElement("ul");
-    list.id = `${name}_list`;
-    list.dataset.field = name;
-    list.style.listStyle = "none";
-    list.style.padding = "0";
-    list.style.margin = "0";
-    list.style.border = "1px solid #E7DEBF";
-    list.style.borderRadius = "14px";
-    list.style.overflow = "hidden";
-    list.style.background = "#FFFFFF";
+    const wrap = document.createElement("div");
+    wrap.style.display = "grid";
+    wrap.style.gridTemplateColumns = "1fr 1.2fr";
+    wrap.style.gap = "14px";
+    wrap.style.alignItems = "start";
+    wrap.style.maxWidth = "100%";
+    wrap.style.boxSizing = "border-box";
+    section.appendChild(wrap);
 
-    colors.forEach((c) => {
-      const li = document.createElement("li");
-      li.draggable = true;
-      li.dataset.color = c.name;
+    // Bank
+    const bankCard = document.createElement("div");
+    bankCard.style.border = "1px solid #E7DEBF";
+    bankCard.style.borderRadius = "14px";
+    bankCard.style.background = "#FFFFFF";
+    bankCard.style.padding = "12px";
+    bankCard.style.boxSizing = "border-box";
 
-      li.style.display = "flex";
-      li.style.alignItems = "center";
-      li.style.gap = "12px";
-      li.style.padding = "12px 14px";
-      li.style.borderBottom = "1px solid #F2ECD5";
-      li.style.background = "#FFFFFF";
-      li.style.cursor = "grab";
+    const bankTitle = document.createElement("div");
+    bankTitle.textContent = "Available colors";
+    bankTitle.style.fontWeight = "700";
+    bankTitle.style.fontSize = "13px";
+    bankTitle.style.marginBottom = "10px";
+    bankCard.appendChild(bankTitle);
 
-      li.addEventListener("mouseenter", () => (li.style.background = "#FFFCF1"));
-      li.addEventListener("mouseleave", () => (li.style.background = "#FFFFFF"));
+    const bank = document.createElement("div");
+    bank.id = `${name}_bank`; // e.g., color_rank_bank
+    bank.dataset.field = name;
+    bank.style.display = "flex";
+    bank.style.flexWrap = "wrap";
+    bank.style.gap = "10px";
+    bank.style.minHeight = "56px";
+    bank.style.padding = "6px";
+    bank.style.borderRadius = "12px";
+    bank.style.background = "#FFFCF1";
+    bank.style.border = "1px dashed #E7DEBF";
+    bankCard.appendChild(bank);
 
-      const handle = document.createElement("span");
-      handle.textContent = "≡";
-      handle.style.fontSize = "18px";
-      handle.style.opacity = "0.6";
-      handle.style.userSelect = "none";
+    wrap.appendChild(bankCard);
 
-      const swatch = document.createElement("span");
-      swatch.style.width = "18px";
-      swatch.style.height = "18px";
-      swatch.style.borderRadius = "5px";
-      swatch.style.display = "inline-block";
-      swatch.style.background = c.hex;
-      swatch.style.border = "1px solid #999";
-      if (c.name === "white") swatch.style.border = "1px solid #555";
+    // Slots
+    const slotsCard = document.createElement("div");
+    slotsCard.style.border = "1px solid #E7DEBF";
+    slotsCard.style.borderRadius = "14px";
+    slotsCard.style.background = "#FFFFFF";
+    slotsCard.style.padding = "12px";
+    slotsCard.style.boxSizing = "border-box";
 
-      const text = document.createElement("span");
-      text.textContent = c.name;
-      text.style.fontSize = "14px";
-      text.style.fontWeight = "600";
+    const slotsTitle = document.createElement("div");
+    slotsTitle.textContent = "Ranking slots";
+    slotsTitle.style.fontWeight = "700";
+    slotsTitle.style.fontSize = "13px";
+    slotsTitle.style.marginBottom = "10px";
+    slotsCard.appendChild(slotsTitle);
 
-      const spacer = document.createElement("span");
-      spacer.style.flex = "1";
+    const slots = document.createElement("div");
+    slots.id = `${name}_slots`; // e.g., color_rank_slots
+    slots.style.display = "flex";
+    slots.style.flexDirection = "column";
+    slots.style.gap = "10px";
+    slotsCard.appendChild(slots);
 
-      const rankHint = document.createElement("span");
-      rankHint.textContent = "drag";
-      rankHint.style.fontSize = "12px";
-      rankHint.style.color = THEME.muted;
-      rankHint.style.padding = "4px 8px";
-      rankHint.style.border = "1px solid #E7DEBF";
-      rankHint.style.borderRadius = "999px";
-      rankHint.style.background = "#FFFCF1";
+    wrap.appendChild(slotsCard);
 
-      li.appendChild(handle);
-      li.appendChild(swatch);
-      li.appendChild(text);
-      li.appendChild(spacer);
-      li.appendChild(rankHint);
+    // Add tiles to bank
+    colors.forEach((c) => bank.appendChild(makeColorTile(c)));
 
-      list.appendChild(li);
-    });
+    // Create rank slots (1..N)
+    for (let i = 1; i <= colors.length; i++) {
+      const slot = document.createElement("div");
+      slot.className = "rank-slot";
+      slot.dataset.rank = String(i);
 
-    const last = list.lastElementChild;
-    if (last) last.style.borderBottom = "none";
+      slot.style.display = "grid";
+      slot.style.gridTemplateColumns = "90px 1fr";
+      slot.style.alignItems = "center";
+      slot.style.gap = "10px";
+      slot.style.padding = "10px";
+      slot.style.borderRadius = "12px";
+      slot.style.background = "#FFFCF1";
+      slot.style.border = "1px dashed #E7DEBF";
 
-    attachSortableList(list);
+      const leftLabel = document.createElement("div");
+      leftLabel.textContent =
+        i === 1 ? "1 (highest)" : (i === colors.length ? `${i} (lowest)` : String(i));
+      leftLabel.style.fontSize = "12px";
+      leftLabel.style.fontWeight = "700";
+      leftLabel.style.color = THEME.muted;
 
-    section.appendChild(list);
+      const drop = document.createElement("div");
+      drop.className = "rank-drop";
+      drop.style.minHeight = "40px";
+      drop.style.display = "flex";
+      drop.style.alignItems = "center";
+      drop.style.gap = "10px";
+
+      const placeholder = document.createElement("div");
+      placeholder.className = "rank-placeholder";
+      placeholder.textContent = "Drop a color here";
+      placeholder.style.fontSize = "12px";
+      placeholder.style.color = THEME.muted;
+      placeholder.style.opacity = "0.8";
+
+      drop.appendChild(placeholder);
+
+      slot.appendChild(leftLabel);
+      slot.appendChild(drop);
+      slots.appendChild(slot);
+    }
+
+    // Enable drag interactions
+    attachDragToRank(bank, slots);
+
+    // Simple responsive stacking for narrow widths
+    // (safe: only affects this UI block)
+    wrap.style.gridAutoFlow = "row";
+    if (window.matchMedia && window.matchMedia("(max-width: 720px)").matches) {
+      wrap.style.gridTemplateColumns = "1fr";
+    }
+
     return section;
   }
 
-  function attachSortableList(listEl) {
-    let draggingEl = null;
+  function makeColorTile(c) {
+    const tile = document.createElement("div");
+    tile.className = "rank-item";
+    tile.draggable = true;
+    tile.dataset.color = c.name;
 
-    listEl.addEventListener("dragstart", (e) => {
-      const li = e.target.closest("li");
-      if (!li) return;
-      draggingEl = li;
+    tile.style.display = "inline-flex";
+    tile.style.alignItems = "center";
+    tile.style.gap = "10px";
+    tile.style.padding = "10px 12px";
+    tile.style.border = "1px solid #E7DEBF";
+    tile.style.borderRadius = "999px";
+    tile.style.background = "#FFFFFF";
+    tile.style.cursor = "grab";
+    tile.style.userSelect = "none";
+    tile.style.boxShadow = "0 2px 10px rgba(0,0,0,0.06)";
 
-      li.style.opacity = "0.6";
-      li.style.cursor = "grabbing";
-      li.style.background = "#FFF6D8";
-      li.style.boxShadow = "0 10px 22px rgba(0,0,0,0.10)";
+    tile.addEventListener("mouseenter", () => (tile.style.background = "#FFFCF1"));
+    tile.addEventListener("mouseleave", () => (tile.style.background = "#FFFFFF"));
+
+    const swatch = document.createElement("span");
+    swatch.style.width = "16px";
+    swatch.style.height = "16px";
+    swatch.style.borderRadius = "5px";
+    swatch.style.display = "inline-block";
+    swatch.style.background = c.hex;
+    swatch.style.border = "1px solid #999";
+    if (c.name === "white") swatch.style.border = "1px solid #555";
+
+    const text = document.createElement("span");
+    text.textContent = c.name;
+    text.style.fontSize = "13px";
+    text.style.fontWeight = "700";
+    text.style.color = THEME.text;
+
+    tile.appendChild(swatch);
+    tile.appendChild(text);
+
+    return tile;
+  }
+
+  function attachDragToRank(bankEl, slotsEl) {
+    let draggingItem = null;
+    let dragSource = null;
+
+    function setDraggingStyles(on) {
+      if (!draggingItem) return;
+      draggingItem.style.opacity = on ? "0.65" : "1";
+      draggingItem.style.cursor = on ? "grabbing" : "grab";
+      draggingItem.style.transform = on ? "scale(0.99)" : "scale(1)";
+    }
+
+    function normalizeDrop(dropEl) {
+      const hasItem = !!dropEl.querySelector(".rank-item");
+      const placeholder = dropEl.querySelector(".rank-placeholder");
+      if (hasItem && placeholder) placeholder.remove();
+      if (!hasItem && !placeholder) {
+        const ph = document.createElement("div");
+        ph.className = "rank-placeholder";
+        ph.textContent = "Drop a color here";
+        ph.style.fontSize = "12px";
+        ph.style.color = THEME.muted;
+        ph.style.opacity = "0.8";
+        dropEl.appendChild(ph);
+      }
+    }
+
+    function onDragStart(e) {
+      const item = e.target.closest(".rank-item");
+      if (!item) return;
+
+      draggingItem = item;
+      dragSource = item.parentElement;
+
+      setDraggingStyles(true);
 
       e.dataTransfer.effectAllowed = "move";
-      e.dataTransfer.setData("text/plain", li.dataset.color || "");
-    });
+      e.dataTransfer.setData("text/plain", item.dataset.color || "");
+    }
 
-    listEl.addEventListener("dragend", () => {
-      if (draggingEl) {
-        draggingEl.style.opacity = "1";
-        draggingEl.style.cursor = "grab";
-        draggingEl.style.background = "#FFFFFF";
-        draggingEl.style.boxShadow = "none";
-      }
-      draggingEl = null;
+    function onDragEnd() {
+      setDraggingStyles(false);
+      draggingItem = null;
+      dragSource = null;
 
-      [...listEl.children].forEach((child, idx, arr) => {
-        child.style.borderBottom = idx === arr.length - 1 ? "none" : "1px solid #F2ECD5";
-      });
-    });
+      // Normalize placeholders
+      slotsEl.querySelectorAll(".rank-drop").forEach(normalizeDrop);
+    }
 
-    listEl.addEventListener("dragover", (e) => {
+    // Delegate drag events from bank + slots
+    bankEl.addEventListener("dragstart", onDragStart);
+    slotsEl.addEventListener("dragstart", onDragStart);
+    bankEl.addEventListener("dragend", onDragEnd);
+    slotsEl.addEventListener("dragend", onDragEnd);
+
+    // Allow drop
+    bankEl.addEventListener("dragover", (e) => e.preventDefault());
+    slotsEl.addEventListener("dragover", (e) => e.preventDefault());
+
+    // Drop into a slot
+    slotsEl.addEventListener("drop", (e) => {
       e.preventDefault();
-      const afterEl = getDragAfterElement(listEl, e.clientY);
-      const li = draggingEl;
-      if (!li) return;
+      if (!draggingItem) return;
 
-      if (afterEl == null) {
-        listEl.appendChild(li);
-      } else if (afterEl !== li) {
-        listEl.insertBefore(li, afterEl);
-      }
-    });
+      const slot = e.target.closest(".rank-slot");
+      if (!slot) return;
 
-    function getDragAfterElement(container, y) {
-      const items = [...container.querySelectorAll("li")].filter((el) => el !== draggingEl);
+      const drop = slot.querySelector(".rank-drop");
+      if (!drop) return;
 
-      let closest = { offset: Number.NEGATIVE_INFINITY, element: null };
-      for (const el of items) {
-        const box = el.getBoundingClientRect();
-        const offset = y - box.top - box.height / 2;
-        if (offset < 0 && offset > closest.offset) {
-          closest = { offset, element: el };
+      const existing = drop.querySelector(".rank-item");
+
+      // If slot already has an item, swap it back to the source container
+      if (existing && existing !== draggingItem) {
+        dragSource.appendChild(existing);
+        if (dragSource.classList && dragSource.classList.contains("rank-drop")) {
+          normalizeDrop(dragSource);
         }
       }
-      return closest.element;
-    }
+
+      // Move dragged item into this drop zone
+      drop.appendChild(draggingItem);
+
+      // Normalize placeholders
+      normalizeDrop(drop);
+      if (dragSource && dragSource.classList && dragSource.classList.contains("rank-drop")) {
+        normalizeDrop(dragSource);
+      }
+    });
+
+    // Drop back into bank
+    bankEl.addEventListener("drop", (e) => {
+      e.preventDefault();
+      if (!draggingItem) return;
+
+      bankEl.appendChild(draggingItem);
+
+      if (dragSource && dragSource.classList && dragSource.classList.contains("rank-drop")) {
+        normalizeDrop(dragSource);
+      }
+    });
   }
+
+  // -------------------- Read form values --------------------
 
   function readSurveyForm(form) {
     const fd = new FormData(form);
@@ -573,16 +707,24 @@
       return { ok: false, msg: "Please complete all required fields.", data: null };
     }
 
-    const list = document.getElementById("color_rank_list");
-    if (!list) return { ok: false, msg: "Internal error: color ranking list not found.", data: null };
+    // NEW: read ranked order from the slots (1..8)
+    const slots = document.getElementById("color_rank_slots");
+    if (!slots) return { ok: false, msg: "Internal error: ranking slots not found.", data: null };
 
-    const ranked = [...list.querySelectorAll("li")].map((li) => li.dataset.color).filter(Boolean);
+    const ranked = [...slots.querySelectorAll(".rank-slot")].map((slot) => {
+      const item = slot.querySelector(".rank-drop .rank-item");
+      return item ? item.dataset.color : null;
+    });
+
+    if (ranked.some((x) => !x)) {
+      return { ok: false, msg: "Please place all 8 colors into the ranking slots.", data: null };
+    }
 
     const expected = new Set(RANK_COLORS.map((c) => c.name));
     const rankedSet = new Set(ranked);
 
     if (ranked.length !== expected.size || rankedSet.size !== expected.size) {
-      return { ok: false, msg: "Please ensure all 8 colors are ranked.", data: null };
+      return { ok: false, msg: "Please ensure all 8 colors are ranked exactly once.", data: null };
     }
 
     const data = {
