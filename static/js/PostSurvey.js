@@ -415,12 +415,6 @@ function renderBuilderPage(color, card, overlay) {
   prevCard.style.boxSizing = "border-box";
   grid.appendChild(prevCard);
 
-  const prevTitle = document.createElement("div");
-  prevTitle.textContent = "Closest available mushroom (preview)";
-  prevTitle.style.fontWeight = "800";
-  prevTitle.style.fontSize = "13px";
-  prevTitle.style.marginBottom = "10px";
-  prevCard.appendChild(prevTitle);
 
   const previewPlaceholder = document.createElement("div");
   previewPlaceholder.style.padding = "14px";
@@ -463,12 +457,6 @@ function renderBuilderPage(color, card, overlay) {
   ctrlCard.style.boxSizing = "border-box";
   grid.appendChild(ctrlCard);
 
-  const ctrlTitle = document.createElement("div");
-  ctrlTitle.textContent = "Choose dimensions (percent sliders)";
-  ctrlTitle.style.fontWeight = "800";
-  ctrlTitle.style.fontSize = "13px";
-  ctrlTitle.style.marginBottom = "10px";
-  ctrlCard.appendChild(ctrlTitle);
 
   // Restore prior selection if revisit (safe)
   const prior = _builderData[color] || null;
