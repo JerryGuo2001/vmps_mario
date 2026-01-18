@@ -360,7 +360,7 @@
 
     if (isBuilder) {
       const color = BUILDER_COLORS[_pageIndex];
-      sub.textContent = `Builder (Page ${_pageIndex + 1}/8): Create the highest-value ${color.toUpperCase()} mushroom`;
+      sub.textContent = `Page ${_pageIndex + 1}/8: ${color.toUpperCase()} mushroom`;
       root.appendChild(renderBuilderPage(color, card, overlay));
     } else {
       sub.textContent = "Final survey: please answer the following questions.";
@@ -377,43 +377,8 @@ function renderBuilderPage(color, card, overlay) {
   wrap.style.gridTemplateColumns = "1fr";
   wrap.style.gap = "14px";
 
-  // Strong, clear instruction banner
-  const banner = document.createElement("div");
-  banner.style.padding = "14px 14px";
-  banner.style.borderRadius = "14px";
-  banner.style.border = "1px solid #E7DEBF";
-  banner.style.background = "#FFF6D8";
-  banner.style.color = THEME.text;
+  const section = makeSectionCard(`${color.toUpperCase()} mushroom`);
 
-  const bannerTitle = document.createElement("div");
-  bannerTitle.textContent = `Task: Build the best ${color.toUpperCase()} mushroom`;
-  bannerTitle.style.fontSize = "18px";
-  bannerTitle.style.fontWeight = "900";
-  bannerTitle.style.marginBottom = "6px";
-
-  const bannerText = document.createElement("div");
-  bannerText.style.fontSize = "14px";
-  bannerText.style.fontWeight = "600";
-  bannerText.style.lineHeight = "1.35";
-  bannerText.innerHTML = [
-    "1) Click or drag <b>both</b> sliders to begin (stem width and cap roundness).",
-    "2) The preview appears only after you interact with both sliders.",
-    "3) Use the sliders (shown in <b>%</b>) to select your ideal mushroom, then click <b>Next</b>."
-  ].join("<br>");
-
-  banner.appendChild(bannerTitle);
-  banner.appendChild(bannerText);
-  wrap.appendChild(banner);
-
-  const section = makeSectionCard(`Mushroom Builder: ${color.toUpperCase()}`);
-
-  const info = document.createElement("div");
-  info.style.fontSize = "13px";
-  info.style.fontWeight = "650";
-  info.style.color = THEME.muted;
-  info.textContent =
-    "Sliders are shown in percentages (0–100%). Internally, we map them to the catalog range for this color to find the closest available stimulus.";
-  section.appendChild(info);
 
   const pool = _catalogIndex?.byColor?.[color] || [];
   const rng = _catalogIndex?.range?.[color] || null;
@@ -467,7 +432,8 @@ function renderBuilderPage(color, card, overlay) {
   previewPlaceholder.style.fontWeight = "650";
   previewPlaceholder.style.lineHeight = "1.35";
   previewPlaceholder.textContent =
-    "Preview is hidden until you interact with BOTH sliders. Click/drag the stem slider and the cap slider to begin.";
+    "Move both sliders to unlock the preview and Next.";
+
   prevCard.appendChild(previewPlaceholder);
 
   const img = document.createElement("img");
@@ -577,9 +543,7 @@ function renderBuilderPage(color, card, overlay) {
     live.sliderStemPct = sPct;
     live.sliderCapPct = cPct;
 
-    // Requirement #2: show PERCENT only (no real-value display)
-    stemSlider.value.textContent = `${sPct}% selected`;
-    capSlider.value.textContent = `${cPct}% selected`;
+
 
     // Still compute mapped values internally for nearest lookup
     const wantStem = pctToValue(sPct, rng.stemMin, rng.stemMax);
@@ -595,11 +559,12 @@ function renderBuilderPage(color, card, overlay) {
 
     if (chosen) {
       img.src = encodeSrc(chosen.filename);
-      meta.textContent = `Preview unlocked. Closest stimulus selected from catalog.`;
+      meta.textContent = "";
     } else {
       img.removeAttribute("src");
-      meta.textContent = "No matching stimulus found for this color.";
+      meta.textContent = "";
     }
+
   }
 
   function markTouched(which) {
@@ -621,9 +586,7 @@ function renderBuilderPage(color, card, overlay) {
   // Initial state: locked, no preview
   updateGatingAndUI();
   // Also show initial % values in the UI text
-  stemSlider.value.textContent = `${Number(stemSlider.input.value)}% selected`;
-  capSlider.value.textContent  = `${Number(capSlider.input.value)}% selected`;
-  meta.textContent = "Interact with BOTH sliders to reveal the preview and unlock Next.";
+  meta.textContent = "";
 
   wrap.appendChild(section);
   wrap.appendChild(nav.row);
@@ -980,6 +943,8 @@ function builderNavRow(color, card, overlay, canNext, liveState = null) {
     value.style.fontSize = "12px";
     value.style.color = THEME.muted;
     value.textContent = "";
+    value.style.display = "none"; // hide "% selected" display
+
 
     right.appendChild(input);
     right.appendChild(value);
