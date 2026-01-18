@@ -4,7 +4,6 @@
 //  - Page 9: your existing survey (enjoyment/difficulty/strategy + color rank + room rank)
 // Writes into participantData.postSurvey and participantData.trials, then downloads CSVs.
 
-
 (function () {
   // Public API
   window.startPostSurvey = startPostSurvey;
@@ -50,6 +49,28 @@
     radius: "16px",
     focusShadow: "0 0 0 3px rgba(66, 133, 244, 0.25)"
   };
+
+  // -------------------- Builder page instructions (Pages 1–8) --------------------
+  // Your requested phrasing (templated by color).
+  function getBuilderInstructionText(color) {
+    const c = String(color || "").trim().toUpperCase();
+    return `Design the MOST rewarding ${c} mushroom. Click on both sliders to select the value, then the mushroom will show up.`;
+  }
+
+  function makeInstructionBlock(text) {
+    const box = document.createElement("div");
+    box.style.padding = "12px 14px";
+    box.style.borderRadius = "14px";
+    box.style.border = "1px solid #EFE7C9";
+    box.style.background = "#FFFCF1";
+    box.style.color = THEME.text;
+    box.style.fontSize = "14px";
+    box.style.lineHeight = "1.45";
+    box.style.fontWeight = "650";
+    box.style.marginBottom = "10px";
+    box.textContent = text || "";
+    return box;
+  }
 
   // Store previous overflow styles so we can restore
   const _prev = { htmlOverflow: null, bodyOverflow: null, bodyMinHeight: null, bodyBg: null };
@@ -361,6 +382,10 @@
     if (isBuilder) {
       const color = BUILDER_COLORS[_pageIndex];
       sub.textContent = `Page ${_pageIndex + 1}/8: ${color.toUpperCase()} mushroom`;
+
+      // ✅ Instruction block (Pages 1–8)
+      root.appendChild(makeInstructionBlock(getBuilderInstructionText(color)));
+
       root.appendChild(renderBuilderPage(color, card, overlay));
     } else {
       sub.textContent = "Final survey: please answer the following questions.";
@@ -368,277 +393,266 @@
     }
   }
 
-
   // -------------------- Builder pages (8 pages) --------------------
 
-function renderBuilderPage(color, card, overlay) {
-  const wrap = document.createElement("div");
-  wrap.style.display = "grid";
-  wrap.style.gridTemplateColumns = "1fr";
-  wrap.style.gap = "14px";
+  function renderBuilderPage(color, card, overlay) {
+    const wrap = document.createElement("div");
+    wrap.style.display = "grid";
+    wrap.style.gridTemplateColumns = "1fr";
+    wrap.style.gap = "14px";
 
-  const section = makeSectionCard(`${color.toUpperCase()} mushroom`);
+    const section = makeSectionCard(`${color.toUpperCase()} mushroom`);
 
+    const pool = _catalogIndex?.byColor?.[color] || [];
+    const rng = _catalogIndex?.range?.[color] || null;
 
-  const pool = _catalogIndex?.byColor?.[color] || [];
-  const rng = _catalogIndex?.range?.[color] || null;
+    if (!pool.length || !rng) {
+      section.appendChild(makeErrorBlock(
+        `No catalog rows found for color: ${color}`,
+        "Check that your catalog rows include columns for color/stem/cap/filename and that color names match exactly."
+      ));
+      wrap.appendChild(section);
 
-  if (!pool.length || !rng) {
-    section.appendChild(makeErrorBlock(
-      `No catalog rows found for color: ${color}`,
-      "Check that your catalog rows include columns for color/stem/cap/filename and that color names match exactly."
-    ));
+      const nav = builderNavRow(color, card, overlay, /*canNext*/ false);
+      wrap.appendChild(nav.row);
+      return wrap;
+    }
+
+    // Layout: preview + sliders
+    const grid = document.createElement("div");
+    grid.style.display = "grid";
+    grid.style.gridTemplateColumns = "1fr 1fr";
+    grid.style.gap = "14px";
+    grid.style.alignItems = "start";
+    if (window.matchMedia && window.matchMedia("(max-width: 780px)").matches) {
+      grid.style.gridTemplateColumns = "1fr";
+    }
+    section.appendChild(grid);
+
+    // Preview card
+    const prevCard = document.createElement("div");
+    prevCard.style.border = "1px solid #E7DEBF";
+    prevCard.style.borderRadius = "14px";
+    prevCard.style.background = "#FFFFFF";
+    prevCard.style.padding = "12px";
+    prevCard.style.boxSizing = "border-box";
+    grid.appendChild(prevCard);
+
+    const previewPlaceholder = document.createElement("div");
+    previewPlaceholder.style.padding = "14px";
+    previewPlaceholder.style.borderRadius = "14px";
+    previewPlaceholder.style.border = "1px dashed #E7DEBF";
+    previewPlaceholder.style.background = "#FFFCF1";
+    previewPlaceholder.style.color = THEME.muted;
+    previewPlaceholder.style.fontSize = "13px";
+    previewPlaceholder.style.fontWeight = "650";
+    previewPlaceholder.style.lineHeight = "1.35";
+    previewPlaceholder.textContent =
+      "Move both sliders to unlock the preview and Next.";
+    prevCard.appendChild(previewPlaceholder);
+
+    const img = document.createElement("img");
+    img.style.width = "220px";
+    img.style.height = "220px";
+    img.style.objectFit = "contain";
+    img.style.borderRadius = "14px";
+    img.style.border = "1px solid #E7DEBF";
+    img.style.background = "#FFFCF1";
+    img.alt = `${color} preview`;
+    img.style.display = "none"; // IMPORTANT: hidden until both sliders interacted
+    prevCard.appendChild(img);
+
+    const meta = document.createElement("div");
+    meta.style.marginTop = "10px";
+    meta.style.fontSize = "13px";
+    meta.style.color = THEME.muted;
+    meta.textContent = "";
+    prevCard.appendChild(meta);
+
+    // Controls card
+    const ctrlCard = document.createElement("div");
+    ctrlCard.style.border = "1px solid #E7DEBF";
+    ctrlCard.style.borderRadius = "14px";
+    ctrlCard.style.background = "#FFFFFF";
+    ctrlCard.style.padding = "12px";
+    ctrlCard.style.boxSizing = "border-box";
+    grid.appendChild(ctrlCard);
+
+    // Restore prior selection if revisit (safe)
+    const prior = _builderData[color] || null;
+
+    const stemSlider = makeRangeControl({
+      label: "Stem width (%)",
+      min: 0,
+      max: 100,
+      step: 1,
+      initial: prior ? Number(prior.slider_stem_pct) : 50
+    });
+
+    const capSlider = makeRangeControl({
+      label: "Cap roundness (%)",
+      min: 0,
+      max: 100,
+      step: 1,
+      initial: prior ? Number(prior.slider_cap_pct) : 50
+    });
+
+    ctrlCard.appendChild(stemSlider.root);
+    ctrlCard.appendChild(capSlider.root);
+
+    // Live state
+    const live = {
+      color,
+      wantStem: null,
+      wantCap: null,
+      chosen: null,
+      sliderStemPct: prior ? Number(prior.slider_stem_pct) : 50,
+      sliderCapPct: prior ? Number(prior.slider_cap_pct) : 50,
+
+      // Gatekeeping:
+      touchedStem: false,
+      touchedCap: false,
+      ready: false
+    };
+
+    // Navigation row: start disabled until BOTH sliders touched
+    const nav = builderNavRow(color, card, overlay, /*canNext*/ true, live);
+
+    function pctToValue(pct, vMin, vMax) {
+      if (!Number.isFinite(vMin) || !Number.isFinite(vMax)) return NaN;
+      if (vMax === vMin) return vMin;
+      const t = Math.max(0, Math.min(1, pct / 100));
+      return vMin + (vMax - vMin) * t;
+    }
+
+    function updateGatingAndUI() {
+      live.ready = !!(live.touchedStem && live.touchedCap);
+      nav.setEnabled(live.ready);
+
+      if (!live.ready) {
+        // Hide preview entirely
+        previewPlaceholder.style.display = "block";
+        img.style.display = "none";
+        img.removeAttribute("src");
+        meta.textContent = "Interact with BOTH sliders to reveal the preview and unlock Next.";
+        live.chosen = null;
+        return;
+      }
+
+      // Show preview
+      previewPlaceholder.style.display = "none";
+      img.style.display = "block";
+    }
+
+    function refresh() {
+      const sPct = Number(stemSlider.input.value);
+      const cPct = Number(capSlider.input.value);
+
+      live.sliderStemPct = sPct;
+      live.sliderCapPct = cPct;
+
+      // Still compute mapped values internally for nearest lookup
+      const wantStem = pctToValue(sPct, rng.stemMin, rng.stemMax);
+      const wantCap  = pctToValue(cPct, rng.capMin,  rng.capMax);
+      live.wantStem = wantStem;
+      live.wantCap  = wantCap;
+
+      updateGatingAndUI();
+      if (!live.ready) return;
+
+      const chosen = nearestRowFor(color, wantStem, wantCap, _catalogIndex);
+      live.chosen = chosen;
+
+      if (chosen) {
+        img.src = encodeSrc(chosen.filename);
+        meta.textContent = "";
+      } else {
+        img.removeAttribute("src");
+        meta.textContent = "";
+      }
+    }
+
+    function markTouched(which) {
+      if (which === "stem") live.touchedStem = true;
+      if (which === "cap")  live.touchedCap = true;
+      refresh();
+    }
+
+    // Mark “interaction” even if the value doesn't change
+    ["pointerdown", "mousedown", "touchstart", "keydown"].forEach((evt) => {
+      stemSlider.input.addEventListener(evt, () => markTouched("stem"), { passive: true });
+      capSlider.input.addEventListener(evt, () => markTouched("cap"), { passive: true });
+    });
+
+    // Normal live updates
+    stemSlider.input.addEventListener("input", refresh);
+    capSlider.input.addEventListener("input", refresh);
+
+    // Initial state: locked, no preview
+    updateGatingAndUI();
+    meta.textContent = "";
+
     wrap.appendChild(section);
-
-    const nav = builderNavRow(color, card, overlay, /*canNext*/ false);
     wrap.appendChild(nav.row);
     return wrap;
   }
 
-  // Layout: preview + sliders
-  const grid = document.createElement("div");
-  grid.style.display = "grid";
-  grid.style.gridTemplateColumns = "1fr 1fr";
-  grid.style.gap = "14px";
-  grid.style.alignItems = "start";
-  if (window.matchMedia && window.matchMedia("(max-width: 780px)").matches) {
-    grid.style.gridTemplateColumns = "1fr";
-  }
-  section.appendChild(grid);
+  function builderNavRow(color, card, overlay, canNext, liveState = null) {
+    const row = document.createElement("div");
+    row.style.display = "flex";
+    row.style.justifyContent = "flex-end";
+    row.style.gap = "10px";
+    row.style.marginTop = "6px";
 
-  // Preview card
-  const prevCard = document.createElement("div");
-  prevCard.style.border = "1px solid #E7DEBF";
-  prevCard.style.borderRadius = "14px";
-  prevCard.style.background = "#FFFFFF";
-  prevCard.style.padding = "12px";
-  prevCard.style.boxSizing = "border-box";
-  grid.appendChild(prevCard);
+    const nextBtn = document.createElement("button");
+    nextBtn.type = "button";
+    nextBtn.textContent = (_pageIndex === 7) ? "Next: Survey" : "Next";
+    nextBtn.style.border = "none";
+    nextBtn.style.borderRadius = "12px";
+    nextBtn.style.padding = "12px 18px";
+    nextBtn.style.fontSize = "16px";
+    nextBtn.style.fontWeight = "700";
 
-
-  const previewPlaceholder = document.createElement("div");
-  previewPlaceholder.style.padding = "14px";
-  previewPlaceholder.style.borderRadius = "14px";
-  previewPlaceholder.style.border = "1px dashed #E7DEBF";
-  previewPlaceholder.style.background = "#FFFCF1";
-  previewPlaceholder.style.color = THEME.muted;
-  previewPlaceholder.style.fontSize = "13px";
-  previewPlaceholder.style.fontWeight = "650";
-  previewPlaceholder.style.lineHeight = "1.35";
-  previewPlaceholder.textContent =
-    "Move both sliders to unlock the preview and Next.";
-
-  prevCard.appendChild(previewPlaceholder);
-
-  const img = document.createElement("img");
-  img.style.width = "220px";
-  img.style.height = "220px";
-  img.style.objectFit = "contain";
-  img.style.borderRadius = "14px";
-  img.style.border = "1px solid #E7DEBF";
-  img.style.background = "#FFFCF1";
-  img.alt = `${color} preview`;
-  img.style.display = "none"; // IMPORTANT: hidden until both sliders interacted
-  prevCard.appendChild(img);
-
-  const meta = document.createElement("div");
-  meta.style.marginTop = "10px";
-  meta.style.fontSize = "13px";
-  meta.style.color = THEME.muted;
-  meta.textContent = "";
-  prevCard.appendChild(meta);
-
-  // Controls card
-  const ctrlCard = document.createElement("div");
-  ctrlCard.style.border = "1px solid #E7DEBF";
-  ctrlCard.style.borderRadius = "14px";
-  ctrlCard.style.background = "#FFFFFF";
-  ctrlCard.style.padding = "12px";
-  ctrlCard.style.boxSizing = "border-box";
-  grid.appendChild(ctrlCard);
-
-
-  // Restore prior selection if revisit (safe)
-  const prior = _builderData[color] || null;
-
-  const stemSlider = makeRangeControl({
-    label: "Stem width (%)",
-    min: 0,
-    max: 100,
-    step: 1,
-    initial: prior ? Number(prior.slider_stem_pct) : 50
-  });
-
-  const capSlider = makeRangeControl({
-    label: "Cap roundness (%)",
-    min: 0,
-    max: 100,
-    step: 1,
-    initial: prior ? Number(prior.slider_cap_pct) : 50
-  });
-
-  ctrlCard.appendChild(stemSlider.root);
-  ctrlCard.appendChild(capSlider.root);
-
-  // Live state
-  const live = {
-    color,
-    wantStem: null,
-    wantCap: null,
-    chosen: null,
-    sliderStemPct: prior ? Number(prior.slider_stem_pct) : 50,
-    sliderCapPct: prior ? Number(prior.slider_cap_pct) : 50,
-
-    // Gatekeeping:
-    touchedStem: false,
-    touchedCap: false,
-    ready: false
-  };
-
-  // Navigation row: start disabled until BOTH sliders touched
-  const nav = builderNavRow(color, card, overlay, /*canNext*/ true, live);
-
-  function pctToValue(pct, vMin, vMax) {
-    if (!Number.isFinite(vMin) || !Number.isFinite(vMax)) return NaN;
-    if (vMax === vMin) return vMin;
-    const t = Math.max(0, Math.min(1, pct / 100));
-    return vMin + (vMax - vMin) * t;
-  }
-
-  function updateGatingAndUI() {
-    live.ready = !!(live.touchedStem && live.touchedCap);
-    nav.setEnabled(live.ready);
-
-    if (!live.ready) {
-      // Hide preview entirely
-      previewPlaceholder.style.display = "block";
-      img.style.display = "none";
-      img.removeAttribute("src");
-      meta.textContent = "Interact with BOTH sliders to reveal the preview and unlock Next.";
-      live.chosen = null;
-      return;
+    function applyEnabled(enabled) {
+      const on = !!enabled && !!canNext;
+      nextBtn.disabled = !on;
+      nextBtn.style.cursor = on ? "pointer" : "not-allowed";
+      nextBtn.style.background = on ? "#1F6FEB" : "#9AA4B2";
+      nextBtn.style.color = "#FFFFFF";
+      nextBtn.style.boxShadow = on ? "0 6px 16px rgba(31, 111, 235, 0.25)" : "none";
+      nextBtn.style.opacity = on ? "1" : "0.85";
     }
 
-    // Show preview
-    previewPlaceholder.style.display = "none";
-    img.style.display = "block";
+    // Initial state: if builder page, default locked until liveState.ready
+    const initialEnabled = (liveState ? !!liveState.ready : true);
+    applyEnabled(initialEnabled);
+
+    nextBtn.addEventListener("click", () => {
+      if (nextBtn.disabled) return;
+      if (liveState && !liveState.ready) return; // extra guard
+
+      const rt = performance.now() - (_pageStartT || performance.now());
+
+      if (liveState && liveState.chosen) {
+        saveBuilderSelection(color, liveState, rt);
+      } else {
+        saveBuilderSelection(color, {
+          color,
+          sliderStemPct: Number(liveState?.sliderStemPct ?? 50),
+          sliderCapPct: Number(liveState?.sliderCapPct ?? 50),
+          wantStem: Number(liveState?.wantStem ?? NaN),
+          wantCap: Number(liveState?.wantCap ?? NaN),
+          chosen: null
+        }, rt);
+      }
+
+      _pageIndex = Math.min(_pageIndex + 1, TOTAL_PAGES - 1);
+      renderPage(card, overlay);
+    });
+
+    row.appendChild(nextBtn);
+    return { row, nextBtn, setEnabled: applyEnabled };
   }
-
-  function refresh() {
-    const sPct = Number(stemSlider.input.value);
-    const cPct = Number(capSlider.input.value);
-
-    live.sliderStemPct = sPct;
-    live.sliderCapPct = cPct;
-
-
-
-    // Still compute mapped values internally for nearest lookup
-    const wantStem = pctToValue(sPct, rng.stemMin, rng.stemMax);
-    const wantCap  = pctToValue(cPct, rng.capMin,  rng.capMax);
-    live.wantStem = wantStem;
-    live.wantCap  = wantCap;
-
-    updateGatingAndUI();
-    if (!live.ready) return;
-
-    const chosen = nearestRowFor(color, wantStem, wantCap, _catalogIndex);
-    live.chosen = chosen;
-
-    if (chosen) {
-      img.src = encodeSrc(chosen.filename);
-      meta.textContent = "";
-    } else {
-      img.removeAttribute("src");
-      meta.textContent = "";
-    }
-
-  }
-
-  function markTouched(which) {
-    if (which === "stem") live.touchedStem = true;
-    if (which === "cap")  live.touchedCap  = true;
-    refresh();
-  }
-
-  // Mark “interaction” even if the value doesn't change
-  ["pointerdown", "mousedown", "touchstart", "keydown"].forEach((evt) => {
-    stemSlider.input.addEventListener(evt, () => markTouched("stem"), { passive: true });
-    capSlider.input.addEventListener(evt, () => markTouched("cap"), { passive: true });
-  });
-
-  // Normal live updates
-  stemSlider.input.addEventListener("input", refresh);
-  capSlider.input.addEventListener("input", refresh);
-
-  // Initial state: locked, no preview
-  updateGatingAndUI();
-  // Also show initial % values in the UI text
-  meta.textContent = "";
-
-  wrap.appendChild(section);
-  wrap.appendChild(nav.row);
-  return wrap;
-}
-
-
-function builderNavRow(color, card, overlay, canNext, liveState = null) {
-  const row = document.createElement("div");
-  row.style.display = "flex";
-  row.style.justifyContent = "flex-end";
-  row.style.gap = "10px";
-  row.style.marginTop = "6px";
-
-  const nextBtn = document.createElement("button");
-  nextBtn.type = "button";
-  nextBtn.textContent = (_pageIndex === 7) ? "Next: Survey" : "Next";
-  nextBtn.style.border = "none";
-  nextBtn.style.borderRadius = "12px";
-  nextBtn.style.padding = "12px 18px";
-  nextBtn.style.fontSize = "16px";
-  nextBtn.style.fontWeight = "700";
-
-  function applyEnabled(enabled) {
-    const on = !!enabled && !!canNext;
-    nextBtn.disabled = !on;
-    nextBtn.style.cursor = on ? "pointer" : "not-allowed";
-    nextBtn.style.background = on ? "#1F6FEB" : "#9AA4B2";
-    nextBtn.style.color = "#FFFFFF";
-    nextBtn.style.boxShadow = on ? "0 6px 16px rgba(31, 111, 235, 0.25)" : "none";
-    nextBtn.style.opacity = on ? "1" : "0.85";
-  }
-
-  // Initial state: if builder page, default locked until liveState.ready
-  const initialEnabled = (liveState ? !!liveState.ready : true);
-  applyEnabled(initialEnabled);
-
-  nextBtn.addEventListener("click", () => {
-    if (nextBtn.disabled) return;
-    if (liveState && !liveState.ready) return; // extra guard
-
-    const rt = performance.now() - (_pageStartT || performance.now());
-
-    if (liveState && liveState.chosen) {
-      saveBuilderSelection(color, liveState, rt);
-    } else {
-      saveBuilderSelection(color, {
-        color,
-        sliderStemPct: Number(liveState?.sliderStemPct ?? 50),
-        sliderCapPct: Number(liveState?.sliderCapPct ?? 50),
-        wantStem: Number(liveState?.wantStem ?? NaN),
-        wantCap: Number(liveState?.wantCap ?? NaN),
-        chosen: null
-      }, rt);
-    }
-
-    _pageIndex = Math.min(_pageIndex + 1, TOTAL_PAGES - 1);
-    renderPage(card, overlay);
-  });
-
-  row.appendChild(nextBtn);
-  return { row, nextBtn, setEnabled: applyEnabled };
-}
-
 
   function saveBuilderSelection(color, liveState, rt) {
     const chosen = liveState.chosen;
@@ -915,7 +929,6 @@ function builderNavRow(color, card, overlay, canNext, liveState = null) {
     lab.style.fontWeight = "900";
     lab.style.color = THEME.text;
 
-
     const right = document.createElement("div");
 
     const input = document.createElement("input");
@@ -932,7 +945,6 @@ function builderNavRow(color, card, overlay, canNext, liveState = null) {
     value.style.color = THEME.muted;
     value.textContent = "";
     value.style.display = "none"; // hide "% selected" display
-
 
     right.appendChild(input);
     right.appendChild(value);
