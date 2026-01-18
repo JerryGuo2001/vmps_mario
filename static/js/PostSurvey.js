@@ -527,53 +527,51 @@
     return wrap;
   }
 
-  function builderNavRow(color, card, overlay, canNext, liveState = null) {
-    const row = document.createElement("div");
-    row.style.display = "flex";
-    row.style.justifyContent = "flex-end";
-    row.style.gap = "10px";
-    row.style.marginTop = "6px";
+function builderNavRow(color, card, overlay, canNext, liveState = null) {
+  const row = document.createElement("div");
+  row.style.display = "flex";
+  row.style.justifyContent = "flex-end";
+  row.style.gap = "10px";
+  row.style.marginTop = "6px";
 
-    const nextBtn = document.createElement("button");
-    nextBtn.type = "button";
-    nextBtn.textContent = (_pageIndex === 7) ? "Next: Survey" : "Next";
-    nextBtn.style.border = "none";
-    nextBtn.style.borderRadius = "12px";
-    nextBtn.style.padding = "12px 18px";
-    nextBtn.style.fontSize = "16px";
-    nextBtn.style.fontWeight = "600";
-    nextBtn.style.cursor = canNext ? "pointer" : "not-allowed";
-    nextBtn.style.background = canNext ? "#1F6FEB" : "#9AA4B2";
-    nextBtn.style.color = "#FFFFFF";
-    nextBtn.style.boxShadow = canNext ? "0 6px 16px rgba(31, 111, 235, 0.25)" : "none";
+  const nextBtn = document.createElement("button");
+  nextBtn.type = "button";
+  nextBtn.textContent = (_pageIndex === 7) ? "Next: Survey" : "Next";
+  nextBtn.style.border = "none";
+  nextBtn.style.borderRadius = "12px";
+  nextBtn.style.padding = "12px 18px";
+  nextBtn.style.fontSize = "16px";
+  nextBtn.style.fontWeight = "600";
+  nextBtn.style.cursor = canNext ? "pointer" : "not-allowed";
+  nextBtn.style.background = canNext ? "#1F6FEB" : "#9AA4B2";
+  nextBtn.style.color = "#FFFFFF";
+  nextBtn.style.boxShadow = canNext ? "0 6px 16px rgba(31, 111, 235, 0.25)" : "none";
 
-    nextBtn.addEventListener("click", () => {
-      if (!canNext) return;
+  nextBtn.addEventListener("click", () => {
+    if (!canNext) return;
 
-      // Save builder data + log trial
-      const rt = performance.now() - (_pageStartT || performance.now());
-      if (liveState && liveState.chosen) {
-        saveBuilderSelection(color, liveState, rt);
-      } else {
-        // still store something so page isn't “missing” in the dataset
-        saveBuilderSelection(color, {
-          color,
-          sliderStemPct: Number(liveState?.sliderStemPct ?? 50),
-          sliderCapPct: Number(liveState?.sliderCapPct ?? 50),
-          wantStem: Number(liveState?.wantStem ?? NaN),
-          wantCap: Number(liveState?.wantCap ?? NaN),
-          chosen: null
-        }, rt);
-      }
+    const rt = performance.now() - (_pageStartT || performance.now());
+    if (liveState && liveState.chosen) {
+      saveBuilderSelection(color, liveState, rt);
+    } else {
+      saveBuilderSelection(color, {
+        color,
+        sliderStemPct: Number(liveState?.sliderStemPct ?? 50),
+        sliderCapPct: Number(liveState?.sliderCapPct ?? 50),
+        wantStem: Number(liveState?.wantStem ?? NaN),
+        wantCap: Number(liveState?.wantCap ?? NaN),
+        chosen: null
+      }, rt);
+    }
 
-      // Advance page
-      _pageIndex = Math.min(_pageIndex + 1, TOTAL_PAGES - 1);
-      renderPage(card, overlay);
-    });
+    _pageIndex = Math.min(_pageIndex + 1, TOTAL_PAGES - 1);
+    renderPage(card, overlay);
+  });
 
-    row.appendChild(nextBtn);
-    return row;
-  }
+  row.appendChild(nextBtn);
+  return row;
+}
+
 
   function saveBuilderSelection(color, liveState, rt) {
     const chosen = liveState.chosen;
