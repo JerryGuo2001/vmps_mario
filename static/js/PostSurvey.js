@@ -410,38 +410,45 @@
     return section;
   }
 
-  function makeTextArea({ name, label, placeholder, required }) {
-    const section = makeSectionCard(label);
+function makeTextArea({ name, label, placeholder, required }) {
+  const section = makeSectionCard(label);
 
-    const ta = document.createElement("textarea");
-    ta.name = name;
-    ta.placeholder = placeholder || "";
-    ta.rows = 4;
-    ta.style.width = "100%";
-    ta.style.marginTop = "6px";
-    ta.style.fontSize = "14px";
-    ta.style.padding = "12px";
-    ta.style.borderRadius = "12px";
-    ta.style.border = "1px solid #E7DEBF";
-    ta.style.resize = "vertical";
-    ta.style.background = "#FFFFFF";
-    ta.style.color = THEME.text;
+  const ta = document.createElement("textarea");
+  ta.name = name;
+  ta.placeholder = placeholder || "";
+  ta.rows = 4;
 
-    ta.addEventListener("focus", () => {
-      ta.style.outline = "none";
-      ta.style.boxShadow = THEME.focus;
-      ta.style.borderColor = "#CBBE8C";
-    });
-    ta.addEventListener("blur", () => {
-      ta.style.boxShadow = "none";
-      ta.style.borderColor = "#E7DEBF";
-    });
+  // ✅ keeps textarea fully inside the container
+  ta.style.width = "100%";
+  ta.style.maxWidth = "100%";
+  ta.style.boxSizing = "border-box";
+  ta.style.display = "block";
 
-    if (required) ta.required = true;
+  ta.style.marginTop = "6px";
+  ta.style.fontSize = "14px";
+  ta.style.padding = "12px";
+  ta.style.borderRadius = "12px";
+  ta.style.border = "1px solid #E7DEBF";
+  ta.style.resize = "vertical";
+  ta.style.background = "#FFFFFF";
+  ta.style.color = THEME.text;
 
-    section.appendChild(ta);
-    return section;
-  }
+  ta.addEventListener("focus", () => {
+    ta.style.outline = "none";
+    ta.style.boxShadow = THEME.focus;
+    ta.style.borderColor = "#CBBE8C";
+  });
+  ta.addEventListener("blur", () => {
+    ta.style.boxShadow = "none";
+    ta.style.borderColor = "#E7DEBF";
+  });
+
+  if (required) ta.required = true;
+
+  section.appendChild(ta);
+  return section;
+}
+
 
   // -------------- Generic drag-into-slots ranking question --------------
 
