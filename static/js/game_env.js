@@ -1,8 +1,13 @@
 // ======================= game_env.js =======================
 
 // Global Variables
-let character, gravity, keys, currentCanvas, showPrompt, currentQuestion, totalMushrooms, collectedMushrooms, atRightEdge, change_detect_right, change_detect_left;
-let totalQuestions = 50;
+let character, gravity, keys, currentCanvas, showPrompt, currentQuestion, totalMushrooms, collectedMushrooms, atRightEdge, change_detect_right, change_detect_left,totalQuestions;
+let exploration_debug=true
+if (exploration_debug==true){
+  totalQuestions = 5;
+}else{
+  totalQuestions = 50;
+}
 let atLeftEdge;
 currentQuestion = 1;
 let cameraOffset = 0; // Tracks world movement in Canvas 4
