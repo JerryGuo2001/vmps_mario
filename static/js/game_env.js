@@ -463,6 +463,16 @@ function expMushroomId(objOrId) {
 function markMushroomSeenOnce(mushroomObjOrId, fallbackRoom = null) {
   ensureExplorationIndex();
 
+  const roomHere = expNormalizeRoom(fallbackRoom) || expNormalizeRoom(currentRoom);
+
+  // ✅ Do NOT count sky mushrooms toward exploration progress / clearing
+  if (roomHere === 'sky') {
+    if (typeof mushroomObjOrId === 'object' && mushroomObjOrId) {
+      mushroomObjOrId._seenLogged = true; // still prevent double-logging per spawned object
+    }
+    return;
+  }
+
   const id = expMushroomId(mushroomObjOrId);
   if (!id) return;
 
@@ -477,12 +487,11 @@ function markMushroomSeenOnce(mushroomObjOrId, fallbackRoom = null) {
   const after  = Math.min(expSeen[id], REQUIRED_SEEN_PER_TYPE);
   expTotalSeenCapped += (after - before);
 
-  const roomHere = expNormalizeRoom(fallbackRoom) || expNormalizeRoom(currentRoom);
   checkAndClearRoom(roomHere);
 
-  // NEW: count revealed mushrooms within this room visit (only once per spawned mushroom)
   if (roomHere && roomHere !== 'sky') roomSeenThisVisit += 1;
 }
+
 
 function isExploreComplete() {
   ensureExplorationIndex();
@@ -785,6 +794,17 @@ function getGroundY(xPosition) {
   return canvas.height;
 }
 
+// ================= SKY (RAINBOW) MUSHROOM ONLY =================
+const SKY_RAINBOW_MUSHROOM_SRC   = 'TexturePack/mushroom_pack/sky_mushroom/rainbow_mushroom.png';
+const SKY_RAINBOW_MUSHROOM_VALUE = 2;
+
+// Optional: give it stable attributes so any type-key code won’t produce NA.
+// (These only matter if you ever run expTypeKeyFromRow on it.)
+const SKY_RAINBOW_MUSHROOM_COLOR = 'rainbow';
+const SKY_RAINBOW_STEM_WIDTH     = 8;    // neutral-ish for your thresholds
+const SKY_RAINBOW_CAP_ROUNDNESS  = 1.1;  // neutral-ish for your thresholds
+
+
 async function generateMushroom(count = 5) {
   const plats = groundPlatforms || [];
   if (!plats.length) return [];
@@ -805,12 +825,16 @@ async function generateMushroom(count = 5) {
   let pool;
 
   // -------- SKY ROOM: only positive mushrooms, no color restriction --------
-  if (env === 'sky') {
-    const positivePool = allRows.filter(r => isPositiveValue(r.value));
-    if (!positivePool.length) return [];
-    pool = positivePool;
-    chosenRows = pickRandomSubset(pool, count);
-  } else {
+    if (env === 'sky') {
+      chosenRows = Array.from({ length: count }, () => ({
+        filename:      SKY_RAINBOW_MUSHROOM_SRC,
+        value:         SKY_RAINBOW_MUSHROOM_VALUE,
+        color:         SKY_RAINBOW_MUSHROOM_COLOR,
+        stem_width:    SKY_RAINBOW_STEM_WIDTH,
+        cap_roundness: SKY_RAINBOW_CAP_ROUNDNESS,
+        room:          'sky'
+      }));
+    } else {
     // -------- NON-SKY ROOMS: use ROOM_COLOR_MAP structure --------
     const allowedColors = getAllowedColorsForEnv(envRaw);
     pool = allRows;

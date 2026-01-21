@@ -221,18 +221,33 @@ function _normalizeMush(row) {
   };
 }
 
+function _isSkyCatalogRow(row) {
+  const env = String(row?.room || row?.env || row?.environment || '').trim().toLowerCase();
+  if (env === 'sky') return true;
+
+  const raw = String(row?.filename || row?.imagefilename || row?.image || '').toLowerCase();
+  if (raw.includes('/sky_mushroom/') || raw.includes('\\sky_mushroom\\')) return true;
+  if (raw.includes('rainbow_mushroom.png')) return true;
+
+  return false;
+}
+
 
 // --- Get the full catalog pool (no dependence on prior phases) ---
 function _getCatalogPool() {
   const pool = Array.isArray(window.mushroomCatalogRows) ? window.mushroomCatalogRows : [];
   const out = [];
   for (const r of pool) {
+    // ✅ Hard-exclude sky items from memory sampling
+    if (_isSkyCatalogRow(r)) continue;
+
     const n = _normalizeMush(r);
     if (!n || !n.imagefilename) continue;
     out.push(n);
   }
   return out;
 }
+
 
 // --- Prepare trials from catalog: 72 unique types, try 36 seen + fill with unseen,
 // then randomize pairing so trials can be SS / SU / UU ---
