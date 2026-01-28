@@ -1778,3 +1778,10 @@ function drawHP_canvas4() {
 
 
 // ======================= end game_env.js =======================
+
+// ---- init core globals so PracticeSkyPhase can run before startExplore() ----
+if (typeof keys === "undefined" || !keys) keys = {};
+if (typeof gravity !== "number") gravity = 0.6;
+if (typeof currentCanvas !== "number") currentCanvas = 4; // practice uses canvas 4
+if (!character && typeof createCharacter === "function") character = createCharacter();
+if (character && typeof character.hp !== "number") character.hp = BASE_START_HP;
