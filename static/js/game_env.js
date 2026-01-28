@@ -4,9 +4,9 @@
 let character, gravity, keys, currentCanvas, showPrompt, currentQuestion, totalMushrooms, collectedMushrooms, atRightEdge, change_detect_right, change_detect_left,totalQuestions,totalQuestions_setup;
 let exploration_debug=true
 // turn it off when you don't want practice
-let practice_explore_on_off=false
+let practice_explore_on_off=true
 if (practice_explore_on_off){
-  totalQuestions=2
+  totalQuestions=3
 }
 if (exploration_debug==true){
   totalQuestions_setup = 5;

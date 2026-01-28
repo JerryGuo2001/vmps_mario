@@ -441,8 +441,8 @@ async function initGame() {
     currentQuestion = 1;
     currentCanvas = 4;
   }else{
-    currentQuestion = 1;
-    currentCanvas = 4;
+    currentQuestion = 2;
+    currentCanvas = 1;
   }
 
   /* FREEZE STATE SAFETY */
