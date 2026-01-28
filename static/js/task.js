@@ -334,6 +334,7 @@ function startExplore() {
     initGame();
   });
   }else{
+    currentRoom='sky'
     totalQuestions=totalQuestions_setup
       showPhaseInstructions('explore', () => {
     const e = document.getElementById('explorephase');
