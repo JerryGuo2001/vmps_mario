@@ -435,8 +435,6 @@ async function initGame() {
   ctx = canvas.getContext('2d');
 
   init_position = true;
-  targetFPS = 60;
-  targetTimeStep = 1 / targetFPS;
   lastTime = 0;
   accumulatedTime = 0;
 
@@ -447,6 +445,7 @@ async function initGame() {
   decisionFreezeSnapshot = null;
   wasInDecisionFreeze = false;
   lastDecisionStartTime = null;
+
   character = createCharacter();
   gravity = 0.5;
   keys = {};
