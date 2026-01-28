@@ -324,20 +324,6 @@ function showPhaseInstructions(phaseKey, onDone) {
 
 
 // =================== END NEW: Instruction system ===================
-function startPracticeExplore() {
-  // Hide anything you want hidden here (optional)
-  // e.g., hide OOO UI, etc.
-
-  window.PracticeExplorePhase.start({
-    participantData,          // uses your existing participantData object
-    totalQuestions: 2,        // practice length; change as needed
-    onDone: () => {
-      // When practice ends, continue with REAL exploration
-      startExplore();
-    }
-  });
-}
-
 function startExplore() {
   // Show instructions for the explore phase first, then actually start the phase
   showPhaseInstructions('explore', () => {
