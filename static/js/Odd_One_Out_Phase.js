@@ -308,8 +308,8 @@ function finishTaskOOO() {
   if (typeOOO === 0) {
     // continue to explore phase
     if (typeof startExplore === 'function')PracticeSkyPhase.start({
-      instructionFolder: "TexturePack/instructions/practice_instruction/",
-      onDone: () => {
+  onDone: (reason) => {
+    console.log("practice done:", reason);
         // then continue your normal flow into exploration
         startExplore (); // replace with your real function/call
       }
