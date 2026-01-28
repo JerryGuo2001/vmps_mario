@@ -1,3 +1,5 @@
+// ======================= game_function.js =======================
+
 let env_deter ='sky'
 //load the door image
 let leftDoorType = null;

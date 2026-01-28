@@ -307,7 +307,14 @@ function finishTaskOOO() {
 
   if (typeOOO === 0) {
     // continue to explore phase
-    if (typeof startExplore === 'function') startExplore();
+    if (typeof startExplore === 'function') startPracticeSkyPhase({
+  participantId: participantData?.id ?? null,
+  logger: (row) => participantData.trials.push(row), // or your DataSaver
+  onDone: () => {
+    // IMPORTANT: do not pass any practice state; just continue
+    startExplorationPhase();
+  }
+});
     typeOOO++;
   } else if (typeOOO === 1) {
     // Transition to post-survey instead of saving immediately
