@@ -1,6 +1,7 @@
 // ========== task.js (platform-locked mushrooms; 5 per room; waits for platforms) ==========
 // Instruction preloads
 const INSTR_SLIDES = {
+  practice_explore: [1],
   explore: [1, 2, 3],   
   memory:  [1, 2],
   ooo:     [1]
@@ -49,6 +50,7 @@ const INSTR_BASE = 'TexturePack/instructions';
 
 // Subfolder names per phase (relative to INSTR_BASE)
 const INSTR_FOLDERS = {
+  practice_explore: 'practice_explore_phase',
   explore: 'explore_phase',
   memory: 'memory_phase',
   ooo: 'ooo_phase', 
@@ -325,12 +327,20 @@ function showPhaseInstructions(phaseKey, onDone) {
 
 // =================== END NEW: Instruction system ===================
 function startExplore() {
-  // Show instructions for the explore phase first, then actually start the phase
-  showPhaseInstructions('explore', () => {
+  if (practice_explore_on_off){
+      showPhaseInstructions('practice_explore', () => {
     const e = document.getElementById('explorephase');
     if (e) e.style.display = 'block';
     initGame();
   });
+  }else{
+    totalQuestions=totalQuestions_setup
+      showPhaseInstructions('explore', () => {
+    const e = document.getElementById('explorephase');
+    if (e) e.style.display = 'block';
+    initGame();
+  });
+  }
 }
 
 function startMemorry() {
@@ -347,10 +357,18 @@ function startMemorry() {
 
 // Complete Task
 function completeExplore() {
-  gameRunning = false;
-  const phases = document.querySelectorAll('.phase');
-  phases.forEach(phase => { phase.style.display = 'none'; });
-  startMemorry();
+  if (practice_explore_on_off){
+    gameRunning = false;
+    const phases = document.querySelectorAll('.phase');
+    phases.forEach(phase => { phase.style.display = 'none'; });
+    practice_explore_on_off=false
+    startExplore()
+  }else{
+    gameRunning = false;
+    const phases = document.querySelectorAll('.phase');
+    phases.forEach(phase => { phase.style.display = 'none'; });
+    startMemorry();
+  }
 }
 
 /* =======================================================================
