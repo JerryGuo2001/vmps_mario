@@ -12,7 +12,7 @@
 
   // ---------- Defaults ----------
   const DEFAULTS = {
-    instructionFolder: "./TexturePack/instructions/practice-instruction/",
+    instructionFolder: "./practice-instruction/",
     instructionPNGs: {
       move: "practice_move.png",
       stamina: "practice_stamina.png",
