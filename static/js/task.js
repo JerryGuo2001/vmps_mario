@@ -437,8 +437,13 @@ async function initGame() {
   gravity = 0.5;
   keys = {};
   //below here are the change to make to skip sky room
-  currentQuestion = 2;
-  currentCanvas = 1;
+  if (practice_explore_on_off){
+    currentQuestion = 1;
+    currentCanvas = 4;
+  }else{
+    currentQuestion = 2;
+    currentCanvas = 1;
+  }
 
   /* FREEZE STATE SAFETY */
   if (typeof window.freezeState === 'undefined') window.freezeState = false;
