@@ -27,7 +27,7 @@
     proceed: "practice_proceed.png",
   };
 
-  const DEFAULT_INSTRUCTION_FOLDER = "TexturePack/instructions/practice-instruction/";
+  const DEFAULT_INSTRUCTION_FOLDER = "TexturePack/instructions/practice_instruction/";
 
   // speed up stamina demo a bit (so you don’t wait 10s)
   const STAMINA_DEMO_FORCE_COUNTDOWN = 2; // seconds until first HP drop
