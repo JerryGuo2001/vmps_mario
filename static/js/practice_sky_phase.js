@@ -134,25 +134,37 @@
 
     const card = document.createElement("div");
     card.style.cssText = `
-      width: min(980px, calc(100vw - 40px));
-      background: #fff;
-      border-radius: 14px;
-      overflow: hidden;
-      box-shadow: 0 12px 40px rgba(0,0,0,0.35);
-      border: 1px solid rgba(0,0,0,0.15);
+    width: 80vw;
+    height: 80vh;
+    background: #fff;
+    border-radius: 14px;
+    overflow: hidden;
+    box-shadow: 0 12px 40px rgba(0,0,0,0.35);
+    border: 1px solid rgba(0,0,0,0.15);
+    display: flex;
+    flex-direction: column;
     `;
 
     const img = document.createElement("img");
-    img.style.cssText = `width: 100%; height: auto; display: block; background: #fafafa;`;
+    img.style.cssText = `
+    flex: 1 1 auto;
+    width: 100%;
+    height: 100%;
+    display: block;
+    background: #fafafa;
+    object-fit: contain;     /* keep aspect ratio */
+    `;
+
 
     const footer = document.createElement("div");
     footer.style.cssText = `
-      display: flex;
-      gap: 10px;
-      justify-content: flex-end;
-      padding: 12px;
-      border-top: 1px solid rgba(0,0,0,0.12);
-      background: rgba(255,255,255,0.95);
+    flex: 0 0 auto;
+    display: flex;
+    gap: 10px;
+    justify-content: flex-end;
+    padding: 12px;
+    border-top: 1px solid rgba(0,0,0,0.12);
+    background: rgba(255,255,255,0.95);
     `;
 
     const status = document.createElement("div");
