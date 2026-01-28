@@ -1,13 +1,10 @@
 /* ===========================
-   practice_sky_phase.js  (REWRITE to match YOUR Canvas-4 exploration structure)
-
-   Requirements satisfied:
-   - Uses your sky room logic: env_deter='sky', generateGroundPlatforms(), generateMushroom() (rainbow placeholders)
-   - Uses your hunger logic: hungry() (1 stamina per 10s), drawHungerCountdown()
-   - Uses your mystery box logic: drawMysBox() head-hit reveal + Press E to eat
-   - Uses your P-to-proceed logic: handleTextInteraction_canvas4()
-   - DOES NOT interfere with exploration variables: snapshots + restores, patches proceedFromRoom temporarily
-   - Instructions are PNGs in /practice-instruction/
+   practice_sky_phase.js  (CAUTIOUS REWRITE)
+   - Uses YOUR Canvas-4 exploration logic (sky room, rainbow mushroom placeholders)
+   - Instruction PNGs live in: TexturePack/instructions/practice-instruction/
+   - Fixes: DOES NOT use window.character etc (because your globals are top-level let)
+   - Patches proceedFromRoom + markMushroomSeenOnce during practice only
+   - Snapshots + restores state after practice
 
    Exposes: window.PracticeSkyPhase.start({ onDone, instructionFolder, pngNames })
    =========================== */
@@ -16,7 +13,7 @@
   "use strict";
 
   // -----------------------
-  // Config
+  // Instruction PNG config
   // -----------------------
   const DEFAULT_PNGS = {
     move: "practice_move.png",
@@ -25,58 +22,106 @@
     proceed: "practice_proceed.png",
   };
 
-  const DEFAULT_BASES = [
-    "practice-instruction/",
-    "./practice-instruction/",
-    "../practice-instruction/",
-  ];
+  // Your requested base:
+  //   'TexturePack/instructions' and then the practice instruction
+  // -> default folder:
+  const DEFAULT_INSTRUCTION_FOLDER = "TexturePack/instructions/practice-instruction/";
 
   // -----------------------
-  // Safe helpers
+  // Helpers
   // -----------------------
   const now = () => performance.now();
 
-  function safe(fn, ...args) {
+  function safeCall(fn, ...args) {
     try { return fn && fn(...args); } catch (e) { return undefined; }
   }
 
-  function deepCloneShallow(obj) {
-    // good enough for plain objects like character/keys snapshots
+  function clearKeysObj(kobj) {
+    if (!kobj || typeof kobj !== "object") return;
+    for (const k of Object.keys(kobj)) kobj[k] = false;
+  }
+
+  function shallowCopy(obj) {
     if (!obj || typeof obj !== "object") return obj;
     return Object.assign({}, obj);
   }
 
-  function clearKeys(keysObj) {
-    if (!keysObj || typeof keysObj !== "object") return;
-    for (const k of Object.keys(keysObj)) keysObj[k] = false;
+  function ensureCoreGlobals() {
+    // IMPORTANT: these are top-level "let" globals in your scripts
+    // We must set them via identifier, NOT window.property.
+
+    // canvas / ctx are defined as top-level let in your game_env.js
+    // But in case practice is started super early, fallback:
+    if (typeof canvas === "undefined" || !canvas) {
+      // if canvas isn't declared yet, this will throw; so guard with try
+      try {
+        const c = document.getElementById("gameCanvas");
+        // We cannot assign to "canvas" if it doesn't exist as a binding.
+        // So we just rely on your normal script load order.
+        if (!c) console.warn("[practice] gameCanvas not found yet.");
+      } catch (_) {}
+    }
+
+    if (typeof keys === "undefined" || !keys || typeof keys !== "object") {
+      // keys is declared in game_env.js as `let ... keys ...`
+      // initialize it if empty
+      try { keys = {}; } catch (e) { /* if not declared yet, ignore */ }
+    }
+
+    // If character isn't created yet, create it using your createCharacter()
+    if (typeof character === "undefined" || !character) {
+      if (typeof createCharacter === "function") {
+        character = createCharacter();
+      } else {
+        // fallback minimal character (only if createCharacter missing)
+        character = {
+          lastDirection: "right",
+          x: 10, y: 0,
+          worldX: 10,
+          width: 40, height: 40,
+          velocityY: 0,
+          speed: 0,
+          onBlock: false,
+          hp: 20,
+          acceleration: 0.2,
+          deceleration: 0.2,
+          max_speed: 6
+        };
+      }
+    }
+
+    if (typeof gravity !== "number") {
+      try { gravity = 0.6; } catch (_) {}
+    }
   }
 
-  function ensureGlobalsExist() {
-    if (!window.canvas) window.canvas = document.getElementById("gameCanvas");
-    if (!window.ctx && window.canvas) window.ctx = window.canvas.getContext("2d");
+  function logTrial(event, extra = {}) {
+    try {
+      const pid = (typeof participantData !== "undefined" && participantData) ? participantData.id : null;
+      const timeElapsed = (typeof participantData !== "undefined" && participantData && participantData.startTime)
+        ? (now() - participantData.startTime)
+        : null;
 
-    if (!window.keys || typeof window.keys !== "object") window.keys = {};
-    if (!window.character) {
-      if (typeof window.createCharacter === "function") window.character = window.createCharacter();
+      if (typeof participantData !== "undefined" && participantData && Array.isArray(participantData.trials)) {
+        participantData.trials.push(Object.assign({
+          id: pid,
+          trial_type: "practice_sky",
+          event,
+          time_elapsed: timeElapsed
+        }, extra));
+      } else {
+        console.log("[practice_sky]", event, extra);
+      }
+    } catch (e) {
+      console.log("[practice_sky log error]", e);
     }
-    // gravity is used by handleMovement_canvas4; keep existing if set
-    if (typeof window.gravity !== "number") window.gravity = 0.6;
-  }
-
-  function loggerPush(row) {
-    if (window.participantData && Array.isArray(window.participantData.trials)) {
-      window.participantData.trials.push(row);
-      return;
-    }
-    console.log("[practice log]", row);
   }
 
   // -----------------------
-  // Instruction overlay UI (PNG)
+  // Overlay UI
   // -----------------------
   function createOverlay() {
     const root = document.createElement("div");
-    root.id = "practiceSkyOverlay";
     root.style.cssText = `
       position: fixed; inset: 0;
       z-index: 999999;
@@ -98,13 +143,7 @@
     `;
 
     const img = document.createElement("img");
-    img.id = "practiceSkyInstrImg";
-    img.style.cssText = `
-      width: 100%;
-      height: auto;
-      display: block;
-      background: #fafafa;
-    `;
+    img.style.cssText = `width: 100%; height: auto; display: block; background: #fafafa;`;
 
     const footer = document.createElement("div");
     footer.style.cssText = `
@@ -117,17 +156,18 @@
     `;
 
     const status = document.createElement("div");
-    status.id = "practiceSkyStatus";
     status.style.cssText = `
       margin-right: auto;
       font-size: 13px;
       color: rgba(0,0,0,0.7);
       align-self: center;
+      max-width: 70%;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
     `;
-    status.textContent = "";
 
     const btn = document.createElement("button");
-    btn.id = "practiceSkyBtn";
     btn.textContent = "Start";
     btn.style.cssText = `
       padding: 10px 14px;
@@ -141,7 +181,6 @@
 
     footer.appendChild(status);
     footer.appendChild(btn);
-
     card.appendChild(img);
     card.appendChild(footer);
     root.appendChild(card);
@@ -150,20 +189,32 @@
     return { root, img, btn, status };
   }
 
-  function loadPngWithFallbacks(imgEl, fileName, bases, onLoaded, onFailed) {
-    let i = 0;
+  function normalizeFolder(folder) {
+    const f = String(folder || "").trim();
+    if (!f) return DEFAULT_INSTRUCTION_FOLDER;
+    return f.endsWith("/") ? f : (f + "/");
+  }
+
+  function loadInstructionPNG(imgEl, folder, fileName, onOk, onFail) {
+    const base = normalizeFolder(folder);
+
+    // Try a few variants; GH Pages is case/path sensitive, so we show exact tries.
+    const tries = [
+      base + fileName,
+      "./" + base + fileName,
+      "../" + base + fileName,
+    ];
+
+    let idx = 0;
     const tried = [];
 
     function tryNext() {
-      if (i >= bases.length) {
-        onFailed(tried);
-        return;
-      }
-      const url = bases[i].replace(/\/?$/, "/") + fileName;
-      tried.push(url);
-      i++;
+      if (idx >= tries.length) return onFail(tried);
 
-      imgEl.onload = () => onLoaded(url, tried);
+      const url = tries[idx++];
+      tried.push(url);
+
+      imgEl.onload = () => onOk(url, tried);
       imgEl.onerror = () => tryNext();
       imgEl.src = url;
     }
@@ -172,151 +223,356 @@
   }
 
   // -----------------------
-  // Practice engine: uses YOUR Canvas-4 functions
+  // Practice runner (Canvas 4)
   // -----------------------
-  function createPracticeRunner(cfg) {
-    ensureGlobalsExist();
+  function startPractice(opts) {
+    ensureCoreGlobals();
 
-    const pid = window.participantData?.id ?? null;
-    const t0 = now();
-
-    const log = (event, extra = {}) => {
-      loggerPush(Object.assign({
-        id: pid,
-        trial_type: "practice_sky",
-        event,
-        time_elapsed: window.participantData?.startTime
-          ? (now() - window.participantData.startTime)
-          : (now() - t0),
-        t_practice: now() - t0
-      }, extra));
+    const cfg = {
+      instructionFolder: normalizeFolder(opts.instructionFolder || DEFAULT_INSTRUCTION_FOLDER),
+      pngNames: Object.assign({}, DEFAULT_PNGS, opts.pngNames || {}),
+      onDone: (typeof opts.onDone === "function") ? opts.onDone : null,
     };
 
-    // Snapshot globals that practice will touch
-    const snapshot = {
-      currentCanvas: window.currentCanvas,
-      env_deter: window.env_deter,
-      currentRoom: window.currentRoom,
-      cameraOffset: window.cameraOffset,
-      worldWidth: window.worldWidth,
-      worldHeight: window.worldHeight,
+    // Snapshot state (CAREFUL: these are lexical globals)
+    const snap = {
+      // key globals
+      currentCanvas: (typeof currentCanvas !== "undefined") ? currentCanvas : null,
+      env_deter: (typeof env_deter !== "undefined") ? env_deter : null,
+      currentRoom: (typeof currentRoom !== "undefined") ? currentRoom : null,
+      cameraOffset: (typeof cameraOffset !== "undefined") ? cameraOffset : 0,
 
-      groundPlatforms: window.groundPlatforms,
-      mushrooms: window.mushrooms,
+      worldWidth: (typeof worldWidth !== "undefined") ? worldWidth : null,
+      worldHeight: (typeof worldHeight !== "undefined") ? worldHeight : null,
 
-      // per-room visit state + proceed latch
-      roomSeenThisVisit: window.roomSeenThisVisit,
-      roomProceedUnlocked: window.roomProceedUnlocked,
-      roomAutoAdvanceFired: window.roomAutoAdvanceFired,
+      // arrays
+      groundPlatforms: (typeof groundPlatforms !== "undefined") ? groundPlatforms : null,
+      mushrooms: (typeof mushrooms !== "undefined") ? mushrooms : null,
 
-      // freeze / active mushroom
-      freezeState: window.freezeState,
-      activeMushroom: window.activeMushroom,
+      // per-room visit latch
+      roomSeenThisVisit: (typeof roomSeenThisVisit !== "undefined") ? roomSeenThisVisit : null,
+      roomProceedUnlocked: (typeof roomProceedUnlocked !== "undefined") ? roomProceedUnlocked : null,
+      roomAutoAdvanceFired: (typeof roomAutoAdvanceFired !== "undefined") ? roomAutoAdvanceFired : null,
 
-      // hunger state (interval cannot be cloned; we just stop/restart)
-      hungerCountdown: window.hungerCountdown,
-      hungerInterval: window.hungerInterval,
+      // freeze
+      freezeState: (typeof freezeState !== "undefined") ? freezeState : null,
+      activeMushroom: (typeof activeMushroom !== "undefined") ? activeMushroom : null,
 
-      // character + keys
-      character: deepCloneShallow(window.character),
-      keys: deepCloneShallow(window.keys),
+      // character / keys (copy values, not references)
+      character: shallowCopy(character),
+      keys: shallowCopy(keys),
 
-      // patched functions
-      proceedFromRoom: window.proceedFromRoom,
+      // functions we patch
+      proceedFromRoom: (typeof proceedFromRoom === "function") ? proceedFromRoom : null,
+      markMushroomSeenOnce: (typeof markMushroomSeenOnce === "function") ? markMushroomSeenOnce : null,
     };
 
-    // Practice state (local only)
-    let step = "instr_move";
-    let raf = null;
-    let running = false;
+    // Also snapshot hunger timer globals if they exist
+    let snapHunger = null;
+    try {
+      if (typeof hungerInterval !== "undefined" || typeof hungerCountdown !== "undefined") {
+        snapHunger = {
+          hungerInterval: (typeof hungerInterval !== "undefined") ? hungerInterval : null,
+          hungerCountdown: (typeof hungerCountdown !== "undefined") ? hungerCountdown : null
+        };
+      }
+    } catch (_) {}
 
-    // gating flags for step 1
-    let sawLeft = false, sawRight = false, sawJump = false;
-
-    // step 2 stamina demo
-    let hpStart = null;
-    let sawHpDrop = false;
-
-    // step 3 mystery
-    let mysteryEatStartHp = null;
-    let forcedMysteryDone = false;
-
-    // step 4 sky practice
-    let skyPracticeStarted = false;
-
-    // overlay
+    // Overlay + input blocking
     const ui = createOverlay();
     let blockInput = true;
 
-    // Capture listeners to block input during instruction overlays
     const blockerDown = (e) => {
       if (!blockInput) return;
       e.preventDefault();
       e.stopImmediatePropagation();
-      // prevent stuck keys
-      clearKeys(window.keys);
+      clearKeysObj(keys);
       return false;
     };
     const blockerUp = (e) => {
       if (!blockInput) return;
       e.preventDefault();
       e.stopImmediatePropagation();
-      clearKeys(window.keys);
+      clearKeysObj(keys);
       return false;
     };
     window.addEventListener("keydown", blockerDown, true);
     window.addEventListener("keyup", blockerUp, true);
 
-    // Patch proceedFromRoom so practice doesn't change your exploration state
-    window.proceedFromRoom = function (reason = "p") {
-      // Only intercept during the final practice step.
-      log("proceedFromRoom_intercept", { reason, step, hp: window.character?.hp });
-      if (step === "demo_sky") {
-        finish("p_proceed");
-        return;
+    // Patch markMushroomSeenOnce to avoid ensureExplorationIndex() side effects in practice
+    if (typeof markMushroomSeenOnce === "function") {
+      markMushroomSeenOnce = function (mushroomObjOrId, fallbackRoom) {
+        // still mark this object as seen to prevent repeated triggers
+        if (mushroomObjOrId && typeof mushroomObjOrId === "object") {
+          mushroomObjOrId._seenLogged = true;
+        }
+        // no exploration index/progress mutation in practice
+      };
+    }
+
+    // Patch proceedFromRoom: only used in practice final step to end practice cleanly
+    if (typeof proceedFromRoom === "function") {
+      const old = proceedFromRoom;
+      proceedFromRoom = function (reason = "p") {
+        logTrial("proceedFromRoom_intercept", { reason, step });
+        if (step === "demo_sky") {
+          finish("p_proceed");
+          return;
+        }
+        // ignore during other steps
+      };
+      // keep old in snap already
+    }
+
+    function restoreAll() {
+      // stop practice loop
+      if (raf) cancelAnimationFrame(raf);
+      raf = null;
+      running = false;
+
+      // remove overlay + listeners
+      try { ui.btn.onclick = null; } catch (_) {}
+      if (ui.root && ui.root.parentNode) ui.root.parentNode.removeChild(ui.root);
+      window.removeEventListener("keydown", blockerDown, true);
+      window.removeEventListener("keyup", blockerUp, true);
+
+      // stop hunger interval created during practice (if your hungry() started one)
+      try {
+        if (typeof hungerInterval !== "undefined" && hungerInterval) {
+          clearInterval(hungerInterval);
+          hungerInterval = null;
+        }
+      } catch (_) {}
+
+      // restore lexical globals
+      try { if (snap.currentCanvas !== null) currentCanvas = snap.currentCanvas; } catch (_) {}
+      try { if (snap.env_deter !== null) env_deter = snap.env_deter; } catch (_) {}
+      try { if (snap.currentRoom !== null) currentRoom = snap.currentRoom; } catch (_) {}
+      try { if (typeof snap.cameraOffset === "number") cameraOffset = snap.cameraOffset; } catch (_) {}
+
+      try { if (snap.worldWidth !== null) worldWidth = snap.worldWidth; } catch (_) {}
+      try { if (snap.worldHeight !== null) worldHeight = snap.worldHeight; } catch (_) {}
+
+      try { if (snap.groundPlatforms !== null) groundPlatforms = snap.groundPlatforms; } catch (_) {}
+      try { if (snap.mushrooms !== null) mushrooms = snap.mushrooms; } catch (_) {}
+
+      try { if (snap.roomSeenThisVisit !== null) roomSeenThisVisit = snap.roomSeenThisVisit; } catch (_) {}
+      try { if (snap.roomProceedUnlocked !== null) roomProceedUnlocked = snap.roomProceedUnlocked; } catch (_) {}
+      try { if (snap.roomAutoAdvanceFired !== null) roomAutoAdvanceFired = snap.roomAutoAdvanceFired; } catch (_) {}
+
+      try { if (snap.freezeState !== null) freezeState = snap.freezeState; } catch (_) {}
+      try { if (snap.activeMushroom !== null) activeMushroom = snap.activeMushroom; } catch (_) {}
+
+      // restore objects
+      try { if (character && snap.character) Object.assign(character, snap.character); } catch (_) {}
+      try {
+        if (keys && snap.keys) {
+          clearKeysObj(keys);
+          Object.assign(keys, snap.keys);
+        }
+      } catch (_) {}
+
+      // restore patched functions
+      try { if (snap.proceedFromRoom) proceedFromRoom = snap.proceedFromRoom; } catch (_) {}
+      try { if (snap.markMushroomSeenOnce) markMushroomSeenOnce = snap.markMushroomSeenOnce; } catch (_) {}
+
+      // restore hunger countdown if it exists
+      if (snapHunger) {
+        try { if (typeof hungerCountdown !== "undefined") hungerCountdown = snapHunger.hungerCountdown; } catch (_) {}
+        try { if (typeof hungerInterval !== "undefined") hungerInterval = snapHunger.hungerInterval; } catch (_) {}
       }
-      // otherwise ignore in practice
-    };
+    }
 
-    function restoreGlobals() {
-      // stop hunger interval if running
-      if (window.hungerInterval) {
-        clearInterval(window.hungerInterval);
-        window.hungerInterval = null;
+    // Practice state
+    let step = "instr_move";
+    let running = false;
+    let raf = null;
+
+    // gates
+    let sawLeft = false, sawRight = false, sawJump = false;
+    let hpStart = null, sawHpDrop = false;
+    let mysteryEatStartHp = null, forcedMysteryDone = false;
+
+    // -----------------------
+    // Canvas-4 world setup (very cautious)
+    // -----------------------
+    function setupCanvas4World({ withMushrooms, singleMysteryBox } = {}) {
+      ensureCoreGlobals(); // ensures character exists (the real global)
+
+      // Ensure we’re in sky room
+      try { env_deter = "sky"; } catch (_) {}
+      try { currentRoom = "sky"; } catch (_) {}
+      try { currentCanvas = 4; } catch (_) {}
+
+      // Reset camera
+      try { cameraOffset = 0; } catch (_) {}
+
+      // Reset room visit latch if available
+      safeCall(typeof resetRoomVisitState === "function" ? resetRoomVisitState : null);
+      try { roomProceedUnlocked = false; } catch (_) {}
+      try { roomAutoAdvanceFired = false; } catch (_) {}
+
+      // Generate platforms
+      if (typeof generateGroundPlatforms === "function") {
+        // ensure worldWidth exists
+        if (typeof worldWidth !== "number") {
+          try { worldWidth = 2000; } catch (_) {}
+        }
+        groundPlatforms = generateGroundPlatforms(worldWidth, 200, 400);
       }
 
-      // restore primitives and references
-      window.currentCanvas = snapshot.currentCanvas;
-      window.env_deter = snapshot.env_deter;
-      window.currentRoom = snapshot.currentRoom;
-      window.cameraOffset = snapshot.cameraOffset;
-      window.worldWidth = snapshot.worldWidth;
-      window.worldHeight = snapshot.worldHeight;
+      // Mushrooms
+      if (singleMysteryBox) {
+        const plats = Array.isArray(groundPlatforms) ? groundPlatforms : [];
+        const p0 = plats[0];
+        mushrooms = [];
 
-      window.groundPlatforms = snapshot.groundPlatforms;
-      window.mushrooms = snapshot.mushrooms;
+        if (p0) {
+          const BOX_H_LOCAL = (typeof BOX_H === "number") ? BOX_H : 50;
 
-      window.roomSeenThisVisit = snapshot.roomSeenThisVisit;
-      window.roomProceedUnlocked = snapshot.roomProceedUnlocked;
-      window.roomAutoAdvanceFired = snapshot.roomAutoAdvanceFired;
+          const x0 = Math.round((p0.startX + p0.endX) / 2) + 220;
+          const y0 = (p0.y) - BOX_H_LOCAL - 75;
 
-      window.freezeState = snapshot.freezeState;
-      window.activeMushroom = snapshot.activeMushroom;
+          const img = new Image();
+          const src = (typeof SKY_RAINBOW_MUSHROOM_SRC === "string")
+            ? SKY_RAINBOW_MUSHROOM_SRC
+            : "TexturePack/mushroom_pack/sky_mushroom/rainbow_mushroom.png";
+          img.src = src;
 
-      window.hungerCountdown = snapshot.hungerCountdown;
-
-      // restore objects (character/keys)
-      if (window.character && snapshot.character) {
-        Object.assign(window.character, snapshot.character);
+          mushrooms.push({
+            x: x0,
+            y: y0,
+            type: 0,
+            value: (typeof SKY_RAINBOW_MUSHROOM_VALUE !== "undefined") ? SKY_RAINBOW_MUSHROOM_VALUE : 2,
+            isVisible: false,
+            growthFactor: 0,
+            growthSpeed: 0.05,
+            growthComplete: false,
+            color: "rainbow",
+            imagefilename: src,
+            image: img,
+            groundPlatformIndex: 0,
+            _expId: "practice_sky_rainbow"
+          });
+        }
+      } else if (withMushrooms) {
+        mushrooms = [];
+        // use your generateMushroom -> sky branch (rainbow, positive)
+        if (typeof generateMushroom === "function") {
+          generateMushroom(5)
+            .then(ms => { mushrooms = ms; })
+            .catch(err => console.warn("[practice] generateMushroom error", err));
+        }
+      } else {
+        mushrooms = [];
       }
-      if (window.keys && snapshot.keys) {
-        // restore each key state
-        clearKeys(window.keys);
-        Object.assign(window.keys, snapshot.keys);
+
+      // Spawn: DO NOT call getRespawnSpot until character is guaranteed
+      // Also wrap to prevent any crash from halting practice.
+      let spawn = null;
+      if (typeof getRespawnSpot === "function") {
+        try {
+          // getRespawnSpot references character.height; character is now guaranteed by ensureCoreGlobals()
+          spawn = getRespawnSpot();
+        } catch (e) {
+          console.warn("[practice] getRespawnSpot failed; using fallback spawn.", e);
+          spawn = null;
+        }
       }
 
-      // restore patched function
-      window.proceedFromRoom = snapshot.proceedFromRoom;
+      if (!spawn) {
+        // fallback spawn using first platform or fixed ground
+        const plats = Array.isArray(groundPlatforms) ? groundPlatforms : [];
+        if (plats[0]) {
+          spawn = {
+            x: plats[0].startX + 5,
+            y: plats[0].y - character.height - 5
+          };
+        } else {
+          // ultimate fallback
+          const gY = (typeof canvas !== "undefined" && canvas) ? (canvas.height * 0.8) : 480;
+          spawn = { x: 10, y: gY - character.height };
+        }
+      }
+
+      // Apply spawn to YOUR world-pos system if present
+      try {
+        if (typeof ensureWorldPosInit === "function") ensureWorldPosInit();
+      } catch (_) {}
+
+      try {
+        // if your canvas4 uses worldX, set it
+        if (typeof character.worldX === "number") character.worldX = spawn.x;
+        else character.worldX = spawn.x;
+
+        character.y = spawn.y;
+
+        // keep legacy screen x consistent
+        if (typeof getCharacterScreenX === "function") character.x = getCharacterScreenX();
+        else character.x = 10;
+      } catch (_) {}
+
+      // Start hunger tick using YOUR hungry()
+      safeCall(typeof hungry === "function" ? hungry : null);
+
+      logTrial("setup_canvas4_world", { withMushrooms: !!withMushrooms, singleMysteryBox: !!singleMysteryBox });
+    }
+
+    // -----------------------
+    // Rendering loop (mirror your canvas4 usage)
+    // -----------------------
+    function renderFrame() {
+      // clear
+      if (typeof clearCanvas === "function") clearCanvas();
+      else if (typeof ctx !== "undefined" && typeof canvas !== "undefined" && ctx && canvas) {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+      }
+
+      // background
+      if (typeof drawBackground_canvas4 === "function") drawBackground_canvas4();
+      else if (typeof drawBackground === "function") drawBackground();
+
+      // If freezeState is true, do not move; still draw interaction (boxes/mushrooms)
+      const frozen = (typeof freezeState !== "undefined") ? !!freezeState : false;
+
+      if (!frozen) {
+        if (typeof handleMovement_canvas4 === "function") handleMovement_canvas4();
+        else if (typeof handleMovement === "function") handleMovement();
+      } else {
+        // Still draw boxes/mushrooms so they can press E to eat in place
+        safeCall(typeof drawMysBox === "function" ? drawMysBox : null);
+        // Optional: if you use a question overlay
+        safeCall(typeof drawMushroomQuestionBox === "function" ? drawMushroomQuestionBox : null);
+      }
+
+      // character
+      if (typeof drawCharacter_canvas4 === "function") drawCharacter_canvas4();
+      else if (typeof drawCharacter === "function") drawCharacter();
+
+      // HUD
+      if (typeof drawHP_canvas4 === "function") drawHP_canvas4();
+      else if (typeof drawHP === "function") drawHP();
+
+      if (typeof drawHungerCountdown === "function") drawHungerCountdown();
+
+      // "Press P to proceed" prompt (your logic)
+      safeCall(typeof handleTextInteraction_canvas4 === "function" ? handleTextInteraction_canvas4 : null);
+
+      // HP logic (your respawn rule) — safe
+      safeCall(typeof checkHP_canvas4 === "function" ? checkHP_canvas4 : null);
+    }
+
+    function startLoop() {
+      if (running) return;
+      running = true;
+
+      const loop = () => {
+        if (!running) return;
+        renderFrame();
+        tickGates();
+        raf = requestAnimationFrame(loop);
+      };
+      raf = requestAnimationFrame(loop);
     }
 
     function stopLoop() {
@@ -325,133 +581,13 @@
       raf = null;
     }
 
-    function startLoop() {
-      if (running) return;
-      running = true;
-      const loop = () => {
-        if (!running) return;
-        tick();
-        raf = requestAnimationFrame(loop);
-      };
-      raf = requestAnimationFrame(loop);
-    }
-
-    function setupCanvas4World({ withMushrooms, singleMysteryBox } = {}) {
-      // Use your Canvas-4 world settings and sky env
-      window.env_deter = "sky";
-      window.currentRoom = "sky";
-      window.currentCanvas = 4;
-
-      // Use your camera/world vars if present; otherwise keep defaults
-      if (typeof window.worldWidth !== "number") window.worldWidth = 2000;
-      if (typeof window.worldHeight !== "number") window.worldHeight = 600;
-
-      window.cameraOffset = 0;
-
-      // Reset proceed latch for practice only
-      if (typeof window.resetRoomVisitState === "function") window.resetRoomVisitState();
-      window.roomProceedUnlocked = false;
-      window.roomAutoAdvanceFired = false;
-
-      // platforms + mushrooms
-      if (typeof window.generateGroundPlatforms === "function") {
-        window.groundPlatforms = window.generateGroundPlatforms(window.worldWidth, 200, 400);
-      }
-
-      if (withMushrooms) {
-        // uses your SKY branch -> rainbow mushrooms (positive)
-        safe(window.generateMushroom, 5)?.then((ms) => { window.mushrooms = ms; })
-          .catch((e) => console.warn("[practice] generateMushroom error", e));
-      } else {
-        window.mushrooms = [];
-      }
-
-      if (singleMysteryBox) {
-        // Build ONE mushroom item using YOUR expected structure
-        const plats = window.groundPlatforms || [];
-        const p0 = plats[0];
-        if (p0) {
-          const x0 = Math.round((p0.startX + p0.endX) / 2) + 220;
-          const y0 = (p0.y) - (window.BOX_H || 50) - 75;
-
-          const img = new Image();
-          img.src = window.SKY_RAINBOW_MUSHROOM_SRC || "TexturePack/mushroom_pack/sky_mushroom/rainbow_mushroom.png";
-
-          window.mushrooms = [{
-            x: x0,
-            y: y0,
-            type: 0,
-            value: (window.SKY_RAINBOW_MUSHROOM_VALUE ?? 2),
-            isVisible: false,
-            growthFactor: 0,
-            growthSpeed: 0.05,
-            growthComplete: false,
-            color: "rainbow",
-            imagefilename: img.src,
-            image: img,
-            groundPlatformIndex: 0,
-            _expId: "practice_sky_rainbow"
-          }];
-        } else {
-          window.mushrooms = [];
-        }
-      }
-
-      // position character like your exploration entry does
-      if (window.character) {
-        // use respawn spot if defined
-        if (typeof window.getRespawnSpot === "function") {
-          const r = window.getRespawnSpot();
-          if (r) {
-            safe(window.ensureWorldPosInit);
-            window.character.worldX = r.x;
-            window.character.y = r.y;
-            window.cameraOffset = 0;
-            window.character.x = safe(window.getCharacterScreenX) ?? 10;
-          }
-        } else {
-          window.character.x = 10;
-          window.character.y = window.canvas.height * 0.8 - window.character.height;
-          safe(window.ensureWorldPosInit);
-          window.character.worldX = window.character.x + (window.cameraOffset || 0);
-        }
-      }
-
-      // hunger tick (your interval-based hunger)
-      safe(window.hungry);
-
-      log("setup_canvas4_world", { withMushrooms: !!withMushrooms, singleMysteryBox: !!singleMysteryBox });
-    }
-
-    function renderPracticeFrame() {
-      // Call YOUR functions in a reasonable Canvas-4 order
-      if (typeof window.clearCanvas === "function") window.clearCanvas();
-      else window.ctx.clearRect(0, 0, window.canvas.width, window.canvas.height);
-
-      if (typeof window.drawBackground_canvas4 === "function") window.drawBackground_canvas4();
-      else if (typeof window.drawBackground === "function") window.drawBackground();
-
-      // Movement + collisions + boxes + eating logic
-      if (typeof window.handleMovement_canvas4 === "function") window.handleMovement_canvas4();
-      else if (typeof window.handleMovement === "function") window.handleMovement();
-
-      // Character + HUD
-      if (typeof window.drawCharacter_canvas4 === "function") window.drawCharacter_canvas4();
-      else if (typeof window.drawCharacter === "function") window.drawCharacter();
-
-      if (typeof window.drawHP_canvas4 === "function") window.drawHP_canvas4();
-      else if (typeof window.drawHP === "function") window.drawHP();
-
-      if (typeof window.drawHungerCountdown === "function") window.drawHungerCountdown();
-
-      // "Press P to proceed" text (uses your threshold logic)
-      safe(window.handleTextInteraction_canvas4);
-    }
-
+    // -----------------------
+    // Instruction control
+    // -----------------------
     function showInstruction(whichKey, buttonText, onClick) {
       step = `instr_${whichKey}`;
       blockInput = true;
-      clearKeys(window.keys);
+      clearKeysObj(keys);
 
       ui.status.textContent = "";
       ui.btn.textContent = buttonText || "Start";
@@ -459,22 +595,20 @@
 
       ui.root.style.display = "flex";
 
-      const file = (cfg.pngNames && cfg.pngNames[whichKey]) || DEFAULT_PNGS[whichKey];
-      const bases = cfg.instructionBases || DEFAULT_BASES;
+      const file = cfg.pngNames[whichKey] || DEFAULT_PNGS[whichKey];
+      logTrial("instruction_show", { whichKey, file, folder: cfg.instructionFolder });
 
-      log("instruction_show", { whichKey, file });
-
-      loadPngWithFallbacks(
+      loadInstructionPNG(
         ui.img,
+        cfg.instructionFolder,
         file,
-        bases,
         (url, tried) => {
           ui.status.textContent = "";
-          log("instruction_png_loaded", { whichKey, url, tried: tried.join(" | ") });
+          logTrial("instruction_png_loaded", { whichKey, url, tried: tried.join(" | ") });
         },
         (tried) => {
-          ui.status.textContent = `PNG failed to load. Tried: ${tried.join(" | ")}`;
-          log("instruction_png_failed", { whichKey, tried: tried.join(" | ") });
+          ui.status.textContent = `PNG failed. Tried: ${tried.join(" | ")}`;
+          logTrial("instruction_png_failed", { whichKey, tried: tried.join(" | ") });
         }
       );
     }
@@ -482,21 +616,20 @@
     function hideInstruction() {
       ui.root.style.display = "none";
       blockInput = false;
-      clearKeys(window.keys);
+      clearKeysObj(keys);
     }
 
     // -----------------------
-    // Step logic
+    // Practice steps
     // -----------------------
     function startMoveDemo() {
       step = "demo_move";
       hideInstruction();
 
-      // no mushrooms so they only learn movement/jump
       setupCanvas4World({ withMushrooms: false });
 
       sawLeft = sawRight = sawJump = false;
-      log("demo_start", { step });
+      logTrial("demo_start", { step });
 
       startLoop();
     }
@@ -507,12 +640,12 @@
 
       setupCanvas4World({ withMushrooms: false });
 
-      // ensure hp is >1 so we can observe a drop
-      window.character.hp = Math.max(2, window.BASE_START_HP ?? 20);
-      hpStart = window.character.hp;
+      // Ensure they won’t die during demo
+      character.hp = Math.max(2, (typeof BASE_START_HP === "number") ? BASE_START_HP : 20);
+      hpStart = character.hp;
       sawHpDrop = false;
 
-      log("demo_start", { step, hpStart });
+      logTrial("demo_start", { step, hpStart });
 
       startLoop();
     }
@@ -521,14 +654,13 @@
       step = "demo_mystery";
       hideInstruction();
 
-      // single mystery box with rainbow mushroom
       setupCanvas4World({ withMushrooms: false, singleMysteryBox: true });
 
-      // Force completion condition: hp increases OR mushroom removed
-      mysteryEatStartHp = window.character.hp = Math.max(2, window.BASE_START_HP ?? 20);
+      character.hp = Math.max(2, (typeof BASE_START_HP === "number") ? BASE_START_HP : 20);
+      mysteryEatStartHp = character.hp;
       forcedMysteryDone = false;
 
-      log("demo_start", { step, hpStart: mysteryEatStartHp });
+      logTrial("demo_start", { step, hpStart: mysteryEatStartHp });
 
       startLoop();
     }
@@ -539,95 +671,69 @@
 
       setupCanvas4World({ withMushrooms: true });
 
-      // Start lower than threshold so they must eat
-      window.character.hp = window.BASE_START_HP ?? 20;
-      skyPracticeStarted = true;
+      // Start below threshold so they must eat
+      character.hp = Math.max(1, (typeof BASE_START_HP === "number") ? BASE_START_HP : 20);
 
-      log("demo_start", { step, hp: window.character.hp, threshold: window.stageHpThreshold });
+      logTrial("demo_start", { step, hp: character.hp, threshold: (typeof stageHpThreshold === "number" ? stageHpThreshold : null) });
 
       startLoop();
     }
 
-    function tick() {
-      // Drive your canvas 4 logic
-      renderPracticeFrame();
-
-      // -------- Step 1 gate: movement/jump --------
+    // -----------------------
+    // Gate checks (what ends each step)
+    // -----------------------
+    function tickGates() {
       if (step === "demo_move") {
-        if (window.keys["ArrowLeft"]) sawLeft = true;
-        if (window.keys["ArrowRight"]) sawRight = true;
-        // Jump key is ArrowUp in your code; also allow 'ArrowUp' tracking
-        if (window.keys["ArrowUp"] && window.character && window.character.velocityY < 0) sawJump = true;
+        if (keys["ArrowLeft"]) sawLeft = true;
+        if (keys["ArrowRight"]) sawRight = true;
+        if (keys["ArrowUp"] && character.velocityY < 0) sawJump = true;
 
         if (sawLeft && sawRight && sawJump) {
           stopLoop();
-          log("demo_complete", { step, sawLeft, sawRight, sawJump });
+          logTrial("demo_complete", { step, sawLeft, sawRight, sawJump });
           showInstruction("stamina", "Start", startStaminaDemo);
         }
         return;
       }
 
-      // -------- Step 2 gate: observe 1 hp drop --------
       if (step === "demo_stamina") {
-        if (window.character && hpStart != null && window.character.hp < hpStart) {
-          sawHpDrop = true;
-        }
+        if (hpStart != null && character.hp < hpStart) sawHpDrop = true;
         if (sawHpDrop) {
           stopLoop();
-          log("demo_complete", { step, hpStart, hpNow: window.character.hp, hungerCountdown: window.hungerCountdown });
+          logTrial("demo_complete", { step, hpStart, hpNow: character.hp, hungerCountdown: (typeof hungerCountdown !== "undefined" ? hungerCountdown : null) });
           showInstruction("mystery", "Start", startMysteryDemo);
         }
         return;
       }
 
-      // -------- Step 3 gate: force eat the revealed mushroom --------
       if (step === "demo_mystery") {
-        const hpNow = window.character?.hp ?? 0;
-        const ms = window.mushrooms || [];
+        const ms = Array.isArray(mushrooms) ? mushrooms : [];
         const mushroomGone = ms.length === 0;
 
-        if (!forcedMysteryDone && (hpNow > mysteryEatStartHp || mushroomGone)) {
+        if (!forcedMysteryDone && (character.hp > mysteryEatStartHp || mushroomGone)) {
           forcedMysteryDone = true;
           stopLoop();
-          log("demo_complete", { step, hpStart: mysteryEatStartHp, hpNow, mushroomGone });
+          logTrial("demo_complete", { step, hpStart: mysteryEatStartHp, hpNow: character.hp, mushroomGone });
           showInstruction("proceed", "Start", startSkyPractice);
         }
         return;
       }
 
-      // -------- Step 4 gate: press P when eligible --------
-      // This is handled by your handleTextInteraction_canvas4() calling proceedFromRoom('p'),
-      // which we patched to finish() ONLY in demo_sky.
-      if (step === "demo_sky") {
-        // no additional gating here; patched proceedFromRoom ends practice
-        return;
-      }
+      // demo_sky ends ONLY by pressing P (intercepted via patched proceedFromRoom)
     }
 
     function finish(reason) {
       stopLoop();
-      log("practice_end", { reason, hp: window.character?.hp });
+      logTrial("practice_end", { reason, hp: character ? character.hp : null });
 
-      // remove overlay + listeners + restore
-      ui.btn.onclick = null;
-      if (ui.root && ui.root.parentNode) ui.root.parentNode.removeChild(ui.root);
+      restoreAll();
 
-      window.removeEventListener("keydown", blockerDown, true);
-      window.removeEventListener("keyup", blockerUp, true);
-
-      restoreGlobals();
-
-      safe(cfg.onDone, reason);
+      if (cfg.onDone) safeCall(cfg.onDone, reason);
     }
 
-    // Public start: kick off instruction sequence
-    function start() {
-      log("practice_start", {});
-      // Start at move instruction
-      showInstruction("move", "Start", startMoveDemo);
-    }
-
-    return { start };
+    // Start sequence
+    logTrial("practice_start", {});
+    showInstruction("move", "Start", startMoveDemo);
   }
 
   // -----------------------
@@ -635,13 +741,7 @@
   // -----------------------
   window.PracticeSkyPhase = {
     start: function (opts = {}) {
-      const cfg = {
-        instructionBases: opts.instructionBases || DEFAULT_BASES,
-        pngNames: Object.assign({}, DEFAULT_PNGS, opts.pngNames || {}),
-        onDone: opts.onDone,
-      };
-      const runner = createPracticeRunner(cfg);
-      runner.start();
+      startPractice(opts);
     }
   };
 })();

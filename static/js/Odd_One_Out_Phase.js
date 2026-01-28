@@ -307,12 +307,13 @@ function finishTaskOOO() {
 
   if (typeOOO === 0) {
     // continue to explore phase
-    if (typeof startExplore === 'function') // instead of jumping directly to exploration:
-PracticeSkyPhase.start({
-  onDone: () => {
-    startExplore(); // <-- replace with your real call
-  }
-});;
+    if (typeof startExplore === 'function')PracticeSkyPhase.start({
+      instructionFolder: "TexturePack/instructions/practice_instruction/",
+      onDone: () => {
+        // then continue your normal flow into exploration
+        startExplore (); // replace with your real function/call
+      }
+    });
     typeOOO++;
   } else if (typeOOO === 1) {
     // Transition to post-survey instead of saving immediately
