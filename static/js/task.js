@@ -1,15 +1,9 @@
 // ========== task.js (platform-locked mushrooms; 5 per room; waits for platforms) ==========
 // Instruction preloads
 const INSTR_SLIDES = {
-  explore: [1, 2, 3],
-  memory: [1, 2],
-  ooo: [1],
-  practice: [
-    "practice_move.png",
-    "practice_stamina.png",
-    "practice_mystery.png",
-    "practice_proceed.png",
-  ], // NEW
+  explore: [1, 2, 3],   
+  memory:  [1, 2],
+  ooo:     [1]
 };
 
 
@@ -55,13 +49,11 @@ const INSTR_BASE = 'TexturePack/instructions';
 
 // Subfolder names per phase (relative to INSTR_BASE)
 const INSTR_FOLDERS = {
-  explore: "explore_phase",
-  memory: "memory_phase",
-  ooo: "ooo_phase",
-  practice: "practice_instruction", // NEW
+  explore: 'explore_phase',
+  memory: 'memory_phase',
+  ooo: 'ooo_phase', 
+  // You can add more, e.g. ooo: 'ooo_phase'
 };
-
-
 
 // File naming convention: numbered PNG files "1.png", "2.png", ... "N.png"
 const INSTR_MAX_SLIDES = 50; // safety cap
@@ -78,34 +70,21 @@ function preloadInstructionSlides(phaseKey) {
   const folderUrl = `${INSTR_BASE}/${sub}`;
   const slideIds = (INSTR_SLIDES[phaseKey] || []).slice(); // keep declared order
 
-  const jobs = slideIds.map((rawId, idx) => {
-    // ✅ Support:
-    // - number: 1  -> "1.png"
-    // - "1"       -> "1.png"
-    // - "foo.png" -> "foo.png" (exact filename)
-    let url;
-    let sortKey;
-
-    if (typeof rawId === 'number' || (/^\d+$/.test(String(rawId).trim()))) {
-      const idNum = Number(rawId);
-      url = `${folderUrl}/${idNum}.${INSTR_EXT}`;
-      sortKey = idNum; // numeric sort
-    } else {
-      const name = String(rawId).trim();
-      url = `${folderUrl}/${name}`; // exact filename (already includes .png)
-      sortKey = idx + 1e6; // keep declared order after numeric ones
-    }
+  const jobs = slideIds.map((rawId) => {
+    const id = Number(rawId); // ensure numeric for correct sorting
+    const url = `${folderUrl}/${id}.${INSTR_EXT}`;
 
     return new Promise((resolve) => {
       const img = new Image();
-      img.onload  = () => resolve({ ok: true,  sortKey, url, img });
-      img.onerror = () => resolve({ ok: false, sortKey, url, img: null });
+      img.onload  = () => resolve({ ok: true,  id, url, img });
+      img.onerror = () => resolve({ ok: false, id, url, img: null });
       img.src = url;
     });
   });
 
   return Promise.all(jobs).then((results) => {
-    const ok = results.filter(r => r.ok).sort((a, b) => a.sortKey - b.sortKey);
+    // Keep only successfully loaded slides, sorted by id (1,2,3,...)
+    const ok = results.filter(r => r.ok).sort((a, b) => a.id - b.id);
 
     const urls = ok.map(r => r.url);
     const imgs = ok.map(r => r.img);
@@ -114,7 +93,6 @@ function preloadInstructionSlides(phaseKey) {
     return INSTR_CACHE[phaseKey];
   });
 }
-
 
 
 
@@ -346,81 +324,28 @@ function showPhaseInstructions(phaseKey, onDone) {
 
 
 // =================== END NEW: Instruction system ===================
-// ===================== PRACTICE SKY FLOW =====================
-let PRACTICE_MODE = false;
-let PRACTICE_DONE = false;
+function startPracticeExplore() {
+  // Hide anything you want hidden here (optional)
+  // e.g., hide OOO UI, etc.
 
-// how many mushroom decisions in sky until we end practice
-const PRACTICE_DECISIONS_TO_FINISH = 1;
-let practiceDecisionCount = 0;
-
-function enterPracticeSkyRoom() {
-  PRACTICE_MODE = true;
-  PRACTICE_DONE = false;
-  practiceDecisionCount = 0;
-
-  // Force sky room context
-  env_deter = 'sky';
-  currentRoom = 'sky';
-  currentCanvas = 4;
-
-  // Reset room state (already exists in your env)
-  if (typeof resetRoomVisitState === 'function') resetRoomVisitState();
-
-  // Fresh platforms + sky mushrooms
-  groundPlatforms = generateGroundPlatforms(worldWidth, 200, 400);
-  generateMushroom(5).then(ms => { mushrooms = ms || []; });
-
-  // Place character safely
-  cameraOffset = 0;
-  const respawn = getRespawnSpot();
-  if (typeof character.worldX !== 'number') character.worldX = respawn.x;
-  character.worldX = respawn.x;
-  character.y = respawn.y;
-
-  // Give some HP for practice (avoid immediate auto-death / weirdness)
-  if (typeof character.hp !== 'number' || character.hp <= 0) {
-    character.hp = 20;
-  }
-}
-
-function finishPracticeAndGoToExploreInstructions() {
-  if (PRACTICE_DONE) return;
-  PRACTICE_DONE = true;
-  PRACTICE_MODE = false;
-
-  // After practice, show explore instructions, then go to hub (canvas 1)
-  showPhaseInstructions('explore', () => {
-    currentCanvas = 1;
-    currentRoom = null;
-    env_deter = 'sky';        // background in hub is sky anyway
-    doorsAssigned = false;
-    leftDoorType = null;
-    rightDoorType = null;
-    roomChoiceStartTime = performance.now();
-
-    // reset init_position so hub spawn logic runs cleanly
-    init_position = true;
+  window.PracticeExplorePhase.start({
+    participantData,          // uses your existing participantData object
+    totalQuestions: 2,        // practice length; change as needed
+    onDone: () => {
+      // When practice ends, continue with REAL exploration
+      startExplore();
+    }
   });
 }
-
-
 
 function startExplore() {
-  // NEW ORDER:
-  // practice instructions -> sky room practice -> explore instructions -> hub
-  showPhaseInstructions('practice', async () => {
+  // Show instructions for the explore phase first, then actually start the phase
+  showPhaseInstructions('explore', () => {
     const e = document.getElementById('explorephase');
     if (e) e.style.display = 'block';
-
-    // Start the game loop once
-    await initGame();
-
-    // Immediately enter the practice sky room
-    enterPracticeSkyRoom();
+    initGame();
   });
 }
-
 
 function startMemorry() {
   // Hide explore UI first, then show memory instructions
@@ -465,7 +390,7 @@ async function ensurePlatformsReady(timeoutMs = 3000) {
 }
 
 /* =======================================================================
-  Helpers for platform-aware placement (WORLD space)
+   Helpers for platform-aware placement (WORLD space)
    ======================================================================= */
 
 function groundAtX(xWorld) {

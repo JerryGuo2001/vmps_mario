@@ -306,8 +306,7 @@ function finishTaskOOO() {
   trialStartTimeOOO = null;
 
   if (typeOOO === 0) {
-    // continue to explore phase
-    if (typeof startExplore === 'function')startExplore ()
+    startPracticeExplore()
     typeOOO++;
   } else if (typeOOO === 1) {
     // Transition to post-survey instead of saving immediately
