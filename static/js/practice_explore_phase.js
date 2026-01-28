@@ -1,1247 +1,996 @@
-/* ===========================
-   practice_explore_phase.js  (STANDALONE)
-   - Self-contained "practice exploration" that mirrors your exploration structure:
-     Canvas 1: door choice
-     Canvas 4: world platforms + 5 mushrooms + head-hit reveal
-     Immediate decision-freeze: E=eat, Q=ignore (timeout auto)
-     P to proceed when HP unlocked (threshold)
-   - DOES NOT reuse your task.js / game_env.js / game_function.js functions or globals.
-   - Uses the SAME DOM canvas #gameCanvas.
-   - Uses window.mushroomCatalogRows if it exists; otherwise falls back to rainbow-only mushrooms.
-   - Calls onDone() -> you wire that to startExplore().
-   =========================== */
+// ===============================
+// practice_phase.js  (STANDALONE)
+// - Everything is prefixed pr_
+// - Patches startExplore() so practice runs BEFORE real exploration
+// - No reuse of task.js / game_env.js / game_function.js symbols
+// ===============================
 
-(function () {
-  "use strict";
+// --------------------
+// Practice config
+// --------------------
+var pr_PRACTICE_DONE = false;
+var pr_PRACTICE_DECISIONS_TO_FINISH = 3; // end practice after N eat/ignore/timeout decisions
 
-  // Export
-  window.PracticeExplorePhase = {
-    start,
-    stop
-  };
+// Instruction slides (place PNGs here):
+// TexturePack/instructions/practice_instruction/1.png ...
+var pr_INSTR_BASE = "TexturePack/instructions";
+var pr_INSTR_FOLDERS = { practice: "practice_instruction" };
+var pr_INSTR_SLIDES = { practice: [1, 2, 3, 4] };
+var pr_INSTR_EXT = "png";
+var pr_INSTR_CACHE = Object.create(null);
 
-  // ---------------------------
-  // Config defaults
-  // ---------------------------
-  const DEFAULTS = {
-    canvasId: "gameCanvas",
-    totalQuestions: 2,              // practice length (Canvas1->Canvas4 cycles)
-    worldWidth: 2000,
-    worldHeight: 600,
-    canvasW: 600,
-    canvasH: 500,
-    baseStartHP: 20,
-    maxHP: 100,
-    hpThreshold: 30,               // P unlock threshold
-    hungerTickSec: 10,             // -1 HP every N seconds
-    maxDecisionTimeMs: 5000,
-    decisionRevealMs: 1000,        // show value after E
-    regenCount: 5,
-    doorTypes: ["lava", "forest", "ocean", "desert", "cave"],
-    useCatalogIfAvailable: true
-  };
+// --------------------
+// Minimal participantData safety (reuse the same participantData object if present)
+// --------------------
+if (!window.participantData) {
+  window.participantData = { id: null, startTime: null, trials: [] };
+} else if (!Array.isArray(window.participantData.trials)) {
+  window.participantData.trials = [];
+}
 
-  // ---------------------------
-  // Assets (same paths you use)
-  // ---------------------------
-  const ASSETS = {
-    ground: "TexturePack/brick_texture.png",
-    mario: "TexturePack/mario.png",
-    box: "TexturePack/box.jpg",
-    bg: {
-      sky: "TexturePack/sky.png",
-      ocean: "TexturePack/ocean.png",
-      desert: "TexturePack/desert.png",
-      forest: "TexturePack/forest.png",
-      cave: "TexturePack/cave.png",
-      lava: "TexturePack/lava.png"
-    },
-    doors: {
-      lava: "TexturePack/lavaDoor.png",
-      forest: "TexturePack/forestDoor.png",
-      ocean: "TexturePack/oceanDoor.png",
-      desert: "TexturePack/desertDoor.png",
-      cave: "TexturePack/caveDoor.png"
-    },
-    skyRainbowMushroom: "TexturePack/mushroom_pack/sky_mushroom/rainbow_mushroom.png"
-  };
-
-  // Same structure you used
-  const ROOM_COLOR_MAP = {
-    yellow:  ["desert"],
-    magenta: ["ocean"],
-    green:   ["forest"],
-    black:   ["cave"],
-    red:     ["lava"],
-    cyan:    ["desert", "cave"],
-    white:   ["ocean", "forest", "lava"],
-    blue:    ["desert", "ocean", "forest", "cave", "lava"]
-  };
-
-  // Mushroom placement / box dims (same vibe)
-  const BOX_W = 50;
-  const BOX_H = 50;
-
-  // Decision box mushroom size
-  const MUSHROOM_DISPLAY_SIZE = 150;
-
-  // ---------------------------
-  // Internal state (private)
-  // ---------------------------
-  let cfg = null;
-  let participantData = null;
-  let onDone = null;
-
-  let canvas = null;
-  let ctx = null;
-
-  let running = false;
-  let rafId = null;
-
-  // input
-  let keys = Object.create(null);
-  let keydownHandler = null;
-  let keyupHandler = null;
-
-  // time & loop
-  const targetFPS = 60;
-  const targetTimeStep = 1 / targetFPS;
-  let lastTime = 0;
-  let accumulatedTime = 0;
-
-  // phase state (mirrors your structure)
-  let currentCanvas = 1; // 1 doors, 4 world
-  let currentQuestion = 1;
-  let totalQuestions = 2;
-
-  // world/camera
-  let cameraOffset = 0;
-  let worldWidth = 2000;
-
-  // character
-  let gravity = 0.5;
-  let character = null;
-
-  // platforms + mushrooms
-  let groundPlatforms = [];
-  let mushrooms = [];
-
-  // room choice
-  let env_deter = "sky";         // current background env
-  let currentRoom = null;        // chosen door room
-  let leftDoorType = null;
-  let rightDoorType = null;
-  let doorsAssigned = false;
-  let roomChoiceStartTime = null;
-
-  // HP gating (same latch behavior)
-  let roomProceedUnlocked = false;
-  let roomAutoAdvanceFired = false;
-
-  // hunger
-  let hungerInterval = null;
-  let hungerCountdown = 10;
-
-  // freeze / decision
-  let freezeState = false;
-  let freezeTime = 0;
-  let activeMushroom = null;
-  let revealOnlyValue = false;
-  let mushroomDecisionTimer = 0;
-  let mushroomDecisionStartTime = null;
-
-  // logging
-  let trialIndex = 0;
-
-  // sprites
-  const imgGround = new Image();
-  imgGround.src = ASSETS.ground;
-
-  const imgMario = new Image();
-  imgMario.src = ASSETS.mario;
-
-  const imgBox = new Image();
-  imgBox.src = ASSETS.box;
-
-  const bgImgs = {
-    sky: new Image(),
-    ocean: new Image(),
-    desert: new Image(),
-    forest: new Image(),
-    cave: new Image(),
-    lava: new Image()
-  };
-  Object.keys(bgImgs).forEach(k => (bgImgs[k].src = ASSETS.bg[k]));
-
-  const doorImgs = {
-    lava: new Image(),
-    forest: new Image(),
-    ocean: new Image(),
-    desert: new Image(),
-    cave: new Image()
-  };
-  Object.keys(doorImgs).forEach(k => (doorImgs[k].src = ASSETS.doors[k]));
-
-  // mario sprite frames (same minimal scheme)
-  let frameWidth = 15, frameHeight = 15;
-  let frameSpeed = 5, tickCount = 0, frameIndex = 0;
-  const marioAnimations = {
-    idle: { x: 211, y: 0 },
-    run: [{ x: 272, y: 0 }, { x: 241, y: 0 }, { x: 300, y: 0 }],
-    jump: { x: 359, y: 0 }
-  };
-
-  // ---------------------------
-  // Public API
-  // ---------------------------
-  function start(options = {}) {
-    stop(); // ensure no double-run
-
-    cfg = { ...DEFAULTS, ...(options || {}) };
-    participantData = cfg.participantData || window.participantData || null;
-    onDone = typeof cfg.onDone === "function" ? cfg.onDone : null;
-
-    totalQuestions = Math.max(1, Number(cfg.totalQuestions || DEFAULTS.totalQuestions));
-    worldWidth = Math.max(800, Number(cfg.worldWidth || DEFAULTS.worldWidth));
-
-    canvas = document.getElementById(cfg.canvasId);
-    if (!canvas) throw new Error(`[PracticeExplorePhase] canvas not found: #${cfg.canvasId}`);
-    ctx = canvas.getContext("2d");
-
-    // lock canvas size (match your exploration initGame)
-    canvas.width = cfg.canvasW;
-    canvas.height = cfg.canvasH;
-
-    // init state
-    running = true;
-    currentCanvas = 1;
-    currentQuestion = 1;
-    cameraOffset = 0;
-
-    keys = Object.create(null);
-    freezeState = false;
-    freezeTime = 0;
-    activeMushroom = null;
-    revealOnlyValue = false;
-    mushroomDecisionTimer = 0;
-    mushroomDecisionStartTime = null;
-
-    doorsAssigned = false;
-    leftDoorType = null;
-    rightDoorType = null;
-    currentRoom = null;
-    env_deter = "sky";
-    roomChoiceStartTime = null;
-
-    roomProceedUnlocked = false;
-    roomAutoAdvanceFired = false;
-
-    // init character
-    character = createCharacter(canvas, cfg.baseStartHP);
-
-    // initial platforms/mushrooms ready (for canvas4 once room chosen)
-    groundPlatforms = [];
-    mushrooms = [];
-
-    // input hooks
-    keydownHandler = (e) => {
-      keys[e.key] = true;
-      // prevent page scroll with arrows/space during practice
-      if (["ArrowLeft", "ArrowRight", "ArrowUp", " "].includes(e.key)) {
-        e.preventDefault();
+// --------------------
+// Practice inline instruction UI (prefixed IDs)
+// --------------------
+function pr_ensureInstrInlineRoot() {
+  if (!document.getElementById("pr-instr-inline-style")) {
+    var style = document.createElement("style");
+    style.id = "pr-instr-inline-style";
+    style.textContent = `
+      #pr-instr-inline{
+        display:none;
+        margin:16px auto;
+        max-width:900px;
+        background:#121212;color:#EEE;
+        border-radius:12px;
+        box-shadow:0 12px 40px rgba(0,0,0,0.15);
+        overflow:hidden;
+        flex-direction:column;
+        z-index:9999;
       }
-    };
-    keyupHandler = (e) => {
-      keys[e.key] = false;
-    };
-    window.addEventListener("keydown", keydownHandler, { passive: false });
-    window.addEventListener("keyup", keyupHandler, { passive: true });
-
-    // hunger
-    startHunger();
-
-    // loop
-    lastTime = 0;
-    accumulatedTime = 0;
-    rafId = requestAnimationFrame(updateGame);
+      #pr-instr-inline-header{
+        padding:12px 16px;font-weight:600;
+        border-bottom:1px solid rgba(255,255,255,0.08);
+        background:#181818;
+      }
+      #pr-instr-inline-body{
+        min-height:320px;
+        display:flex;align-items:center;justify-content:center;
+        background:#0e0e0e;padding:8px;
+      }
+      #pr-instr-inline-body img{
+        max-width:100%;
+        max-height:65vh;
+        object-fit:contain;
+        display:block;
+      }
+      #pr-instr-inline-default{
+        padding:24px;text-align:center;line-height:1.6;font-size:18px;
+      }
+      #pr-instr-inline-footer{
+        padding:10px 16px;
+        display:flex;gap:10px;justify-content:space-between;align-items:center;
+        background:#181818;border-top:1px solid rgba(255,255,255,0.08);
+      }
+      .pr-instr-btn{
+        appearance:none;border:none;border-radius:10px;
+        padding:10px 14px;cursor:pointer;
+        background:#2a2a2a;color:#fff;font-weight:600;
+      }
+      .pr-instr-btn[disabled]{opacity:.4;cursor:default;}
+      .pr-instr-btn.primary{background:#3a6df0;}
+      .pr-instr-counter{opacity:.7;font-size:14px;}
+    `;
+    document.head.appendChild(style);
   }
 
-  function stop() {
-    running = false;
-    if (rafId) cancelAnimationFrame(rafId);
-    rafId = null;
+  if (!document.getElementById("pr-instr-inline")) {
+    var wrap = document.createElement("div");
+    wrap.id = "pr-instr-inline";
+    wrap.innerHTML = `
+      <div id="pr-instr-inline-header">Practice Instructions</div>
+      <div id="pr-instr-inline-body"></div>
+      <div id="pr-instr-inline-footer">
+        <div>
+          <button id="pr-instr-prev" class="pr-instr-btn" aria-label="Previous slide">◀ Prev</button>
+          <span id="pr-instr-counter" class="pr-instr-counter"></span>
+        </div>
+        <div>
+          <button id="pr-instr-next" class="pr-instr-btn primary" aria-label="Next slide">Next ▶</button>
+        </div>
+      </div>
+    `;
 
-    if (keydownHandler) window.removeEventListener("keydown", keydownHandler);
-    if (keyupHandler) window.removeEventListener("keyup", keyupHandler);
-    keydownHandler = null;
-    keyupHandler = null;
-
-    stopHunger();
-
-    // Do NOT clear participantData; just reset our internal refs
-    cfg = null;
-    onDone = null;
-    // keep canvas/ctx refs (harmless)
+    // Put it near the top of body to guarantee visibility
+    document.body.prepend(wrap);
   }
+}
 
-  // ---------------------------
-  // Core loop
-  // ---------------------------
-  function updateGame(t) {
-    if (!running) return;
+function pr_preloadInstructionSlides(phaseKey) {
+  var sub = pr_INSTR_FOLDERS[phaseKey];
+  if (!sub) return Promise.resolve({ urls: [], imgs: [] });
 
-    // 1) freeze (decision)
-    if (freezeState && activeMushroom) {
-      // prevent time accumulation while frozen
-      lastTime = t;
-      accumulatedTime = 0;
+  var folderUrl = pr_INSTR_BASE + "/" + sub;
+  var slideIds = (pr_INSTR_SLIDES[phaseKey] || []).slice();
 
-      // block all keys except e/q
-      for (const k in keys) {
-        if (k !== "e" && k !== "q") keys[k] = false;
-      }
+  var jobs = slideIds.map(function (rawId) {
+    var id = Number(rawId);
+    var url = folderUrl + "/" + id + "." + pr_INSTR_EXT;
 
-      if (freezeTime > 0) {
-        freezeTime -= 16;
-        drawCanvas4Frozen();
-        rafId = requestAnimationFrame(updateGame);
+    return new Promise(function (resolve) {
+      var img = new Image();
+      img.onload = function () { resolve({ ok: true, id: id, url: url, img: img }); };
+      img.onerror = function () { resolve({ ok: false, id: id, url: url, img: null }); };
+      img.src = url;
+    });
+  });
+
+  return Promise.all(jobs).then(function (results) {
+    var ok = results.filter(function (r) { return r.ok; }).sort(function (a, b) { return a.id - b.id; });
+    var urls = ok.map(function (r) { return r.url; });
+    var imgs = ok.map(function (r) { return r.img; });
+    pr_INSTR_CACHE[phaseKey] = { urls: urls, imgs: imgs };
+    return pr_INSTR_CACHE[phaseKey];
+  });
+}
+
+function pr_showPhaseInstructions(phaseKey, onDone) {
+  pr_ensureInstrInlineRoot();
+
+  var wrap = document.getElementById("pr-instr-inline");
+  var body = document.getElementById("pr-instr-inline-body");
+  var prevBtn = document.getElementById("pr-instr-prev");
+  var nextBtn = document.getElementById("pr-instr-next");
+  var counter = document.getElementById("pr-instr-counter");
+
+  function pr_useSlides(cache) {
+    var slides = (cache && cache.urls) ? cache.urls : [];
+    var idx = 0;
+
+    function render() {
+      body.innerHTML = "";
+
+      if (!slides.length) {
+        var box = document.createElement("div");
+        box.id = "pr-instr-inline-default";
+        var sub = pr_INSTR_FOLDERS[phaseKey];
+        var folderUrl = pr_INSTR_BASE + "/" + sub;
+        box.innerHTML =
+          "<p>No practice slides found in <code>" + folderUrl + "/</code>.</p>" +
+          "<p>Click “Start” to begin practice.</p>";
+        body.appendChild(box);
+
+        prevBtn.disabled = true;
+        counter.textContent = "";
+        nextBtn.textContent = "Start";
         return;
       }
 
-      // after reveal pause ends
-      if (revealOnlyValue) {
-        revealOnlyValue = false;
-        removeActiveMushroom();
-        rafId = requestAnimationFrame(updateGame);
-        return;
-      }
+      var img = new Image();
+      img.decoding = "async";
+      img.loading = "eager";
+      img.alt = "Practice instruction slide " + (idx + 1);
+      img.src = slides[idx];
+      body.appendChild(img);
 
-      mushroomDecisionTimer += 16;
-
-      drawCanvas4Frozen();
-
-      // accept response
-      if (keys["e"]) {
-        if (!activeMushroom.decisionMade) {
-          activeMushroom.decisionMade = true;
-          logDecision("eat");
-
-          // apply value
-          const delta = getNumericValue(activeMushroom.value);
-          character.hp = clampHP(character.hp + delta, cfg.maxHP);
-
-          // reveal value briefly
-          revealOnlyValue = true;
-          freezeTime = cfg.decisionRevealMs;
-
-          // clear start time
-          mushroomDecisionStartTime = null;
-        }
-      } else if (keys["q"] || mushroomDecisionTimer >= cfg.maxDecisionTimeMs) {
-        if (!activeMushroom.decisionMade) {
-          activeMushroom.decisionMade = true;
-          logDecision(keys["q"] ? "ignore" : "timeout");
-
-          mushroomDecisionStartTime = null;
-          removeActiveMushroom();
-        }
-      }
-
-      rafId = requestAnimationFrame(updateGame);
-      return;
+      prevBtn.disabled = (idx === 0);
+      var isLast = (idx === slides.length - 1);
+      nextBtn.textContent = isLast ? "Start" : "Next ▶";
+      counter.textContent = "Slide " + (idx + 1) + " / " + slides.length;
     }
 
-    // 2) time-based freeze
-    if (freezeTime > 0) {
-      lastTime = t;
-      accumulatedTime = 0;
-      freezeTime -= 16;
-      rafId = requestAnimationFrame(updateGame);
-      return;
+    function finish() {
+      wrap.style.display = "none";
+      window.removeEventListener("keydown", keyNav, true);
+      if (typeof onDone === "function") onDone();
     }
-    freezeTime = 0;
 
-    // 3) fixed timestep normal loop
-    if (!lastTime) lastTime = t;
-    let deltaTime = (t - lastTime) / 1000;
-    lastTime = t;
-    accumulatedTime += deltaTime;
+    function keyNav(e) {
+      if (wrap.style.display === "none") return;
 
-    while (accumulatedTime >= targetTimeStep) {
-      clearCanvas();
-
-      if (currentCanvas === 1) {
-        drawCanvas1Doors();
-        handleMovementCanvas1();
-        handleDoorInteractions();
-      } else {
-        drawCanvas4World();
-        handleMovementCanvas4();
-        handlePProceedPrompt();
-        handleRegenIfEmpty();
-      }
-
-      accumulatedTime -= targetTimeStep;
-
-      // completion check (after each tick)
-      if (currentQuestion > totalQuestions) {
-        endPractice();
-        return;
+      if (e.key === "ArrowLeft") {
+        if (idx > 0) { idx--; render(); }
+        e.preventDefault(); e.stopImmediatePropagation();
+      } else if (e.key === "ArrowRight" || e.key === " ") {
+        var isLast = (!slides.length) || (idx === slides.length - 1);
+        if (isLast) finish();
+        else { idx++; render(); }
+        e.preventDefault(); e.stopImmediatePropagation();
       }
     }
 
-    rafId = requestAnimationFrame(updateGame);
-  }
-
-  // ---------------------------
-  // Canvas 1: doors (matches your structure)
-  // ---------------------------
-  function drawCanvas1Doors() {
-    // background sky + ground tiles (same style)
-    drawBackground("sky");
-    drawGroundFlat();
-
-    if (!doorsAssigned) assignDoors();
-
-    const doorWidth = 70, doorHeight = 75;
-    const doorY = canvas.height * 0.8 - doorHeight + 5;
-    const leftX = canvas.width * 0.25 - doorWidth / 2;
-    const rightX = canvas.width * 0.75 - doorWidth / 2;
-
-    const leftImg = doorImgs[leftDoorType];
-    const rightImg = doorImgs[rightDoorType];
-
-    if (leftImg && leftImg.complete) ctx.drawImage(leftImg, leftX, doorY, doorWidth, doorHeight);
-    if (rightImg && rightImg.complete) ctx.drawImage(rightImg, rightX, doorY, doorWidth, doorHeight);
-
-    // small prompt header
-    ctx.fillStyle = "#000";
-    ctx.font = "16px Arial";
-    ctx.fillText(`Practice: choose a door (E). Trial ${currentQuestion}/${totalQuestions}`, 20, 30);
-
-    // draw character
-    drawCharacterScreen(character.x, character.y);
-    drawHPBarTopRight();
-  }
-
-  function assignDoors() {
-    const pool = (cfg.doorTypes || DEFAULTS.doorTypes).slice();
-    shuffle(pool);
-    leftDoorType = pool[0];
-    rightDoorType = pool.find(x => x !== leftDoorType) || pool[0];
-    doorsAssigned = true;
-    roomChoiceStartTime = performance.now();
-  }
-
-  function handleDoorInteractions() {
-    if (!doorsAssigned) return;
-
-    const doorWidth = 70, doorHeight = 75;
-    const doorY = canvas.height * 0.8 - doorHeight + 5;
-    const leftX = canvas.width * 0.25 - doorWidth / 2;
-    const rightX = canvas.width * 0.75 - doorWidth / 2;
-
-    const overLeft =
-      character.x + character.width > leftX &&
-      character.x < leftX + doorWidth &&
-      character.y + character.height > doorY;
-
-    const overRight =
-      character.x + character.width > rightX &&
-      character.x < rightX + doorWidth &&
-      character.y + character.height > doorY;
-
-    if (overLeft || overRight) {
-      ctx.fillStyle = "#000";
-      ctx.font = "16px Arial";
-      ctx.fillText("Press E to enter", (overLeft ? leftX : rightX) - 20, doorY - 30);
-
-      if (keys["e"]) {
-        keys["e"] = false;
-
-        const chosen = overLeft ? leftDoorType : rightDoorType;
-        env_deter = chosen;
-        currentRoom = chosen;
-
-        logRoomChoice(overLeft ? "left" : "right", chosen);
-
-        // enter Canvas4 world
-        enterCanvas4World();
-      }
-    }
-  }
-
-  function handleMovementCanvas1() {
-    // horizontal only, flat ground
-    if (keys["ArrowLeft"] && keys["ArrowRight"]) {
-      decelerate();
-    } else if (keys["ArrowRight"]) {
-      character.speed = Math.min(character.max_speed, character.speed + character.acceleration);
-    } else if (keys["ArrowLeft"]) {
-      character.speed = Math.max(-character.max_speed, character.speed - character.acceleration);
-    } else {
-      decelerate();
-    }
-
-    if (keys["ArrowUp"] && character.y + character.height >= canvas.height * 0.8) {
-      character.velocityY = -13;
-    }
-
-    character.x += character.speed;
-
-    // gravity
-    character.velocityY += gravity;
-    character.y += character.velocityY;
-
-    // collide with flat ground
-    const groundY = canvas.height * 0.8;
-    if (character.y + character.height > groundY) {
-      character.y = groundY - character.height;
-      character.velocityY = 0;
-    }
-    if (character.x < 0) character.x = 0;
-    if (character.x + character.width > canvas.width) character.x = canvas.width - character.width;
-    if (character.y < 0) character.y = 0;
-  }
-
-  // ---------------------------
-  // Canvas 4: world platforms + boxes + head-hit reveal + decision freeze
-  // ---------------------------
-  function enterCanvas4World() {
-    currentCanvas = 4;
-
-    // reset camera + put character near left
-    cameraOffset = 0;
-    character.worldX = 30;
-    character.x = 30;
-    character.y = 10;
-    character.velocityY = 0;
-
-    // reset per-room gating
-    roomProceedUnlocked = false;
-    roomAutoAdvanceFired = false;
-
-    // new platforms per entry (like your code)
-    groundPlatforms = generateGroundPlatforms(worldWidth, 200, 400);
-
-    // spawn mushrooms
-    mushrooms = generateMushrooms(cfg.regenCount, env_deter, groundPlatforms);
-
-    // done: doors reset for next time you return to Canvas1
-    doorsAssigned = false;
-  }
-
-  function drawCanvas4World() {
-    drawBackground(env_deter);
-    drawGroundPlatformsTiled();
-    drawBoxesAndMushrooms(); // includes collisions + head-hit reveal
-    drawCharacterWorld();
-    drawHPBarTopRight();
-    drawHungerCountdown();
-  }
-
-  function handleMovementCanvas4() {
-    // horizontal movement with worldX + camera follow
-    if (keys["ArrowLeft"] && keys["ArrowRight"]) decelerate();
-    else if (keys["ArrowRight"]) character.speed = Math.min(character.max_speed, character.speed + character.acceleration);
-    else if (keys["ArrowLeft"]) character.speed = Math.max(-character.max_speed, character.speed - character.acceleration);
-    else decelerate();
-
-    // apply x in world space
-    const oldWorldX = character.worldX;
-    character.worldX = clamp(oldWorldX + character.speed, 0, worldWidth - character.width);
-
-    // gravity
-    character.velocityY += gravity;
-
-    // predicted vertical
-    const oldY = character.y;
-    const newY = oldY + character.velocityY;
-
-    // platform landing (robust enough)
-    const overlaps = overlappingPlatformsWorld(character.worldX, character.worldX + character.width);
-    const oldBottom = oldY + character.height;
-    const newBottom = newY + character.height;
-
-    if (character.velocityY >= 0 && overlaps.length) {
-      const landing = findLandingPlatform(overlaps, oldBottom, newBottom);
-      if (landing) {
-        character.y = landing.y - character.height;
-        character.velocityY = 0;
-      } else {
-        character.y = newY;
-      }
-    } else {
-      character.y = newY;
-    }
-
-    // jump
-    const bottomNow = character.y + character.height;
-    const onGround = overlaps.some(p => Math.abs(bottomNow - p.y) <= 0.75);
-    if (keys["ArrowUp"] && onGround) {
-      character.velocityY = -13;
-    }
-
-    // camera follow
-    cameraOffset = clamp(character.worldX + character.width / 2 - canvas.width / 2, 0, worldWidth - canvas.width);
-    character.x = worldToScreenX(character.worldX);
-  }
-
-  function drawBoxesAndMushrooms() {
-    const prev = {
-      left: character.worldX,
-      right: character.worldX + character.width,
-      top: character.y,
-      bottom: character.y + character.height
+    prevBtn.onclick = function () { if (idx > 0) { idx--; render(); } };
+    nextBtn.onclick = function () {
+      var isLast = (!slides.length) || (idx === slides.length - 1);
+      if (isLast) finish();
+      else { idx++; render(); }
     };
 
-    // for each mushroom box
-    for (const m of mushrooms) {
-      // box world
-      const boxX_world = m.x;
-      const boxY_top = m.y;
-      const boxLeft = boxX_world - BOX_W / 2;
-      const boxRight = boxX_world + BOX_W / 2;
-      const boxBottom = boxY_top + BOX_H;
-
-      // draw box
-      const boxX_screen = worldToScreenX(boxX_world);
-      if (imgBox.complete) {
-        ctx.drawImage(imgBox, boxX_screen - BOX_W / 2, boxY_top, BOX_W, BOX_H);
-      } else {
-        ctx.fillStyle = "rgba(0,0,0,0.2)";
-        ctx.fillRect(boxX_screen - BOX_W / 2, boxY_top, BOX_W, BOX_H);
-        ctx.strokeStyle = "#333";
-        ctx.strokeRect(boxX_screen - BOX_W / 2, boxY_top, BOX_W, BOX_H);
-      }
-
-      // sweep test for this frame
-      const nextBottom = character.y + character.height + character.velocityY;
-      const nextTop = character.y + character.velocityY;
-      const hOver = (prev.left < boxRight && prev.right > boxLeft);
-
-      // LAND ON TOP
-      if (character.velocityY >= 0 && hOver &&
-          prev.bottom <= boxY_top && nextBottom >= boxY_top) {
-        character.y = boxY_top - character.height;
-        character.velocityY = 0;
-      }
-
-      // HEAD HIT FROM BELOW -> reveal and start decision immediately
-      if (character.velocityY < 0 && hOver &&
-          prev.top >= boxBottom && nextTop <= boxBottom) {
-        m.isVisible = true;
-
-        if (mushroomDecisionStartTime === null) mushroomDecisionStartTime = performance.now();
-
-        // start decision freeze immediately (your "instant freeze" behavior)
-        activeMushroom = m;
-        freezeState = true;
-        mushroomDecisionTimer = 0;
-        revealOnlyValue = false;
-
-        // snap under box
-        character.y = boxBottom;
-        character.velocityY = 0;
-        return; // stop further collision processing this tick
-      }
-
-      // Draw mushroom if revealed (growth optional; keep stable)
-      if (m.isVisible) {
-        const mW = 40;
-        const mH = 40;
-        const mScreenX = worldToScreenX(m.x);
-        if (m.image && m.image.complete) {
-          ctx.drawImage(m.image, mScreenX - mW / 2, m.y - mH, mW, mH);
-        }
-      }
-    }
+    wrap.style.display = "flex";
+    window.addEventListener("keydown", keyNav, true);
+    render();
   }
 
-  function drawCanvas4Frozen() {
-    // frozen view should render same background + character + question box
-    clearCanvas();
-    drawBackground(env_deter);
-    drawGroundPlatformsTiled();
-
-    // show boxes/mushrooms (no collisions while frozen)
-    for (const m of mushrooms) {
-      const boxX_screen = worldToScreenX(m.x);
-      if (imgBox.complete) ctx.drawImage(imgBox, boxX_screen - BOX_W / 2, m.y, BOX_W, BOX_H);
-      if (m.isVisible && m.image && m.image.complete) {
-        ctx.drawImage(m.image, worldToScreenX(m.x) - 20, m.y - 40, 40, 40);
-      }
-    }
-
-    drawCharacterWorld();
-    drawHPBarTopRight();
-    drawHungerCountdown();
-    drawMushroomQuestionBox();
+  if (pr_INSTR_CACHE[phaseKey]) {
+    pr_useSlides(pr_INSTR_CACHE[phaseKey]);
+  } else {
+    pr_preloadInstructionSlides(phaseKey)
+      .then(pr_useSlides)
+      .catch(function () { pr_useSlides({ urls: [], imgs: [] }); });
   }
+}
 
-  function drawMushroomQuestionBox() {
-    if (!activeMushroom) return;
+// --------------------
+// Practice game state (all prefixed)
+// --------------------
+var pr_canvas = null;
+var pr_ctx = null;
 
-    const boxMargin = 100;
-    const boxTop = 80;
-    const boxHeight = 260;
+var pr_character = null;
+var pr_gravity = 0.5;
+var pr_keys = Object.create(null);
 
-    ctx.fillStyle = "#fff";
-    ctx.strokeStyle = "#000";
-    ctx.lineWidth = 3;
-    ctx.fillRect(boxMargin, boxTop, canvas.width - 2 * boxMargin, boxHeight);
-    ctx.strokeRect(boxMargin, boxTop, canvas.width - 2 * boxMargin, boxHeight);
+var pr_worldWidth = 2000;
+var pr_cameraOffset = 0;
 
-    ctx.fillStyle = "#000";
-    ctx.font = "18px Arial";
-    ctx.fillText("Do you want to eat this mushroom?", canvas.width / 2 - 160, boxTop + 30);
+var pr_groundPlatforms = [];
+var pr_mushrooms = [];
 
-    if (revealOnlyValue) {
-      ctx.font = "20px Arial";
-      const v = getNumericValue(activeMushroom.value);
-      const text = (v > 0 ? `+${v}` : `${v}`);
-      ctx.fillText(text, canvas.width / 2 - ctx.measureText(text).width / 2, boxTop + 130);
+var pr_gameRunning = false;
+var pr_lastTime = 0;
+var pr_accumulatedTime = 0;
+var pr_targetFPS = 60;
+var pr_targetTimeStep = 1 / pr_targetFPS;
+
+var pr_freezeState = false;
+var pr_activeMushroom = null;
+var pr_mushroomDecisionTimer = 0;
+var pr_maxDecisionTime = 5000;
+var pr_mushroomDecisionStartTime = null;
+var pr_revealOnlyValue = false;
+var pr_freezeTime = 0;
+
+var pr_decisionsMade = 0;
+var pr_rafId = 0;
+
+// --------------------
+// Assets (prefixed)
+// --------------------
+var pr_groundImage = new Image();
+pr_groundImage.src = "TexturePack/brick_texture.png";
+
+var pr_skyImage = new Image();
+pr_skyImage.src = "TexturePack/sky.png";
+
+var pr_marioSprite = new Image();
+pr_marioSprite.src = "TexturePack/mario.png";
+
+var pr_boxImage = new Image();
+pr_boxImage.src = "TexturePack/box.jpg";
+
+var pr_rainbowMushroomImg = new Image();
+pr_rainbowMushroomImg.src = "TexturePack/mushroom_pack/sky_mushroom/rainbow_mushroom.png";
+
+// --------------------
+// Helpers (prefixed)
+// --------------------
+function pr_clamp(n, lo, hi) { return Math.max(lo, Math.min(hi, n)); }
+
+function pr_worldToScreenX(xWorld) { return xWorld - pr_cameraOffset; }
+
+function pr_wrapWorldX(xWorld) {
+  var maxX = pr_worldWidth - pr_character.width;
+  if (maxX <= 0) return 0;
+  if (xWorld < 0) return maxX;
+  if (xWorld > maxX) return 0;
+  return xWorld;
+}
+
+function pr_horizOverlap(aLeft, aRight, bLeft, bRight) {
+  return aLeft < bRight && aRight > bLeft;
+}
+
+function pr_overlappingPlatformsWorld(xLeft, xRight) {
+  if (!Array.isArray(pr_groundPlatforms)) return [];
+  return pr_groundPlatforms.filter(function (p) { return (xRight > p.startX) && (xLeft < p.endX); });
+}
+
+function pr_findLandingPlatform(overlaps, oldBottom, newBottom) {
+  var best = null;
+  for (var i = 0; i < overlaps.length; i++) {
+    var p = overlaps[i];
+    if (oldBottom <= p.y && newBottom >= p.y) {
+      if (!best || p.y < best.y) best = p;
+    }
+  }
+  return best;
+}
+
+function pr_enforceNotBelowPlatform(overlaps) {
+  if (!overlaps || !overlaps.length || !pr_character) return;
+  var floor = overlaps[0];
+  for (var i = 1; i < overlaps.length; i++) if (overlaps[i].y < floor.y) floor = overlaps[i];
+
+  var EPS = 0.75;
+  var bottom = pr_character.y + pr_character.height;
+  if (bottom > floor.y + EPS) {
+    pr_character.y = floor.y - pr_character.height;
+    if (pr_character.velocityY > 0) pr_character.velocityY = 0;
+  }
+}
+
+// --------------------
+// Character + platforms (prefixed)
+// --------------------
+function pr_createCharacter() {
+  return {
+    lastDirection: "right",
+    x: 30,
+    y: 10,
+    worldX: 30,
+    width: 40,
+    height: 40,
+    velocityY: 0,
+    speed: 0,
+    acceleration: 0.2,
+    deceleration: 0.2,
+    max_speed: 6,
+    hp: 20
+  };
+}
+
+function pr_generateGroundPlatforms(worldWidth, minHeight, maxHeight, numSections) {
+  if (numSections == null) numSections = Math.floor(Math.random() * 4) + 2;
+
+  var platforms = [];
+  var sectionWidth = Math.floor(worldWidth / numSections);
+  var lastY = Math.floor(Math.random() * (maxHeight - minHeight + 1)) + minHeight;
+
+  var maxStep = 60;
+  var minStep = 20;
+
+  for (var i = 0; i < numSections; i++) {
+    var startX = i * sectionWidth;
+    var endX = (i === numSections - 1) ? worldWidth : startX + sectionWidth;
+
+    var lowerBound = Math.max(minHeight - lastY, -maxStep);
+    var upperBound = Math.min(maxHeight - lastY, maxStep);
+
+    var intervals = [];
+    if (lowerBound <= -minStep) intervals.push({ min: lowerBound, max: -minStep });
+    if (upperBound >= minStep) intervals.push({ min: minStep, max: upperBound });
+
+    var deltaY;
+    if (intervals.length > 0) {
+      var chosen = intervals[Math.floor(Math.random() * intervals.length)];
+      var span = chosen.max - chosen.min + 1;
+      deltaY = chosen.min + Math.floor(Math.random() * span);
     } else {
-      const sz = MUSHROOM_DISPLAY_SIZE;
-      if (activeMushroom.image && activeMushroom.image.complete) {
-        ctx.drawImage(activeMushroom.image, canvas.width / 2 - sz / 2, boxTop + 70, sz, sz);
-      }
+      var absLower = Math.abs(lowerBound);
+      var absUpper = Math.abs(upperBound);
+      deltaY = (absLower > absUpper) ? lowerBound : upperBound;
     }
 
-    ctx.font = "18px Arial";
-    ctx.fillText("Press E to eat or Q to ignore.", canvas.width / 2 - 130, boxTop + boxHeight - 25);
+    var y = Math.min(Math.max(lastY + deltaY, minHeight), maxHeight);
+
+    platforms.push({ startX: startX, endX: endX, y: y });
+    lastY = y;
   }
 
-  function handlePProceedPrompt() {
-    // latch unlock once reached threshold
-    if (!roomProceedUnlocked && character.hp >= cfg.hpThreshold) roomProceedUnlocked = true;
+  return platforms;
+}
 
-    // auto-advance if unlocked then HP hits 0 (once)
-    if (roomProceedUnlocked && character.hp <= 0 && !roomAutoAdvanceFired) {
-      roomAutoAdvanceFired = true;
-      proceedFromRoom("auto_hp0");
-      return;
-    }
+// --------------------
+// Practice mushrooms (prefixed)
+// --------------------
+var pr_BOX_W = 50;
+var pr_BOX_H = 50;
 
-    // show prompt if unlocked
-    if (!roomProceedUnlocked) return;
+function pr_generateMushroomSet(count) {
+  if (!Array.isArray(pr_groundPlatforms) || !pr_groundPlatforms.length) return [];
 
-    ctx.fillStyle = "#000";
-    ctx.font = "16px Arial";
-    const text = "Press P to proceed";
-    const xPos = (canvas.width - ctx.measureText(text).width) / 2;
-    const yPos = canvas.height / 4;
-    ctx.fillText(text, xPos, yPos);
+  var items = [];
+  var plats = pr_groundPlatforms.slice();
 
-    if (keys["p"]) {
-      keys["p"] = false;
-      proceedFromRoom("p");
-    }
-  }
+  // simple: distribute evenly across platforms
+  var total = Math.max(1, count || 5);
+  var perPlat = new Array(plats.length).fill(0);
+  for (var i = 0; i < total; i++) perPlat[i % plats.length]++;
 
-  function proceedFromRoom(reason) {
-    // increment question
-    currentQuestion += 1;
-
-    // back to door canvas
-    currentCanvas = 1;
-
-    // reset character to flat ground spawn
-    character.x = 10;
-    character.y = canvas.height * 0.8 - character.height;
-    character.worldX = 10;
-    character.velocityY = 0;
-    cameraOffset = 0;
-
-    // reset room state
-    currentRoom = null;
-    env_deter = "sky";
-    doorsAssigned = false;
-    roomChoiceStartTime = performance.now();
-
-    // clear world objects
-    groundPlatforms = [];
-    mushrooms = [];
-
-    // reset gating
-    roomProceedUnlocked = false;
-    roomAutoAdvanceFired = false;
-  }
-
-  function handleRegenIfEmpty() {
-    if (freezeState) return;
-    if (!Array.isArray(mushrooms) || mushrooms.length > 0) return;
-    mushrooms = generateMushrooms(cfg.regenCount, env_deter, groundPlatforms);
-  }
-
-  function removeActiveMushroom() {
-    const idx = mushrooms.indexOf(activeMushroom);
-    if (idx !== -1) mushrooms.splice(idx, 1);
-    activeMushroom = null;
-    freezeState = false;
-    mushroomDecisionTimer = 0;
-  }
-
-  // ---------------------------
-  // Drawing helpers
-  // ---------------------------
-  function clearCanvas() {
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-  }
-
-  function drawBackground(env) {
-    const e = String(env || "sky").toLowerCase();
-    const img = bgImgs[e] || bgImgs.sky;
-    if (img && img.complete) ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-  }
-
-  function drawGroundFlat() {
-    const groundY = canvas.height * 0.8;
-    const tileSize = 50;
-    if (!imgGround.complete) return;
-    for (let y = groundY; y < canvas.height; y += tileSize) {
-      for (let x = 0; x < canvas.width; x += tileSize) {
-        ctx.drawImage(imgGround, x, y, tileSize, tileSize);
-      }
-    }
-  }
-
-  function drawGroundPlatformsTiled() {
-    if (!imgGround.complete) return;
-    for (const p of groundPlatforms) {
-      const screenStartX = worldToScreenX(p.startX);
-      const screenEndX = worldToScreenX(p.endX);
-      for (let x = screenStartX; x < screenEndX; x += 50) {
-        for (let y = p.y; y < canvas.height; y += 50) {
-          ctx.drawImage(imgGround, x, y, 50, 50);
-        }
-      }
-    }
-  }
-
-  function getMarioFrame() {
-    if (character.velocityY < 0) return marioAnimations.jump;
-    if (keys["ArrowRight"] || keys["ArrowLeft"]) {
-      tickCount++;
-      if (tickCount > frameSpeed) {
-        tickCount = 0;
-        frameIndex = (frameIndex + 1) % marioAnimations.run.length;
-      }
-      return marioAnimations.run[frameIndex];
-    }
-    return marioAnimations.idle;
-  }
-
-  function drawCharacterScreen(x, y) {
-    const frame = getMarioFrame();
-    if (keys["ArrowLeft"]) character.lastDirection = "left";
-    if (keys["ArrowRight"]) character.lastDirection = "right";
-    const flip = character.lastDirection === "left";
-
-    ctx.save();
-    if (flip) {
-      ctx.scale(-1, 1);
-      ctx.drawImage(imgMario, frame.x, frame.y, frameWidth, frameHeight,
-        -(x + character.width), y, character.width, character.height);
-    } else {
-      ctx.drawImage(imgMario, frame.x, frame.y, frameWidth, frameHeight,
-        x, y, character.width, character.height);
-    }
-    ctx.restore();
-  }
-
-  function drawCharacterWorld() {
-    drawCharacterScreen(worldToScreenX(character.worldX), character.y);
-  }
-
-  function drawHPBarTopRight() {
-    const barWidth = 200, barHeight = 20;
-    const barX = canvas.width - barWidth - 20;
-    const barY = 20;
-
-    const hp = clampHP(character.hp, cfg.maxHP);
-    const currentWidth = (hp / cfg.maxHP) * barWidth;
-
-    ctx.fillStyle = "#ddd";
-    ctx.fillRect(barX, barY, barWidth, barHeight);
-
-    ctx.fillStyle = (hp >= cfg.hpThreshold) ? "blue" : "orange";
-    ctx.fillRect(barX, barY, currentWidth, barHeight);
-
-    // dashed goal line
-    const goalRatio = clamp(cfg.hpThreshold / cfg.maxHP, 0, 1);
-    const goalX = barX + goalRatio * barWidth;
-    ctx.save();
-    ctx.setLineDash([4, 4]);
-    ctx.strokeStyle = "#000";
-    ctx.beginPath();
-    ctx.moveTo(goalX, barY - 4);
-    ctx.lineTo(goalX, barY + barHeight + 4);
-    ctx.stroke();
-    ctx.restore();
-
-    ctx.strokeStyle = "#000";
-    ctx.lineWidth = 2;
-    ctx.strokeRect(barX, barY, barWidth, barHeight);
-  }
-
-  // ---------------------------
-  // Hunger logic
-  // ---------------------------
-  function startHunger() {
-    stopHunger();
-    hungerCountdown = cfg.hungerTickSec;
-
-    hungerInterval = setInterval(() => {
-      if (!running) return;
-
-      // only drain in canvas4 and when not frozen
-      if (currentCanvas !== 4) return;
-      if (freezeState) return;
-
-      if (character.hp <= 0) return;
-
-      if (hungerCountdown > 0) hungerCountdown--;
-      else {
-        character.hp = Math.max(0, character.hp - 1);
-        hungerCountdown = cfg.hungerTickSec;
-      }
-    }, 1000);
-  }
-
-  function stopHunger() {
-    if (hungerInterval) clearInterval(hungerInterval);
-    hungerInterval = null;
-  }
-
-  function drawHungerCountdown() {
-    if (currentCanvas !== 4) return;
-    ctx.fillStyle = "#FF0000";
-    ctx.font = "16px Arial";
-    ctx.fillText(`Next Stamina loss: ${hungerCountdown}s`, 20, 40);
-  }
-
-  // ---------------------------
-  // Mushroom generation (platform-locked; 5 per room)
-  // ---------------------------
-  function generateMushrooms(count, envRaw, plats) {
-    const env = String(envRaw || "sky").trim().toLowerCase();
-    const platforms = Array.isArray(plats) ? plats : [];
-
-    // if no platforms yet, create them (safety)
-    if (!platforms.length) {
-      groundPlatforms = generateGroundPlatforms(worldWidth, 200, 400);
-    }
-
-    // Catalog pool
-    const hasCatalog = cfg.useCatalogIfAvailable && Array.isArray(window.mushroomCatalogRows) && window.mushroomCatalogRows.length;
-    const allRows = hasCatalog ? window.mushroomCatalogRows.slice() : [];
-
-    let chosenRows = [];
-
-    if (env === "sky" || !hasCatalog) {
-      // fallback: rainbow only
-      chosenRows = Array.from({ length: count }, () => ({
-        filename: ASSETS.skyRainbowMushroom,
-        value: 2,
-        color: "rainbow",
-        room: "sky"
-      }));
-    } else {
-      // non-sky: filter by ROOM_COLOR_MAP
-      const allowedColors = getAllowedColorsForEnv(env);
-      let pool = allRows;
-
-      if (allowedColors && allowedColors.length) {
-        const set = new Set(allowedColors.map(c => String(c).toLowerCase()));
-        pool = allRows.filter(r => set.has(String(r.color || r.color_name || "").toLowerCase()));
-        if (!pool.length) pool = allRows.slice();
-      }
-
-      // pick count
-      chosenRows = pickRandomSubset(pool, count);
-
-      // shuffle so not ordered left->right
-      shuffle(chosenRows);
-    }
-
-    // place exactly on platforms (spread across platforms)
-    const items = [];
-    const perPlat = allocationForFivePlatforms(platforms.length, count);
-
-    let idx = 0;
-    for (let pi = 0; pi < platforms.length && idx < chosenRows.length; pi++) {
-      const p = platforms[pi];
-      const k = perPlat[pi] || 0;
-      if (k <= 0) continue;
-
-      const xs = xsOnPlatform(p, k, 10);
-      const boxTopY = p.y - BOX_H - 75;
-
-      for (let j = 0; j < xs.length && idx < chosenRows.length; j++) {
-        const r = chosenRows[idx++];
-        const img = new Image();
-        img.src = String(r.filename || r.image || r.imagefilename || ASSETS.skyRainbowMushroom);
-
-        items.push({
-          x: xs[j],
-          y: boxTopY,
-          value: (r.value ?? 0),
-          color: (r.color ?? r.color_name ?? "na"),
-          imagefilename: (r.filename || r.image || r.imagefilename || "unknown"),
-          image: img,
-          isVisible: false,
-          decisionMade: false
-        });
-      }
-    }
-
-    // if still leftover (rare), center on first platform
-    while (idx < chosenRows.length && platforms.length) {
-      const p0 = platforms[0];
-      const x0 = Math.round((p0.startX + p0.endX) / 2);
-      const y0 = p0.y - BOX_H - 75;
-
-      const r = chosenRows[idx++];
-      const img = new Image();
-      img.src = String(r.filename || r.image || r.imagefilename || ASSETS.skyRainbowMushroom);
-
-      items.push({
-        x: x0,
-        y: y0,
-        value: (r.value ?? 0),
-        color: (r.color ?? r.color_name ?? "na"),
-        imagefilename: (r.filename || r.image || r.imagefilename || "unknown"),
-        image: img,
-        isVisible: false,
-        decisionMade: false
-      });
-    }
-
-    return items;
-  }
-
-  function getAllowedColorsForEnv(envName) {
-    if (!envName) return null;
-    const e = String(envName).trim().toLowerCase();
-    if (e === "sky") return null;
-
-    const allowed = [];
-    for (const [color, rooms] of Object.entries(ROOM_COLOR_MAP)) {
-      for (const rm of rooms) {
-        if (String(rm).toLowerCase() === e) {
-          allowed.push(color);
-          break;
-        }
-      }
-    }
-    return allowed;
-  }
-
-  function allocationForFivePlatforms(nPlats, count) {
-    // mirrors your logic for count=5; generalized a bit
-    if (count === 5) {
-      switch (nPlats) {
-        case 5: return [1,1,1,1,1];
-        case 4: return [2,1,1,1];
-        case 3: return [2,2,1];
-        case 2: return [3,2];
-        case 1: return [5];
-        default: return new Array(Math.max(1, Math.min(5, nPlats))).fill(1);
-      }
-    }
-    // generic round-robin allocation
-    const arr = new Array(Math.max(1, nPlats)).fill(0);
-    for (let i = 0; i < count; i++) arr[i % arr.length]++;
-    return arr;
-  }
-
-  function xsOnPlatform(p, k, margin = 10) {
-    const startX = p.startX + margin + BOX_W / 2;
-    const endX = p.endX - margin - BOX_W / 2;
-    const span = Math.max(0, endX - startX);
+  function xsOnPlatform(p, k) {
+    var margin = 10;
+    var startX = p.startX + margin + pr_BOX_W / 2;
+    var endX = p.endX - margin - pr_BOX_W / 2;
+    var span = Math.max(0, endX - startX);
 
     if (k <= 0) return [];
     if (span <= 0) return new Array(k).fill(Math.round((p.startX + p.endX) / 2));
     if (k === 1) return [Math.round((startX + endX) / 2)];
 
-    const xs = [];
-    for (let i = 0; i < k; i++) {
-      const t = i / (k - 1);
+    var xs = [];
+    for (var j = 0; j < k; j++) {
+      var t = j / (k - 1);
       xs.push(Math.round(startX + t * span));
     }
     return xs;
   }
 
-  // ---------------------------
-  // Platforms + collision helpers
-  // ---------------------------
-  function generateGroundPlatforms(ww, minHeight, maxHeight, numSections = null) {
-    if (numSections === null) numSections = Math.floor(Math.random() * 4) + 2; // 2–5
-    const platforms = [];
-    const sectionWidth = Math.floor(ww / numSections);
-    let lastY = randInt(minHeight, maxHeight);
+  // make one toxic, rest positive (so practice shows both)
+  var values = [];
+  values.push("reset"); // toxic
+  while (values.length < total) values.push(2); // +2
+  // shuffle
+  for (var s = values.length - 1; s > 0; s--) {
+    var jj = (Math.random() * (s + 1)) | 0;
+    var tmp = values[s]; values[s] = values[jj]; values[jj] = tmp;
+  }
 
-    const maxStep = 60;
-    const minStep = 20;
+  var idxVal = 0;
+  for (var pi = 0; pi < plats.length && items.length < total; pi++) {
+    var p = plats[pi];
+    var k = perPlat[pi] || 0;
+    if (k <= 0) continue;
 
-    for (let i = 0; i < numSections; i++) {
-      const startX = i * sectionWidth;
-      const endX = (i === numSections - 1) ? ww : startX + sectionWidth;
+    var xs = xsOnPlatform(p, k);
+    var boxTopY = p.y - pr_BOX_H - 75;
 
-      const lowerBound = Math.max(minHeight - lastY, -maxStep);
-      const upperBound = Math.min(maxHeight - lastY, maxStep);
+    for (var j2 = 0; j2 < xs.length && items.length < total; j2++) {
+      var v = values[idxVal++];
+      items.push({
+        x: xs[j2],
+        y: boxTopY,
+        value: v,
+        isVisible: false,
+        growthFactor: 0,
+        growthSpeed: 0.05,
+        growthComplete: false,
+        image: pr_rainbowMushroomImg
+      });
+    }
+  }
 
-      const intervals = [];
-      if (lowerBound <= -minStep) intervals.push({ min: lowerBound, max: -minStep });
-      if (upperBound >= minStep) intervals.push({ min: minStep, max: upperBound });
+  return items;
+}
 
-      let deltaY = 0;
-      if (intervals.length) {
-        const chosen = intervals[Math.floor(Math.random() * intervals.length)];
-        deltaY = randInt(chosen.min, chosen.max);
-      } else {
-        const absLower = Math.abs(lowerBound);
-        const absUpper = Math.abs(upperBound);
-        deltaY = (absLower > absUpper) ? lowerBound : upperBound;
+function pr_removeActiveMushroom() {
+  var index = pr_mushrooms.indexOf(pr_activeMushroom);
+  if (index !== -1) pr_mushrooms.splice(index, 1);
+  pr_activeMushroom = null;
+  pr_freezeState = false;
+  pr_revealOnlyValue = false;
+  pr_mushroomDecisionTimer = 0;
+  pr_mushroomDecisionStartTime = null;
+}
+
+// --------------------
+// Drawing (prefixed)
+// --------------------
+function pr_clearCanvas() {
+  pr_ctx.clearRect(0, 0, pr_canvas.width, pr_canvas.height);
+}
+
+function pr_drawBackground_canvas4() {
+  if (pr_skyImage.complete) {
+    pr_ctx.drawImage(pr_skyImage, 0, 0, pr_canvas.width, pr_canvas.height);
+  } else {
+    // fallback fill if sky not loaded yet
+    pr_ctx.fillStyle = "#87CEEB";
+    pr_ctx.fillRect(0, 0, pr_canvas.width, pr_canvas.height);
+  }
+
+  // ground tiles for each platform
+  for (var i = 0; i < pr_groundPlatforms.length; i++) {
+    var platform = pr_groundPlatforms[i];
+    var screenStartX = pr_worldToScreenX(platform.startX);
+    var screenEndX = pr_worldToScreenX(platform.endX);
+
+    if (pr_groundImage.complete) {
+      for (var x = screenStartX; x < screenEndX; x += 50) {
+        for (var y = platform.y; y < pr_canvas.height; y += 50) {
+          pr_ctx.drawImage(pr_groundImage, x, y, 50, 50);
+        }
       }
+    } else {
+      pr_ctx.fillStyle = "#444";
+      pr_ctx.fillRect(screenStartX, platform.y, Math.max(1, screenEndX - screenStartX), pr_canvas.height - platform.y);
+    }
+  }
+}
 
-      const y = clamp(lastY + deltaY, minHeight, maxHeight);
-      platforms.push({ startX, endX, y });
-      lastY = y;
+// Sprite frames (same values you use; prefixed)
+var pr_frameWidth = 15;
+var pr_frameHeight = 15;
+var pr_frameSpeed = 5;
+var pr_tickCount = 0;
+var pr_frameIndex = 0;
+
+var pr_marioAnimations = {
+  idle: { x: 211, y: 0 },
+  run: [{ x: 272, y: 0 }, { x: 241, y: 0 }, { x: 300, y: 0 }],
+  jump: { x: 359, y: 0 }
+};
+
+function pr_getMarioFrame() {
+  if (pr_character.velocityY < 0) {
+    return pr_marioAnimations.jump;
+  } else if (pr_keys["ArrowRight"] || pr_keys["ArrowLeft"]) {
+    pr_tickCount++;
+    if (pr_tickCount > pr_frameSpeed) {
+      pr_tickCount = 0;
+      pr_frameIndex = (pr_frameIndex + 1) % pr_marioAnimations.run.length;
+    }
+    return pr_marioAnimations.run[pr_frameIndex];
+  }
+  return pr_marioAnimations.idle;
+}
+
+function pr_drawCharacter_canvas4() {
+  var characterX = pr_worldToScreenX(pr_character.worldX);
+  var frame = pr_getMarioFrame();
+
+  if (pr_keys["ArrowLeft"]) pr_character.lastDirection = "left";
+  if (pr_keys["ArrowRight"]) pr_character.lastDirection = "right";
+  var flip = (pr_character.lastDirection === "left");
+
+  pr_ctx.save();
+  if (flip) {
+    pr_ctx.scale(-1, 1);
+    pr_ctx.drawImage(
+      pr_marioSprite,
+      frame.x, frame.y, pr_frameWidth, pr_frameHeight,
+      -(characterX + pr_character.width), pr_character.y, pr_character.width, pr_character.height
+    );
+  } else {
+    pr_ctx.drawImage(
+      pr_marioSprite,
+      frame.x, frame.y, pr_frameWidth, pr_frameHeight,
+      characterX, pr_character.y, pr_character.width, pr_character.height
+    );
+  }
+  pr_ctx.restore();
+}
+
+function pr_drawHP_canvas4() {
+  var maxHP = 100;
+  var barWidth = 200;
+  var barHeight = 20;
+  var barX = pr_canvas.width - barWidth - 20;
+  var barY = 20;
+
+  var currentWidth = (pr_character.hp / maxHP) * barWidth;
+
+  pr_ctx.fillStyle = "#ddd";
+  pr_ctx.fillRect(barX, barY, barWidth, barHeight);
+
+  pr_ctx.fillStyle = (pr_character.hp >= 10) ? "blue" : "orange";
+  pr_ctx.fillRect(barX, barY, currentWidth, barHeight);
+
+  pr_ctx.strokeStyle = "#000";
+  pr_ctx.lineWidth = 2;
+  pr_ctx.strokeRect(barX, barY, barWidth, barHeight);
+
+  pr_ctx.fillStyle = "#000";
+  pr_ctx.font = "14px Arial";
+  pr_ctx.fillText("Practice", 20, 30);
+}
+
+function pr_drawMushroomQuestionBox() {
+  if (!pr_activeMushroom) return;
+
+  var sz = 150;
+  var boxMargin = 100;
+  var boxTop = 80;
+  var boxHeight = 260;
+
+  pr_ctx.fillStyle = "#fff";
+  pr_ctx.strokeStyle = "#000";
+  pr_ctx.lineWidth = 3;
+  pr_ctx.fillRect(boxMargin, boxTop, pr_canvas.width - 2 * boxMargin, boxHeight);
+  pr_ctx.strokeRect(boxMargin, boxTop, pr_canvas.width - 2 * boxMargin, boxHeight);
+
+  pr_ctx.fillStyle = "#000";
+  pr_ctx.font = "18px Arial";
+  pr_ctx.fillText("PRACTICE: Eat this mushroom?", pr_canvas.width / 2 - 160, boxTop + 30);
+
+  if (pr_revealOnlyValue) {
+    pr_ctx.font = "20px Arial";
+    var valueText = (pr_activeMushroom.value === "reset") ? "Toxic!" : ("+" + pr_activeMushroom.value);
+    pr_ctx.fillText(
+      valueText,
+      pr_canvas.width / 2 - pr_ctx.measureText(valueText).width / 2,
+      boxTop + 130
+    );
+  } else {
+    pr_ctx.drawImage(pr_activeMushroom.image, pr_canvas.width / 2 - sz / 2, boxTop + 70, sz, sz);
+  }
+
+  pr_ctx.font = "18px Arial";
+  pr_ctx.fillText("Press E to eat or Q to ignore.", pr_canvas.width / 2 - 130, boxTop + boxHeight - 25);
+}
+
+// --------------------
+// Box drawing + collision (prefixed)
+// --------------------
+function pr_drawMysBox() {
+  var canJump = false;
+
+  var prev = {
+    left: pr_character.worldX,
+    right: pr_character.worldX + pr_character.width,
+    top: pr_character.y,
+    bottom: pr_character.y + pr_character.height
+  };
+
+  for (var i = 0; i < pr_mushrooms.length; i++) {
+    var mushroom = pr_mushrooms[i];
+
+    var boxX_world = mushroom.x;
+    var boxY_top = mushroom.y;
+    var boxLeft = boxX_world - pr_BOX_W / 2;
+    var boxRight = boxX_world + pr_BOX_W / 2;
+    var boxBottom = boxY_top + pr_BOX_H;
+
+    var boxX_screen = pr_worldToScreenX(boxX_world);
+
+    if (pr_boxImage && pr_boxImage.complete) {
+      pr_ctx.drawImage(pr_boxImage, boxX_screen - pr_BOX_W / 2, boxY_top, pr_BOX_W, pr_BOX_H);
+    } else {
+      pr_ctx.fillStyle = "rgba(0,0,0,0.2)";
+      pr_ctx.fillRect(boxX_screen - pr_BOX_W / 2, boxY_top, pr_BOX_W, pr_BOX_H);
+      pr_ctx.strokeStyle = "#333";
+      pr_ctx.strokeRect(boxX_screen - pr_BOX_W / 2, boxY_top, pr_BOX_W, pr_BOX_H);
     }
 
-    return platforms;
-  }
-
-  function overlappingPlatformsWorld(xLeft, xRight) {
-    return groundPlatforms.filter(p => (xRight > p.startX) && (xLeft < p.endX));
-  }
-
-  function findLandingPlatform(overlaps, oldBottom, newBottom) {
-    let best = null;
-    for (const p of overlaps) {
-      if (oldBottom <= p.y && newBottom >= p.y) {
-        if (!best || p.y < best.y) best = p;
-      }
-    }
-    return best;
-  }
-
-  function worldToScreenX(xWorld) {
-    return xWorld - cameraOffset;
-  }
-
-  // ---------------------------
-  // Character
-  // ---------------------------
-  function createCharacter(canvasEl, hpStart) {
-    return {
-      lastDirection: "right",
-      x: canvasEl.width / 2,
-      y: canvasEl.height * 0.8 - 20,
-      worldX: 30,
-      width: 40,
-      height: 40,
-      velocityY: 0,
-      speed: 0,
-      hp: hpStart,
-      acceleration: 0.2,
-      deceleration: 0.2,
-      max_speed: 6
+    var now = {
+      left: pr_character.worldX,
+      right: pr_character.worldX + pr_character.width,
+      top: pr_character.y,
+      bottom: pr_character.y + pr_character.height
     };
-  }
 
-  function decelerate() {
-    if (character.speed > 0) character.speed = Math.max(0, character.speed - character.deceleration);
-    else if (character.speed < 0) character.speed = Math.min(0, character.speed + character.deceleration);
-  }
+    var nextBottom = pr_character.y + pr_character.height + pr_character.velocityY;
+    var nextTop = pr_character.y + pr_character.velocityY;
 
-  // ---------------------------
-  // Logging (practice tagged)
-  // ---------------------------
-  function logRoomChoice(side, room) {
-    if (!participantData || !participantData.trials) return;
-    const rt = roomChoiceStartTime ? (performance.now() - roomChoiceStartTime) : null;
-    const timeElapsed = (participantData.startTime != null) ? (performance.now() - participantData.startTime) : null;
+    var hOver = pr_horizOverlap(now.left, now.right, boxLeft, boxRight);
 
-    participantData.trials.push({
-      id: participantData.id,
-      trial_index: trialIndex++,
-      trial_type: "practice_room_choice",
-      choice: side,
-      room,
-      rt,
-      time_elapsed: timeElapsed,
-      practice_question: currentQuestion
-    });
-  }
-
-  function logDecision(decision) {
-    if (!participantData || !participantData.trials || !activeMushroom) return;
-    const rt = mushroomDecisionStartTime ? (performance.now() - mushroomDecisionStartTime) : null;
-    const timeElapsed = (participantData.startTime != null) ? (performance.now() - participantData.startTime) : null;
-
-    participantData.trials.push({
-      id: participantData.id,
-      trial_index: trialIndex++,
-      trial_type: "practice_explore_decision",
-      stimulus: activeMushroom.imagefilename || "unknown",
-      value: activeMushroom.value ?? null,
-      decision,
-      rt,
-      time_elapsed: timeElapsed,
-      room: currentRoom,
-      hp: character.hp,
-      mushroom_x: activeMushroom.x,
-      mushroom_y: activeMushroom.y,
-      practice_question: currentQuestion
-    });
-  }
-
-  // ---------------------------
-  // End
-  // ---------------------------
-  function endPractice() {
-    stop();
-    // hand off to main exploration
-    if (typeof onDone === "function") onDone();
-  }
-
-  // ---------------------------
-  // Utilities
-  // ---------------------------
-  function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
-
-  function clampHP(hp, maxHP) {
-    const n = Number(hp);
-    if (!Number.isFinite(n)) return 0;
-    return clamp(n, 0, maxHP);
-  }
-
-  function getNumericValue(v) {
-    if (v === null || v === undefined) return 0;
-    if (v === "reset") return 0;
-    const n = Number(v);
-    return Number.isFinite(n) ? n : 0;
-  }
-
-  function randInt(min, max) {
-    if (max < min) return min;
-    return Math.floor(Math.random() * (max - min + 1)) + min;
-  }
-
-  function shuffle(a) {
-    for (let i = a.length - 1; i > 0; i--) {
-      const j = (Math.random() * (i + 1)) | 0;
-      [a[i], a[j]] = [a[j], a[i]];
+    // 1) land on top
+    if (pr_character.velocityY >= 0 && hOver && prev.bottom <= boxY_top && nextBottom >= boxY_top) {
+      pr_character.y = boxY_top - pr_character.height;
+      pr_character.velocityY = 0;
+      canJump = true;
+      continue;
     }
-    return a;
+
+    // 2) head-hit from below
+    if (pr_character.velocityY < 0 && hOver && prev.top >= boxBottom && nextTop <= boxBottom) {
+      mushroom.isVisible = true;
+      if (pr_mushroomDecisionStartTime === null) pr_mushroomDecisionStartTime = performance.now();
+      pr_character.y = boxBottom;
+      pr_character.velocityY = 0;
+      continue;
+    }
+
+    // 3) draw mushroom if visible (grow then freeze)
+    if (mushroom.isVisible) {
+      if (!mushroom.growthComplete) {
+        mushroom.growthFactor = Math.min(mushroom.growthFactor + mushroom.growthSpeed, 1);
+        if (mushroom.growthFactor === 1) {
+          mushroom.growthComplete = true;
+          pr_freezeState = true;
+          pr_activeMushroom = mushroom;
+          pr_mushroomDecisionTimer = 0;
+        }
+      }
+
+      var mW = 30 + 20 * mushroom.growthFactor;
+      var mH = 30 + 20 * mushroom.growthFactor;
+      var mScreenX = pr_worldToScreenX(mushroom.x);
+      pr_ctx.drawImage(mushroom.image, mScreenX - mW / 2, mushroom.y - mH, mW, mH);
+    }
   }
 
-  function pickRandomSubset(arr, k) {
-    const copy = arr.slice();
-    shuffle(copy);
-    return copy.slice(0, Math.min(k, copy.length));
+  return canJump;
+}
+
+// --------------------
+// Movement + physics (prefixed)
+// --------------------
+function pr_handleMovement_canvas4() {
+  // acceleration/deceleration
+  if (pr_keys["ArrowLeft"] && pr_keys["ArrowRight"]) {
+    if (pr_character.speed > 0) pr_character.speed = Math.max(0, pr_character.speed - pr_character.deceleration);
+    else if (pr_character.speed < 0) pr_character.speed = Math.min(0, pr_character.speed + pr_character.deceleration);
+  } else if (pr_keys["ArrowRight"]) {
+    pr_character.speed = Math.min(pr_character.max_speed, pr_character.speed + pr_character.acceleration);
+  } else if (pr_keys["ArrowLeft"]) {
+    pr_character.speed = Math.max(-pr_character.max_speed, pr_character.speed - pr_character.acceleration);
+  } else {
+    if (pr_character.speed > 0) pr_character.speed = Math.max(0, pr_character.speed - pr_character.deceleration);
+    else if (pr_character.speed < 0) pr_character.speed = Math.min(0, pr_character.speed + pr_character.deceleration);
   }
-})();
+
+  // horizontal move + wrap
+  var oldWorldX = pr_character.worldX;
+  var proposedWorldX = oldWorldX + pr_character.speed;
+  proposedWorldX = pr_wrapWorldX(proposedWorldX);
+  pr_character.worldX = proposedWorldX;
+
+  // gravity
+  pr_character.velocityY += pr_gravity;
+
+  // draw boxes & resolve box collisions (also triggers reveal/freeze)
+  var boxCanJump = pr_drawMysBox();
+
+  // robust ground landing
+  var xL = pr_character.worldX;
+  var xR = pr_character.worldX + pr_character.width;
+  var overlaps = pr_overlappingPlatformsWorld(xL, xR);
+
+  var oldY = pr_character.y;
+  var oldBottom = oldY + pr_character.height;
+  var newY = oldY + pr_character.velocityY;
+  var newBottom = newY + pr_character.height;
+
+  if (pr_character.velocityY >= 0 && overlaps.length) {
+    var landingPlat = pr_findLandingPlatform(overlaps, oldBottom, newBottom);
+    if (landingPlat) {
+      pr_character.y = landingPlat.y - pr_character.height;
+      pr_character.velocityY = 0;
+    } else {
+      pr_character.y = newY;
+    }
+  } else {
+    pr_character.y = newY;
+  }
+
+  // snap if somehow below
+  var overlapsNow = pr_overlappingPlatformsWorld(pr_character.worldX, pr_character.worldX + pr_character.width);
+  if (overlapsNow.length) pr_enforceNotBelowPlatform(overlapsNow);
+
+  // jumping
+  var bottomNow = pr_character.y + pr_character.height;
+  var onGround = overlapsNow.some(function (p) { return Math.abs(bottomNow - p.y) <= 0.75; });
+
+  if (pr_keys["ArrowUp"] && (onGround || boxCanJump)) {
+    pr_character.velocityY = -13;
+  }
+
+  // camera follow
+  pr_cameraOffset = pr_clamp(
+    pr_character.worldX + pr_character.width / 2 - pr_canvas.width / 2,
+    0,
+    pr_worldWidth - pr_canvas.width
+  );
+}
+
+// --------------------
+// Key handling (prefixed)
+// --------------------
+function pr_handleKeyDown(e) {
+  pr_keys[e.key] = true;
+
+  // reduce page scroll interference during practice
+  if (e.key === "ArrowUp" || e.key === "ArrowDown" || e.key === "ArrowLeft" || e.key === "ArrowRight" || e.key === " ") {
+    e.preventDefault();
+  }
+}
+function pr_handleKeyUp(e) {
+  pr_keys[e.key] = false;
+}
+
+// --------------------
+// Practice loop (prefixed)
+// --------------------
+function pr_updateGame(currentTime) {
+  if (!pr_gameRunning) return;
+
+  // decision freeze
+  if (pr_freezeState && pr_activeMushroom) {
+    // no accumulation during freeze
+    pr_lastTime = currentTime;
+    pr_accumulatedTime = 0;
+
+    // freeze-time after revealing value
+    if (pr_freezeTime > 0) {
+      pr_freezeTime -= 16;
+      pr_clearCanvas();
+      pr_drawBackground_canvas4();
+      pr_drawHP_canvas4();
+      pr_drawCharacter_canvas4();
+      pr_drawMushroomQuestionBox();
+      pr_rafId = requestAnimationFrame(pr_updateGame);
+      return;
+    }
+    pr_freezeTime = 0;
+
+    pr_mushroomDecisionTimer += 16;
+
+    pr_clearCanvas();
+    pr_drawBackground_canvas4();
+    pr_drawHP_canvas4();
+    pr_drawCharacter_canvas4();
+    pr_drawMushroomQuestionBox();
+
+    // decision keys
+    var decidedEat = !!pr_keys["e"];
+    var decidedIgnore = !!pr_keys["q"];
+    var decidedTimeout = (pr_mushroomDecisionTimer >= pr_maxDecisionTime);
+
+    if (decidedEat || decidedIgnore || decidedTimeout) {
+      var decision = decidedEat ? "eat" : (decidedIgnore ? "ignore" : "timeout");
+      var rt = (pr_mushroomDecisionStartTime != null) ? (performance.now() - pr_mushroomDecisionStartTime) : null;
+      var timeElapsed = (window.participantData && window.participantData.startTime != null)
+        ? (performance.now() - window.participantData.startTime)
+        : null;
+
+      window.participantData.trials.push({
+        id: window.participantData.id,
+        trial_type: "practice_decision",
+        decision: decision,
+        value: pr_activeMushroom.value,
+        rt: rt,
+        time_elapsed: timeElapsed
+      });
+
+      // apply outcome if eat
+      if (decidedEat) {
+        if (pr_activeMushroom.value === "reset") {
+          pr_character.hp = 0;
+        } else {
+          pr_character.hp = pr_clamp(pr_character.hp + Number(pr_activeMushroom.value || 0), 0, 100);
+        }
+        pr_revealOnlyValue = true;
+        pr_freezeTime = 800; // short reveal
+      }
+
+      // consume keys so they don't repeat
+      pr_keys["e"] = false;
+      pr_keys["q"] = false;
+
+      // count decision + remove mushroom
+      pr_decisionsMade += 1;
+      pr_removeActiveMushroom();
+
+      // finish practice after N decisions
+      if (pr_decisionsMade >= pr_PRACTICE_DECISIONS_TO_FINISH) {
+        pr_finishPractice();
+        return;
+      }
+    }
+
+    pr_rafId = requestAnimationFrame(pr_updateGame);
+    return;
+  }
+
+  // normal loop timing
+  if (!pr_lastTime) pr_lastTime = currentTime;
+  var deltaTime = (currentTime - pr_lastTime) / 1000;
+  pr_lastTime = currentTime;
+  pr_accumulatedTime += deltaTime;
+
+  while (pr_accumulatedTime >= pr_targetTimeStep) {
+    pr_clearCanvas();
+    pr_drawBackground_canvas4();
+    pr_handleMovement_canvas4();
+    pr_drawCharacter_canvas4();
+    pr_drawHP_canvas4();
+
+    pr_accumulatedTime -= pr_targetTimeStep;
+  }
+
+  pr_rafId = requestAnimationFrame(pr_updateGame);
+}
+
+// --------------------
+// Start / cleanup / finish (prefixed)
+// --------------------
+function pr_initPracticeGame() {
+  pr_canvas = document.getElementById("gameCanvas");
+  if (!pr_canvas) {
+    console.error("[practice] #gameCanvas not found.");
+    // fail-safe: go straight to real explore
+    pr_finishPractice(true);
+    return;
+  }
+
+  pr_canvas.width = 600;
+  pr_canvas.height = 500;
+  pr_ctx = pr_canvas.getContext("2d");
+
+  pr_character = pr_createCharacter();
+  pr_character.worldX = 30;
+  pr_character.y = 10;
+
+  pr_keys = Object.create(null);
+  pr_cameraOffset = 0;
+  pr_groundPlatforms = pr_generateGroundPlatforms(pr_worldWidth, 200, 400);
+  pr_mushrooms = pr_generateMushroomSet(5);
+
+  pr_freezeState = false;
+  pr_activeMushroom = null;
+  pr_mushroomDecisionTimer = 0;
+  pr_mushroomDecisionStartTime = null;
+  pr_revealOnlyValue = false;
+  pr_freezeTime = 0;
+
+  pr_decisionsMade = 0;
+  pr_gameRunning = true;
+  pr_lastTime = 0;
+  pr_accumulatedTime = 0;
+
+  window.addEventListener("keydown", pr_handleKeyDown, { passive: false });
+  window.addEventListener("keyup", pr_handleKeyUp, { passive: true });
+
+  pr_rafId = requestAnimationFrame(pr_updateGame);
+}
+
+function pr_cleanupPractice() {
+  pr_gameRunning = false;
+  try { cancelAnimationFrame(pr_rafId); } catch (_) {}
+
+  window.removeEventListener("keydown", pr_handleKeyDown, { passive: false });
+  window.removeEventListener("keyup", pr_handleKeyUp, { passive: true });
+
+  // hard stop keys
+  pr_keys = Object.create(null);
+}
+
+function pr_finishPractice(forceSkip) {
+  pr_cleanupPractice();
+  pr_PRACTICE_DONE = true;
+
+  // hide instruction block if visible
+  var wrap = document.getElementById("pr-instr-inline");
+  if (wrap) wrap.style.display = "none";
+
+  // call the ORIGINAL startExplore (not the patched one)
+  if (typeof window.__pr_startExplore_original === "function") {
+    window.__pr_startExplore_original();
+  } else if (typeof window.startExplore === "function") {
+    // last resort
+    window.startExplore();
+  } else {
+    console.warn("[practice] startExplore not found.");
+  }
+}
+
+function pr_beginPracticePhase() {
+  // ensure explorephase is visible so canvas is visible (common layout)
+  var e = document.getElementById("explorephase");
+  if (e) e.style.display = "block";
+
+  // show practice instructions first, then start game
+  pr_showPhaseInstructions("practice", function () {
+    pr_initPracticeGame();
+  });
+}
+
+// --------------------
+// Patch startExplore so practice runs first (only once)
+// --------------------
+function pr_patchStartExplore() {
+  if (window.__pr_startExplore_patched) return true;
+  if (typeof window.startExplore !== "function") return false;
+
+  window.__pr_startExplore_original = window.startExplore;
+
+  window.startExplore = function () {
+    // If practice already done, behave normally
+    if (pr_PRACTICE_DONE) {
+      return window.__pr_startExplore_original();
+    }
+    // Run practice instead of explore the first time
+    pr_beginPracticePhase();
+  };
+
+  window.__pr_startExplore_patched = true;
+  return true;
+}
+
+// Try patch now; if task.js loads after this file, poll briefly
+pr_patchStartExplore();
+var pr_patchTries = 0;
+var pr_patchTimer = setInterval(function () {
+  if (pr_patchStartExplore() || pr_patchTries++ > 200) { // ~4s at 20ms
+    clearInterval(pr_patchTimer);
+  }
+}, 20);
