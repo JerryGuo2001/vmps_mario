@@ -311,8 +311,7 @@ function finishTaskOOO() {
   participantId: participantData?.id ?? null,
   logger: (row) => participantData.trials.push(row), // or your DataSaver
   onDone: () => {
-    // IMPORTANT: do not pass any practice state; just continue
-    startExplorationPhase();
+    startExplore()
   }
 });
     typeOOO++;
