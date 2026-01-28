@@ -307,13 +307,7 @@ function finishTaskOOO() {
 
   if (typeOOO === 0) {
     // continue to explore phase
-    if (typeof startExplore === 'function')PracticeSkyPhase.start({
-  onDone: (reason) => {
-    console.log("practice done:", reason);
-        // then continue your normal flow into exploration
-        startExplore (); // replace with your real function/call
-      }
-    });
+    if (typeof startExplore === 'function')startExplore ()
     typeOOO++;
   } else if (typeOOO === 1) {
     // Transition to post-survey instead of saving immediately
