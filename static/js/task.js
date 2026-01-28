@@ -418,8 +418,9 @@ async function initGame() {
   character = createCharacter();
   gravity = 0.5;
   keys = {};
-  currentQuestion = 1; // Initialize here
-  currentCanvas = 4;
+  //below here are the change to make to skip sky room
+  currentQuestion = 2;
+  currentCanvas = 1;
 
   /* FREEZE STATE SAFETY */
   if (typeof window.freezeState === 'undefined') window.freezeState = false;
@@ -661,25 +662,6 @@ function updateGame(currentTime) {
     clearCanvas();
 
     if (currentCanvas == 1) {
-
-      // // letter grade display section
-      // if (lettergradeupdate === true) {
-      //   if (lettergradefreezetime <= 0) {
-      //     lettergradeupdate = false;
-      //   }
-
-      //   drawBackground();          // base sky + ground
-      //   drawLetterGradeOverlay();  // NEW: overlay the A/B/C letter
-
-      //   lettergradefreezetime -= 16;
-      //   requestAnimationFrame(updateGame);
-      //   return;
-      // }
-      // lettergradefreezetime=0
-      // //letter grade display section end
-
-      
-      
       if (init_position === true) {
         if (typeof character.worldX !== 'number') {
           character.worldX = cameraOffset + character.x;
