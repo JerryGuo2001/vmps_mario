@@ -9,7 +9,7 @@ if (practice_explore_on_off){
   totalQuestions=1
 }
 if (exploration_debug==true){
-  totalQuestions_setup = 5;
+  totalQuestions_setup = 2;
 }else{
   totalQuestions_setup = 50;
 }

@@ -197,7 +197,7 @@
     overlay.scrollTop = 0;
   }
 
-  function finishAndSaveAllData() {
+  async function finishAndSaveAllData() {
     const overlay = document.getElementById("postSurveyOverlay");
     if (overlay) overlay.style.display = "none";
     restoreBackgroundScroll();
@@ -206,16 +206,51 @@
     if (thanks) thanks.style.display = "block";
 
     const id = participantData?.id || "unknown";
-    if (typeof downloadCSV === "function") {
-      downloadCSV(participantData.trials || [], `data_${id}.csv`);
-      if (participantData.postSurvey) {
-        downloadCSV([participantData.postSurvey], `survey_${id}.csv`);
+
+    // Prefer the new switchable save functions
+    const hasNewTrialSaver = (typeof saveParticipantTrialsCSV === "function");
+    const hasNewGenericSaver = (typeof saveCSVString === "function"); // optional
+    const hasOldDownloader = (typeof downloadCSV === "function");
+
+    try {
+      // -------------------------
+      // 1) Save trial-level data
+      // -------------------------
+      if (hasNewTrialSaver) {
+        // Uses SAVE_MODE switch internally (local vs vercel)
+        await saveParticipantTrialsCSV(participantData.trials || [], `data_${id}.csv`);
+      } else if (hasOldDownloader) {
+        // Backward-compatible fallback: local only
+        downloadCSV(participantData.trials || [], `data_${id}.csv`);
+      } else {
+        throw new Error("No saver available for trials (saveParticipantTrialsCSV or downloadCSV missing).");
       }
-    } else {
-      console.warn("[PostSurvey] downloadCSV() not found; cannot save data automatically.");
-      alert("Internal error: downloadCSV() not available. Please contact the researcher.");
+
+      // -------------------------
+      // 2) Save post-survey data
+      // -------------------------
+      if (participantData.postSurvey) {
+        if (hasNewGenericSaver && typeof buildTrialsCSVString === "function") {
+          // Reuse your dynamic-header CSV builder by treating survey as a one-row "trial list"
+          // (This preserves the same flatten/dynamic header behavior you already use.)
+          const csvString = buildTrialsCSVString([participantData.postSurvey]);
+          if (csvString) {
+            await saveCSVString(csvString, `survey_${id}.csv`);
+          }
+        } else if (hasOldDownloader) {
+          // Backward-compatible fallback: local only
+          downloadCSV([participantData.postSurvey], `survey_${id}.csv`);
+        } else {
+          // Not fatal; trials already saved
+          console.warn("[PostSurvey] No saver available for postSurvey CSV; skipping survey save.");
+        }
+      }
+    } catch (err) {
+      console.error("Save failed:", err);
+      alert("Save failed: " + (err?.message || String(err)));
     }
   }
+
 
   // -------------------- Catalog readiness --------------------
 
