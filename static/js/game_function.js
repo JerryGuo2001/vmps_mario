@@ -100,19 +100,30 @@ async function drawObstacles() {
                 mushrooms = await generateMushroom(5);
                 handleTextInteraction_canvas4()
                 // Log room choice
+                // consume key so you don’t double-log across frames
+                keys['e'] = false;
+
+                // Log room choice (record BOTH options + chosen)
                 const rt = performance.now() - roomChoiceStartTime;
                 const timeElapsed = performance.now() - participantData.startTime;
-            
+
                 participantData.trials.push({
-                    id: participantData.id,
-                    trial_type: 'room_choice',
-                    choice: 'left',
-                    room: leftDoorType,
-                    rt: rt,
-                    time_elapsed: timeElapsed
+                id: participantData.id,
+                trial_type: 'room_choice',
+
+                // what was offered
+                door_left: leftDoorType,
+                door_right: rightDoorType,
+
+                // what they did
+                chosen_side: 'left',
+                chosen_room: leftDoorType,
+                rt: rt,
+                time_elapsed: timeElapsed
                 });
-            
-                roomChoiceStartTime = null; // ✅ Reset timer
+
+                roomChoiceStartTime = null;
+
             
                 // Set up room entry
                 if (!roomRepetitionMap[currentRoom]) {
@@ -153,20 +164,24 @@ async function drawObstacles() {
                 mushrooms = await generateMushroom(5);
                 handleTextInteraction_canvas4()
 
-                // Log room choice
+                keys['e'] = false;
+
                 const rt = performance.now() - roomChoiceStartTime;
                 const timeElapsed = performance.now() - participantData.startTime;
-            
+
                 participantData.trials.push({
-                    id: participantData.id,
-                    trial_type: 'room_choice',
-                    choice: 'right',
-                    room: rightDoorType,
-                    rt: rt,
-                    time_elapsed: timeElapsed
+                id: participantData.id,
+                trial_type: 'room_choice',
+                door_left: leftDoorType,
+                door_right: rightDoorType,
+                chosen_side: 'right',
+                chosen_room: rightDoorType,
+                rt: rt,
+                time_elapsed: timeElapsed
                 });
-            
-                roomChoiceStartTime = null; // ✅ Reset timer
+
+                roomChoiceStartTime = null;
+
             
                 // Set up room entry
                 if (!roomRepetitionMap[currentRoom]) {
