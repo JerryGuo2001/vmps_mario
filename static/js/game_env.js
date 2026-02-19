@@ -710,8 +710,8 @@ function wrapWorldXLeftEdge(xWorld) {
   const maxX = worldWidth - character.width; // last valid left position
   if (maxX <= 0) return 0;
 
-  // If you pass the left edge, appear on the far right
-  if (xWorld < 0) return maxX;
+  // // If you pass the left edge, appear on the far right
+  // if (xWorld < 0) return maxX;
 
   // If you pass the right edge, appear on the far left
   if (xWorld > maxX) return 0;
