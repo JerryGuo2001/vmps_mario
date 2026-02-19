@@ -1,10 +1,19 @@
 // ========================= MEMORY PHASE (2AFC VALUE CHOICE) =========================
-// FULL DROP-IN REPLACEMENT: adds per-color XY space difficulty binning for UNSEEN selection
-// - Uses SEEN mushrooms to define per-color XY space (cap, stem)
-// - Computes dNN(unseen) = distance to nearest seen (same color) in normalized space
-// - Bins unseen into 3 difficulties per color: close=3 (hard), mid=2, far=1 (easy)
-// - Builds extra 32 within-color SU trials (4 per color, 8 colors) using unseen by difficulty
-// - Fallback: if not enough unseen in easier bins, falls back toward MOST DIFFICULT (close)
+// FULL DROP-IN REPLACEMENT (v2): 72-type enforcement + lure_bin correctness + checks
+//
+// Key changes:
+// 1) Enforces discrete 72 types: type_key = color|cap_bin|stem_bin
+//    - cap_bin, stem_bin are {-1,0,1} based on (a) exact 3 unique values if present, else (b) global tertiles.
+// 2) Normalizes catalog rows using your CSV columns:
+//    - image_relpath / imagefilename
+//    - color_name / color
+//    - cap_roundness / cap
+//    - stem_width / stem
+//    - assigned_value / value
+// 3) Computes per-color XY (cap, stem) difficulty for UNSEEN items using SEEN items.
+//    - dNN = nearest-neighbor distance to SEEN (same color) in minmax-normalized XY space.
+//    - bins per color: close/mid/far (tertiles) and sets lure_bin: far=1, mid/close=2.
+// 4) Adds console checks: uniqueTypes target=72, per-color types target=9, and base selection uses 72 unique types.
 
 // -------------------- GLOBAL STATE --------------------
 let memory_currentQuestion = 0;
@@ -57,11 +66,6 @@ function _cleanImageName(s) {
   return m[0].replace(/^.*images_balanced[\\/]/i, '').replace(/^.*[\\/]/, '');
 }
 
-function memoryTypeKey(m) {
-  if (typeof window.expTypeKeyFromRow === 'function') return window.expTypeKeyFromRow(m);
-  return `${m.color}|${m.cap}|${m.stem}`;
-}
-
 function _normSeenStatus(s) {
   return (String(s || '').startsWith('seen')) ? 'seen' : 'unseen';
 }
@@ -72,15 +76,28 @@ function _packMushForLog(m) {
     name: m.name ?? null,
     image: m.imagefilename ?? null,
     value: (typeof m.value === 'number' ? m.value : null),
+
     color: m.color ?? null,
-    cap: m.cap ?? null,
-    stem: m.stem ?? null,
+
+    // continuous numeric
+    cap: Number.isFinite(m.cap) ? m.cap : null,
+    stem: Number.isFinite(m.stem) ? m.stem : null,
+
+    // discrete bins for 72 types
+    cap_bin: (m.cap_bin ?? null),
+    stem_bin: (m.stem_bin ?? null),
+
     type_key: m.type_key ?? (typeof memoryTypeKey === 'function' ? memoryTypeKey(m) : null),
     memory_status: m.memory_status ?? null,
     seen_in_learning: (m.seen_in_learning ?? null),
+
+    // difficulty / lure
     dNN: (Number.isFinite(m.dNN) ? m.dNN : null),
     difficulty: (m.difficulty ?? null),
     difficulty_label: (m.difficulty_label ?? null),
+    lure_bin: (m.lure_bin ?? null),
+
+    // debugging XY
     xy_cap: (m.xy_cap ?? null),
     xy_stem: (m.xy_stem ?? null),
   };
@@ -97,7 +114,8 @@ function _currentTrialMeta() {
       color: null,
       unseen_difficulty: null,
       unseen_difficulty_label: null,
-      unseen_dNN: null
+      unseen_dNN: null,
+      unseen_lure_bin: null
     };
   }
   return {
@@ -109,6 +127,7 @@ function _currentTrialMeta() {
     unseen_difficulty: tr.unseen_difficulty ?? null,
     unseen_difficulty_label: tr.unseen_difficulty_label ?? null,
     unseen_dNN: tr.unseen_dNN ?? null,
+    unseen_lure_bin: tr.unseen_lure_bin ?? null,
     trial_index_pre_shuffle: tr.trial_index_pre_shuffle ?? null
   };
 }
@@ -189,50 +208,197 @@ function memoryImageSrc(imagefilename) {
   return `TexturePack/mushroom_pack/images_balanced/${imagefilename}`;
 }
 
-function _normalizeMush(row) {
-  if (!row) return null;
-
-  let raw = row.imagefilename || row.filename || row.image || '';
-  const imagefilename = String(raw)
-    .replace(/^.*images_balanced\//i, '')
-    .replace(/^.*[\\/]/, '');
-
-  const name = row.name || (imagefilename ? imagefilename.replace(/\.[^.]+$/, '') : 'mushroom');
-
-  const color = row.color ?? row.col ?? null;
-  const cap   = row.cap   ?? row.cap_size ?? row.cap_zone ?? null;
-  const stem  = row.stem  ?? row.stem_width ?? row.stem_zone ?? null;
-
-  return {
-    name,
-    imagefilename,
-    value: row.value ?? 0,
-    color,
-    cap,
-    stem
-  };
-}
-
 function _isSkyCatalogRow(row) {
   const env = String(row?.room || row?.env || row?.environment || '').trim().toLowerCase();
   if (env === 'sky') return true;
 
-  const raw = String(row?.filename || row?.imagefilename || row?.image || '').toLowerCase();
+  const raw = String(row?.filename || row?.imagefilename || row?.image || row?.image_relpath || '').toLowerCase();
   if (raw.includes('/sky_mushroom/') || raw.includes('\\sky_mushroom\\')) return true;
   if (raw.includes('rainbow_mushroom.png')) return true;
 
   return false;
 }
 
-function _getCatalogPool() {
-  const pool = Array.isArray(window.mushroomCatalogRows) ? window.mushroomCatalogRows : [];
-  const out = [];
-  for (const r of pool) {
-    if (_isSkyCatalogRow(r)) continue;
-    const n = _normalizeMush(r);
-    if (!n || !n.imagefilename) continue;
-    out.push(n);
+function _asFiniteNumber(v) {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
+// ---- Catalog row -> canonical mushroom object ----
+function _normalizeMush(row) {
+  if (!row) return null;
+
+  // image path (your CSV likely uses image_relpath like "images_balanced/xxx.png")
+  const rawImg =
+    row.imagefilename ??
+    row.image_relpath ??
+    row.image_webpath ??
+    row.filename ??
+    row.image ??
+    '';
+
+  const imagefilename = String(rawImg)
+    .replace(/^.*images_balanced[\\/]/i, '')
+    .replace(/^.*images_balanced\//i, '')
+    .replace(/^.*[\\/]/, '');
+
+  if (!imagefilename) return null;
+
+  const name = row.name || row.slug || (imagefilename ? imagefilename.replace(/\.[^.]+$/, '') : 'mushroom');
+
+  const color = row.color ?? row.color_name ?? row.col ?? null;
+
+  // continuous numeric (used for XY space + dNN)
+  const cap  = _asFiniteNumber(row.cap_roundness ?? row.cap ?? row.cap_value ?? row.cap_roundness_value ?? row.cap_zone ?? null);
+  const stem = _asFiniteNumber(row.stem_width ?? row.stem ?? row.stem_value ?? row.stem_width_value ?? row.stem_zone ?? null);
+
+  // value
+  const value = _asFiniteNumber(row.assigned_value ?? row.value ?? 0) ?? 0;
+
+  return {
+    name,
+    imagefilename,
+    value,
+
+    color,
+    cap,
+    stem,
+
+    // bins for 72-type
+    cap_bin: null,
+    stem_bin: null,
+    type_key: null,
+
+    // memory status / seen flag (set later)
+    memory_status: null,
+    seen_in_learning: null,
+
+    // difficulty + lure
+    dNN: null,
+    difficulty: null,
+    difficulty_label: null,
+    lure_bin: null,
+
+    // debug
+    xy_cap: null,
+    xy_stem: null
+  };
+}
+
+// ========================= 72-TYPE BINNING =========================
+// Prefer exact 3 unique values; otherwise use global tertiles (33%/66%).
+let MEMORY_BINNING = null;
+// {
+//   mode: "exact3" | "tertiles",
+//   cap: { values: [a,b,c] } OR { q1, q2 },
+//   stem:{ values: [a,b,c] } OR { q1, q2 }
+// }
+
+function _uniqSorted(nums) {
+  const set = new Set();
+  for (const x of nums) if (Number.isFinite(x)) set.add(x);
+  return Array.from(set).sort((a,b)=>a-b);
+}
+
+function _quantileSorted(sorted, p) {
+  if (!sorted.length) return null;
+  const idx = (sorted.length - 1) * p;
+  const lo = Math.floor(idx);
+  const hi = Math.ceil(idx);
+  const w = idx - lo;
+  if (hi >= sorted.length) return sorted[sorted.length - 1];
+  return sorted[lo] * (1 - w) + sorted[hi] * w;
+}
+
+function _computeBinning(pool) {
+  const caps = pool.map(m => m.cap).filter(Number.isFinite);
+  const stems = pool.map(m => m.stem).filter(Number.isFinite);
+
+  const capU = _uniqSorted(caps);
+  const stemU = _uniqSorted(stems);
+
+  // Exact 3-value case (ideal: your catalog already has discrete values)
+  if (capU.length === 3 && stemU.length === 3) {
+    return {
+      mode: "exact3",
+      cap: { values: capU },
+      stem: { values: stemU }
+    };
   }
+
+  // Otherwise tertiles on the full continuous distribution
+  const capS = caps.slice().sort((a,b)=>a-b);
+  const stemS = stems.slice().sort((a,b)=>a-b);
+
+  return {
+    mode: "tertiles",
+    cap: { q1: _quantileSorted(capS, 1/3), q2: _quantileSorted(capS, 2/3) },
+    stem:{ q1: _quantileSorted(stemS,1/3), q2: _quantileSorted(stemS,2/3) }
+  };
+}
+
+function _bin3(value, spec) {
+  if (!Number.isFinite(value) || !spec) return null;
+
+  // exact3 mapping: lowest -> -1, mid -> 0, high -> 1
+  if (spec.values && spec.values.length === 3) {
+    const [a,b,c] = spec.values;
+    // robust equality for floats: pick nearest
+    const da = Math.abs(value - a);
+    const db = Math.abs(value - b);
+    const dc = Math.abs(value - c);
+    if (da <= db && da <= dc) return -1;
+    if (db <= da && db <= dc) return 0;
+    return 1;
+  }
+
+  // tertiles
+  const q1 = spec.q1, q2 = spec.q2;
+  if (!Number.isFinite(q1) || !Number.isFinite(q2)) return null;
+  if (value <= q1) return -1;
+  if (value <= q2) return 0;
+  return 1;
+}
+
+function _ensureTypeKey(m) {
+  if (!m) return null;
+  if (!MEMORY_BINNING) return null;
+
+  if (m.cap_bin === null || m.cap_bin === undefined) m.cap_bin = _bin3(m.cap, MEMORY_BINNING.cap);
+  if (m.stem_bin === null || m.stem_bin === undefined) m.stem_bin = _bin3(m.stem, MEMORY_BINNING.stem);
+
+  if (!m.color || m.cap_bin === null || m.stem_bin === null) return null;
+
+  const tk = `${m.color}|${m.cap_bin}|${m.stem_bin}`;
+  m.type_key = tk;
+  return tk;
+}
+
+// IMPORTANT: type key must be DISCRETE bins (not raw cap/stem)
+function memoryTypeKey(m) {
+  return _ensureTypeKey(m);
+}
+
+function _getCatalogPool() {
+  const rows = Array.isArray(window.mushroomCatalogRows) ? window.mushroomCatalogRows : [];
+  const out = [];
+  for (const r of rows) {
+    if (_isSkyCatalogRow(r)) continue;
+    const m = _normalizeMush(r);
+    if (!m) continue;
+    if (!m.imagefilename) continue;
+    if (!m.color) continue;
+    if (!Number.isFinite(m.cap) || !Number.isFinite(m.stem)) continue;
+    out.push(m);
+  }
+
+  if (!MEMORY_BINNING && out.length) {
+    MEMORY_BINNING = _computeBinning(out);
+    console.log("[memory-check] binning mode:", MEMORY_BINNING);
+  }
+
+  for (const m of out) _ensureTypeKey(m);
+
   return out;
 }
 
@@ -311,28 +477,52 @@ function _ensureArray(x) {
   return Array.isArray(x) ? x : [];
 }
 
-// ========================= DIFFICULTY / XY SPACE HELPERS =========================
-function _toScalar(v) {
-  if (v === null || v === undefined) return null;
-  if (typeof v === "number" && Number.isFinite(v)) return v;
+// ========================= CHECKS =========================
+function memoryCatalogChecks(pool) {
+  const colors = new Set();
+  const types = new Set();
+  const typesByColor = new Map();
 
-  const s = String(v).trim().toLowerCase();
-  const map = {
-    thin: -1, small: -1, low: -1,
-    neutral: 0, med: 0, medium: 0, mid: 0,
-    thick: 1, large: 1, high: 1
-  };
-  if (s in map) return map[s];
+  let bad = 0;
+  for (const m of pool) {
+    const tk = memoryTypeKey(m);
+    if (!tk || tk.includes("null") || tk.includes("undefined")) { bad++; continue; }
+    types.add(tk);
+    colors.add(m.color);
 
-  const n = Number(s);
-  return Number.isFinite(n) ? n : null;
+    if (!typesByColor.has(m.color)) typesByColor.set(m.color, new Set());
+    typesByColor.get(m.color).add(tk);
+  }
+
+  console.log(`[memory-check] pool=${pool.length}, colors=${colors.size}, uniqueTypes=${types.size} (target=72), badTypeKey=${bad}`);
+
+  const perColor = [];
+  for (const [c, set] of typesByColor.entries()) {
+    perColor.push({ color: c, nTypes: set.size, target: 9 });
+  }
+  perColor.sort((a,b)=>String(a.color).localeCompare(String(b.color)));
+  console.table(perColor);
+
+  const ok72 = (types.size >= 72);
+  if (!ok72) {
+    console.warn("[memory-check] WARNING: uniqueTypes < 72. You cannot enforce 72 unique types with current catalog filtering.");
+  }
+
+  // show binning stats
+  if (MEMORY_BINNING) {
+    if (MEMORY_BINNING.mode === "exact3") {
+      console.log("[memory-check] exact3 cap values:", MEMORY_BINNING.cap.values, "stem values:", MEMORY_BINNING.stem.values);
+    } else {
+      console.log("[memory-check] tertile cutpoints cap:", MEMORY_BINNING.cap, "stem:", MEMORY_BINNING.stem);
+    }
+  }
 }
 
+// ========================= DIFFICULTY / XY SPACE HELPERS =========================
+// Uses continuous cap/stem. Assumes already numeric.
 function _mushXY(m) {
-  const x = _toScalar(m.cap);
-  const y = _toScalar(m.stem);
-  if (x === null || y === null) return null;
-  return { x, y };
+  if (!m || !Number.isFinite(m.cap) || !Number.isFinite(m.stem)) return null;
+  return { x: m.cap, y: m.stem };
 }
 
 function _minmaxNorm(points) {
@@ -360,6 +550,8 @@ function _distNorm(a, b) {
  * Build per-color XY space from SEEN mushrooms, then compute for each UNSEEN candidate:
  *   dNN = distance to nearest seen (same color) in normalized space
  * and bin unseen into {close, mid, far} per color using tertiles.
+ *
+ * Also sets: lure_bin (far=1, mid/close=2)
  */
 function buildUnseenDifficultyBinsByColor({ pool, seenSet, usedImages }) {
   const byColorPts = new Map();
@@ -369,10 +561,10 @@ function buildUnseenDifficultyBinsByColor({ pool, seenSet, usedImages }) {
     if (!base) continue;
     if (usedImages && usedImages.has(base)) continue;
 
-    const typeKey = memoryTypeKey(m);
-    if (!typeKey || typeKey.includes("null") || typeKey.includes("undefined")) continue;
+    const tk = memoryTypeKey(m);
+    if (!tk || tk.includes("null") || tk.includes("undefined")) continue;
 
-    const color = _typeColorFromKey(typeKey);
+    const color = m.color ?? _typeColorFromKey(tk);
     if (!color) continue;
 
     const xy = _mushXY(m);
@@ -382,18 +574,19 @@ function buildUnseenDifficultyBinsByColor({ pool, seenSet, usedImages }) {
 
     if (!byColorPts.has(color)) byColorPts.set(color, { seenPts: [], unseenPts: [] });
 
-    const pt = { ...xy, m, base, type_key: typeKey };
+    const pt = { ...xy, m, base, type_key: tk };
     byColorPts.get(color)[isSeen ? "seenPts" : "unseenPts"].push(pt);
 
-    m.type_key = typeKey;
     m.seen_in_learning = isSeen ? 1 : 0;
   }
 
+  // normalize within each color on seen+unseen pooled
   for (const [color, obj] of byColorPts.entries()) {
     const all = obj.seenPts.concat(obj.unseenPts);
     if (all.length >= 2) _minmaxNorm(all);
   }
 
+  // dNN: unseen -> nearest seen
   for (const [color, obj] of byColorPts.entries()) {
     const S = obj.seenPts;
     if (!S || S.length === 0) continue;
@@ -423,9 +616,9 @@ function buildUnseenDifficultyBinsByColor({ pool, seenSet, usedImages }) {
 
     const U_sorted = U.slice().sort((a, b) => a.dNN - b.dNN);
 
+    // tertiles: close = lowest third (hard), far = highest third (easy)
     const k = Math.floor(U_sorted.length / 3);
     const rem = U_sorted.length - 3 * k;
-
     const closeN = k + rem;
 
     const closePts = U_sorted.slice(0, closeN);
@@ -439,16 +632,19 @@ function buildUnseenDifficultyBinsByColor({ pool, seenSet, usedImages }) {
     for (const u of closePts) {
       u.m.difficulty_label = "close";
       u.m.difficulty = 3;
+      u.m.lure_bin = 2; // lure-like
       close.push(u.m);
     }
     for (const u of midPts) {
       u.m.difficulty_label = "mid";
       u.m.difficulty = 2;
+      u.m.lure_bin = 2; // lure-like
       mid.push(u.m);
     }
     for (const u of farPts) {
       u.m.difficulty_label = "far";
       u.m.difficulty = 1;
+      u.m.lure_bin = 1; // novel/easy
       far.push(u.m);
     }
 
@@ -489,7 +685,7 @@ function appendWithinColorSUTrialsAndShuffleTotal({
   const pool = _getCatalogPool();
   const seenSet = _getSeenImageSet();
 
-  const byTypeAvail = new Map();
+  const byTypeAvail = new Map(); // typeKey -> { seen: [], unseen: [] }
 
   for (const m of pool) {
     const typeKey = memoryTypeKey(m);
@@ -508,6 +704,7 @@ function appendWithinColorSUTrialsAndShuffleTotal({
     byTypeAvail.get(typeKey)[isSeen ? "seen" : "unseen"].push(m);
   }
 
+  // types per color
   const typesByColor = new Map();
   for (const typeKey of byTypeAvail.keys()) {
     const color = _typeColorFromKey(typeKey);
@@ -531,6 +728,7 @@ function appendWithinColorSUTrialsAndShuffleTotal({
   _shuffle(candidateColors);
   const colors = candidateColors.slice(0, nColorsWanted);
 
+  // Compute difficulty bins restricted by usedImages (so you don't pick duplicates)
   const difficultyByColor = buildUnseenDifficultyBinsByColor({ pool, seenSet, usedImages });
 
   const appended = [];
@@ -631,6 +829,9 @@ function appendWithinColorSUTrialsAndShuffleTotal({
         let right = unseenItems[i];
         if (Math.random() < 0.5) [left, right] = [right, left];
 
+        // Identify the unseen item actually in this trial after left/right swap
+        const unseenInTrial = [left, right].find(mm => String(mm?.memory_status || "").startsWith("unseen")) || null;
+
         appended.push({
           trial_uid: `extra_${color}_${appendedCounter++}`,
           trial_index_pre_shuffle: (baseTrials.length + appended.length),
@@ -640,9 +841,12 @@ function appendWithinColorSUTrialsAndShuffleTotal({
           left,
           right,
           pair_type: "SU",
-          unseen_difficulty: unseenItems[i]?.difficulty ?? null,
-          unseen_difficulty_label: unseenItems[i]?.difficulty_label ?? null,
-          unseen_dNN: unseenItems[i]?.dNN ?? null,
+
+          // meta from the actual unseen item
+          unseen_difficulty: unseenInTrial?.difficulty ?? null,
+          unseen_difficulty_label: unseenInTrial?.difficulty_label ?? null,
+          unseen_dNN: unseenInTrial?.dNN ?? null,
+          unseen_lure_bin: unseenInTrial?.lure_bin ?? null
         });
       }
 
@@ -674,15 +878,22 @@ function appendWithinColorSUTrialsAndShuffleTotal({
 
   const extraOnly = memoryTrials.filter(t => t.block === "within_color_extra");
   const dCounts = { 1:0, 2:0, 3:0, null:0 };
+  const lCounts = { 1:0, 2:0, null:0 };
+
   for (const tr of extraOnly) {
     const d = tr.unseen_difficulty;
     if (d === 1 || d === 2 || d === 3) dCounts[d] += 1;
     else dCounts.null += 1;
+
+    const lb = tr.unseen_lure_bin;
+    if (lb === 1 || lb === 2) lCounts[lb] += 1;
+    else lCounts.null += 1;
   }
 
   console.log(
     `[memory] Appended extra trials=${extraOnly.length}. Total trials=${memory_totalQuestions}. ` +
-    `Extra unseen difficulty: d3=${dCounts[3]}, d2=${dCounts[2]}, d1=${dCounts[1]}, null=${dCounts.null}`
+    `Extra unseen difficulty: d3=${dCounts[3]}, d2=${dCounts[2]}, d1=${dCounts[1]}, null=${dCounts.null}. ` +
+    `Extra lure_bin: lb2=${lCounts[2]}, lb1=${lCounts[1]}, null=${lCounts.null}`
   );
 }
 
@@ -699,11 +910,19 @@ async function preloadMushroomPairs() {
   }
 
   const desiredPairs = Memory_debug ? 2 : MEMORY_TRIALS;
-  const desiredItems = desiredPairs * 2;
+  const desiredItems = desiredPairs * 2;          // 72
   const targetSeenItems = Math.floor(desiredItems / 2);
 
   const seenSet = _getSeenImageSet();
 
+  // ---- CHECKS: catalog supports 72 types? ----
+  memoryCatalogChecks(pool);
+
+  // ---- Precompute difficulty + lure_bin for ALL unseen candidates (base + extra) ----
+  // usedImages=null => no exclusion; stamps dNN/difficulty/lure_bin onto object references in pool
+  buildUnseenDifficultyBinsByColor({ pool, seenSet, usedImages: null });
+
+  // ---- Build byType buckets ----
   const byType = new Map(); // typeKey -> { seen: [], unseen: [] }
   for (const m of pool) {
     const typeKey = memoryTypeKey(m);
@@ -730,16 +949,18 @@ async function preloadMushroomPairs() {
     return;
   }
 
+  // Enforce the 72-type rule: pick exactly one mushroom per type.
   const nTypesWanted = Math.min(desiredItems, allTypes.length);
 
-  const typesWithSeen = allTypes.filter(t => byType.get(t).seen.length > 0);
+  // choose up to 36 types that have SEEN available (so we can hit ~50% seen items)
+  const typesWithSeen = allTypes.filter(t => (byType.get(t)?.seen?.length || 0) > 0);
   _shuffle(typesWithSeen);
 
   const chosenTypesSeen = typesWithSeen.slice(0, Math.min(targetSeenItems, nTypesWanted));
   const chosenTypeSet = new Set(chosenTypesSeen);
 
+  // fill remaining types from the rest
   const remainingNeed = nTypesWanted - chosenTypeSet.size;
-
   const remainingTypes = allTypes.filter(t => !chosenTypeSet.has(t));
   _shuffle(remainingTypes);
 
@@ -747,7 +968,7 @@ async function preloadMushroomPairs() {
   for (const t of remainingTypes) {
     if (chosenTypesFill.length >= remainingNeed) break;
     const bucket = byType.get(t);
-    if (bucket.unseen.length > 0 || bucket.seen.length > 0) {
+    if ((bucket.unseen?.length || 0) > 0 || (bucket.seen?.length || 0) > 0) {
       chosenTypesFill.push(t);
       chosenTypeSet.add(t);
     }
@@ -756,7 +977,6 @@ async function preloadMushroomPairs() {
   const finalTypes = [...chosenTypesSeen, ...chosenTypesFill].slice(0, nTypesWanted);
 
   const selectedItems = [];
-
   for (const t of finalTypes) {
     const bucket = byType.get(t);
     let chosen = null;
@@ -779,6 +999,7 @@ async function preloadMushroomPairs() {
     if (chosen) selectedItems.push(chosen);
   }
 
+  // ensure even length (should be 72)
   if (selectedItems.length % 2 === 1) selectedItems.pop();
 
   _shuffle(selectedItems);
@@ -801,10 +1022,27 @@ async function preloadMushroomPairs() {
       trial_index: i,
       block: "base",
       pair_type,
-      color: null,
+      color: null,  // base trials can be mixed color
       left,
-      right
+      right,
+
+      // For base trials we also store meta of the unseen if present (optional but useful)
+      unseen_difficulty: null,
+      unseen_difficulty_label: null,
+      unseen_dNN: null,
+      unseen_lure_bin: null
     });
+  }
+
+  // Fill base unseen meta (so you can verify lure manipulation even in base SU)
+  for (const tr of memoryTrials) {
+    const unseenInTrial = [tr.left, tr.right].find(mm => _normSeenStatus(mm.memory_status) === "unseen") || null;
+    if (unseenInTrial) {
+      tr.unseen_difficulty = unseenInTrial.difficulty ?? null;
+      tr.unseen_difficulty_label = unseenInTrial.difficulty_label ?? null;
+      tr.unseen_dNN = unseenInTrial.dNN ?? null;
+      tr.unseen_lure_bin = unseenInTrial.lure_bin ?? null;
+    }
   }
 
   aMushrooms = memoryTrials.map(t => t.left);
@@ -833,15 +1071,20 @@ async function preloadMushroomPairs() {
     trial: i + 1,
     L_status: _normSeenStatus(tr.left.memory_status),
     L_type: tr.left.type_key,
+    L_capbin: tr.left.cap_bin,
+    L_stembin: tr.left.stem_bin,
     L_img: tr.left.imagefilename,
     R_status: _normSeenStatus(tr.right.memory_status),
     R_type: tr.right.type_key,
+    R_capbin: tr.right.cap_bin,
+    R_stembin: tr.right.stem_bin,
     R_img: tr.right.imagefilename,
+    unseen_lb: tr.unseen_lure_bin
   }));
   console.table(seq);
 
   if (desiredItems === 72 && uniqTypes < 72) {
-    console.warn(`[memory] WARNING: Could not reach 72 unique types. Got ${uniqTypes}.`);
+    console.warn(`[memory] WARNING: Could not reach 72 unique types. Got ${uniqTypes}. (catalog/filtering limitation)`);
   }
 
   // Append extra 32 only when not debug
@@ -1108,11 +1351,12 @@ function handleMemoryChoice(side) {
 
   animateChoiceIndicator(targetBox, () => {
     if (ENABLE_SIMILARITY_TEST) {
-      // If extra SU trials: target the UNSEEN mushroom so your difficulty manipulation affects prompt data.
+      // If extra SU trials: target the UNSEEN mushroom so difficulty/lure manipulation affects prompt data.
       if (meta.block === "within_color_extra") {
         const cand = [a, b].filter(m => String(m?.memory_status || '').startsWith('unseen'));
         memory_promptMushroom = cand.length ? cand[0] : ((Math.random() < 0.5) ? a : b);
       } else {
+        // otherwise random
         memory_promptMushroom = (Math.random() < 0.5) ? a : b;
       }
       showMemoryChoicePrompt(memory_promptMushroom);
@@ -1256,144 +1500,4 @@ function completeMemory() {
   } else {
     console.warn('[memory] initTaskOOO() not found; memory phase ended with no next phase.');
   }
-}
-
-
-//debug for catalog and lure bin
-// ========================= CATALOG NUMERIC CHECK (for lure-bin) =========================
-// Paste this once (e.g., near _getCatalogPool or before Memory_initGame).
-// Requires: window.mushroomCatalogRows OR your normalized pool; optionally uses _toScalar if defined.
-
-function _isFiniteNumber(x) {
-  return (typeof x === "number" && Number.isFinite(x));
-}
-
-function _asNumberMaybe(v) {
-  // 1) already number
-  if (_isFiniteNumber(v)) return v;
-
-  // 2) try your _toScalar mapping if available (thin/med/thick -> -1/0/1, etc.)
-  if (typeof _toScalar === "function") {
-    const s = _toScalar(v);
-    if (_isFiniteNumber(s)) return s;
-  }
-
-  // 3) try plain numeric cast
-  const n = Number(String(v ?? "").trim());
-  return Number.isFinite(n) ? n : null;
-}
-
-function checkCatalogNumericForLureBin({
-  rows = (Array.isArray(window.mushroomCatalogRows) ? window.mushroomCatalogRows : []),
-  showExamples = 8
-} = {}) {
-  let total = 0;
-
-  let cap_num = 0, cap_bad = 0, cap_missing = 0;
-  let stem_num = 0, stem_bad = 0, stem_missing = 0;
-
-  const badExamples = []; // store rows with non-numeric cap/stem after conversion
-  const missExamples = []; // store rows with missing cap/stem
-
-  for (const r of rows) {
-    if (!r || typeof r !== "object") continue;
-    total++;
-
-    // Try multiple possible field names (match your _normalizeMush logic)
-    const capRaw  = (r.cap ?? r.cap_size ?? r.cap_zone ?? r.cap_roundness ?? null);
-    const stemRaw = (r.stem ?? r.stem_width ?? r.stem_zone ?? r.stem_width_zone ?? null);
-
-    const capN  = _asNumberMaybe(capRaw);
-    const stemN = _asNumberMaybe(stemRaw);
-
-    if (capRaw === null || capRaw === undefined || String(capRaw).trim() === "") {
-      cap_missing++;
-      if (missExamples.length < showExamples) missExamples.push({ which: "cap", capRaw, stemRaw, row: r });
-    } else if (capN === null) {
-      cap_bad++;
-      if (badExamples.length < showExamples) badExamples.push({ which: "cap", capRaw, stemRaw, row: r });
-    } else {
-      cap_num++;
-    }
-
-    if (stemRaw === null || stemRaw === undefined || String(stemRaw).trim() === "") {
-      stem_missing++;
-      if (missExamples.length < showExamples) missExamples.push({ which: "stem", capRaw, stemRaw, row: r });
-    } else if (stemN === null) {
-      stem_bad++;
-      if (badExamples.length < showExamples) badExamples.push({ which: "stem", capRaw, stemRaw, row: r });
-    } else {
-      stem_num++;
-    }
-  }
-
-  const report = {
-    total_rows: total,
-    cap: { numeric_or_mappable: cap_num, missing: cap_missing, non_numeric: cap_bad },
-    stem:{ numeric_or_mappable: stem_num, missing: stem_missing, non_numeric: stem_bad },
-    bad_examples: badExamples.map(e => ({
-      which: e.which,
-      capRaw: e.capRaw,
-      stemRaw: e.stemRaw,
-      filename: e.row?.imagefilename ?? e.row?.filename ?? e.row?.image ?? null,
-      color: e.row?.color ?? e.row?.col ?? null
-    })),
-    missing_examples: missExamples.map(e => ({
-      which: e.which,
-      capRaw: e.capRaw,
-      stemRaw: e.stemRaw,
-      filename: e.row?.imagefilename ?? e.row?.filename ?? e.row?.image ?? null,
-      color: e.row?.color ?? e.row?.col ?? null
-    }))
-  };
-
-  // "Ready" if a strong majority of rows have both mappable cap & stem (tweak threshold if you want)
-  const bothGood = Math.max(0, total - (cap_missing + cap_bad)) + Math.max(0, total - (stem_missing + stem_bad));
-  // The above is loose; simpler strict readiness:
-  const capReady  = (cap_num / Math.max(1, total)) >= 0.95;
-  const stemReady = (stem_num / Math.max(1, total)) >= 0.95;
-
-  window.CATALOG_LUREBIN_REPORT = report;
-  window.CATALOG_LUREBIN_READY = (capReady && stemReady);
-
-  console.log("[catalog] Lure-bin numeric readiness:", {
-    ready: window.CATALOG_LUREBIN_READY,
-    capReady, stemReady,
-    ...report
-  });
-
-  if (!window.CATALOG_LUREBIN_READY) {
-    console.warn("[catalog] Not fully numeric/mappable for lure-bin. See CATALOG_LUREBIN_REPORT.bad_examples.");
-  }
-
-  return report;
-}
-
-// Call it once after catalog load:
-checkCatalogNumericForLureBin();
-
-
-// ========================= OPTIONAL: SAFE LURE-BIN COMPUTE =========================
-// Example lure-bin: based on distance in (cap,stem) space from a reference set.
-// If cap/stem are categorical, _toScalar mapping makes it still work.
-
-function computeLureBinForMush(m, {
-  // thresholds in normalized Euclidean distance (tune to your task)
-  t_close = 0.20,   // "more similar" (hard lure)
-  t_mid   = 0.45    // "less similar" (easier lure)
-} = {}) {
-  // Expect m.cap / m.stem (or similar); use the same conversion as your XY difficulty code
-  const x = _asNumberMaybe(m?.cap);
-  const y = _asNumberMaybe(m?.stem);
-  if (x === null || y === null) return null;
-
-  // Example: if you already computed m.dNN (distance to nearest seen in normalized space),
-  // you can bin directly from that:
-  const d = Number.isFinite(m.dNN) ? m.dNN : null;
-  if (d === null) return null;
-
-  // lure_bin: 2 = closer (hard), 1 = farther (easy)  [match your own convention]
-  if (d <= t_close) return 2;
-  if (d <= t_mid)   return 1;
-  return 1; // everything beyond mid treated as easy by default
 }
