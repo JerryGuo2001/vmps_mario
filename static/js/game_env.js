@@ -465,6 +465,35 @@ function expMushroomId(objOrId) {
 }
 
 
+// ---- Exploration logging: "seen" events for memory to reuse ----
+function expBaseImageName(v) {
+  if (!v) return null;
+  const str = String(v);
+  const m = str.match(/[^\\/]+\.(png|jpg|jpeg|webp)$/i);
+  return m ? m[0] : null;
+}
+
+function logExploreSeenEvent(mushroomObj, roomHere) {
+  if (typeof participantData === 'undefined' || !participantData?.trials) return;
+
+  const imgRaw =
+    mushroomObj?.imagefilename ||
+    mushroomObj?.filename ||
+    mushroomObj?.image?.src ||
+    null;
+
+  participantData.trials.push({
+    id: participantData.id,
+    trial_type: 'explore_seen',
+    room: String(roomHere || currentRoom || '').trim().toLowerCase(),
+    type_key: mushroomObj?._expId || expMushroomId(mushroomObj) || null,
+    imagefilename: expBaseImageName(imgRaw) || imgRaw, // store base if possible
+    value: mushroomObj?.value ?? null,
+    time_elapsed: (participantData?.startTime ? (performance.now() - participantData.startTime) : null)
+  });
+}
+
+
 function markMushroomSeenOnce(mushroomObjOrId, fallbackRoom = null) {
   ensureExplorationIndex();
 
@@ -485,7 +514,10 @@ function markMushroomSeenOnce(mushroomObjOrId, fallbackRoom = null) {
   if (typeof mushroomObjOrId === 'object' && mushroomObjOrId) {
     if (mushroomObjOrId._seenLogged === true) return;
     mushroomObjOrId._seenLogged = true;
+
+    logExploreSeenEvent(mushroomObjOrId, roomHere);
   }
+
 
   const before = Math.min(expSeen[id] || 0, REQUIRED_SEEN_PER_TYPE);
   expSeen[id] = (expSeen[id] || 0) + 1;

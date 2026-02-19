@@ -8,7 +8,7 @@ let memory_promptStartTime = null; // for optional old/new/similar RT
 let memory_awaitingAnswer = false;
 let memory_chosenMushroom = null;
 let memory_totalQuestions
-let Memory_debug = true
+let Memory_debug = false
 if (Memory_debug==true){
   memory_totalQuestions = 2;  
 }else{
@@ -117,58 +117,29 @@ function _cleanImageName(s) {
   return m[0].replace(/^.*images_balanced[\\/]/i, '').replace(/^.*[\\/]/, '');
 }
 
-// --- Collect ALL "seen" mushroom filenames from the learning/exploration logs ---
-function _getSeenImageSet() {
-  const seen = new Set();
-  const trials = (typeof participantData !== 'undefined' && participantData?.trials) ? participantData.trials : [];
 
-  // Pull filenames from common shapes you use across phases (and nested objects)
-  const tryAdd = (v) => {
-    const base = _cleanImageName(v);
-    if (base) seen.add(base);
-  };
+
+function _getSeenTypeSet() {
+  const seenTypes = new Set();
+  const trials = (typeof participantData !== 'undefined' && participantData?.trials) ? participantData.trials : [];
 
   for (const tr of trials) {
     if (!tr || typeof tr !== 'object') continue;
 
-    // Skip memory logs if any already exist (usually none at init)
-    if (typeof tr.trial_type === 'string' && tr.trial_type.includes('memory')) continue;
-
-    // direct keys
-    tryAdd(tr.imagefilename);
-    tryAdd(tr.image);
-    tryAdd(tr.filename);
-    tryAdd(tr.img);
-    tryAdd(tr.mushroom_image);
-
-    // nested common keys
-    if (tr.mushroom && typeof tr.mushroom === 'object') {
-      tryAdd(tr.mushroom.imagefilename);
-      tryAdd(tr.mushroom.image);
-      tryAdd(tr.mushroom.filename);
+    // If you logged explore_seen, this is the most reliable
+    if (tr.trial_type === 'explore_seen' && tr.type_key) {
+      seenTypes.add(String(tr.type_key));
+      continue;
     }
 
-    if (tr.left_mushroom && typeof tr.left_mushroom === 'object') {
-      tryAdd(tr.left_mushroom.imagefilename);
-      tryAdd(tr.left_mushroom.image);
-      tryAdd(tr.left_mushroom.filename);
-    }
-
-    if (tr.right_mushroom && typeof tr.right_mushroom === 'object') {
-      tryAdd(tr.right_mushroom.imagefilename);
-      tryAdd(tr.right_mushroom.image);
-      tryAdd(tr.right_mushroom.filename);
-    }
-
-    if (tr.selected_mushroom && typeof tr.selected_mushroom === 'object') {
-      tryAdd(tr.selected_mushroom.imagefilename);
-      tryAdd(tr.selected_mushroom.image);
-      tryAdd(tr.selected_mushroom.filename);
-    }
+    // Fallback: if you ever logged type_key under other keys
+    if (tr.type_key) seenTypes.add(String(tr.type_key));
+    if (tr.mushroom?.type_key) seenTypes.add(String(tr.mushroom.type_key));
   }
 
-  return seen;
+  return seenTypes;
 }
+
 
 
 // Globals the memory phase expects
@@ -206,20 +177,21 @@ function _normalizeMush(row) {
 
   const name = row.name || (imagefilename ? imagefilename.replace(/\.[^.]+$/, '') : 'mushroom');
 
-  // Pull type attributes from catalog (common keys in your pipeline)
-  const color = row.color ?? row.col ?? null;
-  const cap   = row.cap   ?? row.cap_size ?? row.cap_zone ?? null;
-  const stem  = row.stem  ?? row.stem_width ?? row.stem_zone ?? null;
+  // ✅ match exploration keys
+  const color = (row.color_name ?? row.color ?? row.col ?? null);
+  const cap   = (row.cap_roundness ?? row.cap ?? row.cap_size ?? row.cap_zone ?? null);
+  const stem  = (row.stem_width ?? row.stem ?? row.stem_zone ?? null);
 
-  return {
-    name,
-    imagefilename,
-    value: row.value ?? 0,
-    color,
-    cap,
-    stem
-  };
+  // value: keep 'reset' if you use it, else numeric
+  let value = row.value ?? 0;
+  if (value !== 'reset') {
+    const n = Number(value);
+    value = Number.isFinite(n) ? n : 0;
+  }
+
+  return { name, imagefilename, value, color, cap, stem };
 }
+
 
 function _isSkyCatalogRow(row) {
   const env = String(row?.room || row?.env || row?.environment || '').trim().toLowerCase();
@@ -267,7 +239,8 @@ async function preloadMushroomPairs() {
   const targetSeenItems = Math.floor(desiredItems / 2);  // 36 (or 2 in debug)
 
   // Build "seen" set from learning/exploration phase logs
-  const seenSet = _getSeenImageSet();
+  const seenTypeSet = _getSeenTypeSet();
+
 
   // Bucket catalog items by type, split into seen vs unseen exemplars
   const byType = new Map(); // typeKey -> { seen: [], unseen: [] }
@@ -277,8 +250,7 @@ async function preloadMushroomPairs() {
 
     if (!byType.has(typeKey)) byType.set(typeKey, { seen: [], unseen: [] });
 
-    const base = _cleanImageName(m.imagefilename) || m.imagefilename;
-    const isSeen = seenSet.has(base);
+    const isSeen = seenTypeSet.has(typeKey);
 
     m.type_key = typeKey;
     m.seen_in_learning = isSeen ? 1 : 0;
@@ -390,8 +362,9 @@ async function preloadMushroomPairs() {
 
   console.log(
     `[memory] Prepared ${nPairs} trials (${nPairs * 2} items). ` +
-    `uniqueTypes=${uniqTypes}/${desiredItems}, seen=${seenCount}, unseen=${unseenCount}, ` +
-    `pairs: SS=${ss}, SU=${su}, UU=${uu}, catalogTypes=${allTypes.length}, seenSet=${seenSet.size}`
+    `uniqueTypes=${uniqTypes}/${desiredItems}, ` +
+    `seenTypesInExplore=${seenTypeSet.size}, ` +
+    `pairs: SS=${ss}, SU=${su}, UU=${uu}, catalogTypes=${allTypes.length}`
   );
 
   // Print full sequence (one row per trial)
