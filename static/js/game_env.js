@@ -501,9 +501,6 @@ function markMushroomSeenOnce(mushroomObjOrId, fallbackRoom = null) {
 
   // ✅ Do NOT count sky mushrooms toward exploration progress / clearing
   if (roomHere === 'sky') {
-    if (typeof mushroomObjOrId === 'object' && mushroomObjOrId) {
-      mushroomObjOrId._seenLogged = true; // still prevent double-logging per spawned object
-    }
     return;
   }
 
