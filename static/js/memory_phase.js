@@ -6,22 +6,26 @@
 // - Builds extra 32 within-color SU trials (4 per color, 8 colors) using unseen by difficulty
 // - Fallback: if not enough unseen in easier bins, falls back toward MOST DIFFICULT (close)
 
-// -------------------- GLOBAL STATE --------------------
+// --- Global state for memory phase ---
 let memory_currentQuestion = 0;
 let memory_selectedSide = 'left'; // 'left' | 'right' | 'middle'
 let memory_trialStartTime = null; // for choice RT
-let memory_promptStartTime = null; // for prompt RT
+let memory_promptStartTime = null; // for optional old/new/similar RT
 let memory_awaitingAnswer = false;
 let memory_chosenMushroom = null;
-
+let memory_totalQuestions;
 let Memory_debug = true;
-let memory_totalQuestions = Memory_debug ? 2 : 36;
+if (Memory_debug==true){
+  memory_totalQuestions = 2;  
+}else{
+  memory_totalQuestions = 36;  
+}      
 
-let memory_promptMushroom = null; // the mushroom shown in the new/old prompt
+let memory_promptMushroom = null; // the mushroom shown in the similarity/old-new prompt
 
-// --- Config ---
-const MEMORY_TRIALS = 36;                  // 36 trials -> 72 mushrooms used exactly once (base)
-const ENABLE_SIMILARITY_TEST = true;       // true => show new/old prompt
+// --- Config: number of trials & similarity test toggle ---
+const MEMORY_TRIALS=36;     // 36 trials -> 72 mushrooms used exactly once
+const ENABLE_SIMILARITY_TEST = true; // set to true to re-enable old/new/similar
 
 // ---------------- TOO-FAST PAUSE (MEMORY) ----------------
 const MEMORY_TOO_FAST_MS = 300;
@@ -31,100 +35,6 @@ const ENFORCE_TOO_FAST_ON_PROMPT = true;
 
 let memoryPaused = false;
 
-// -------------------- TRIAL ARRAYS --------------------
-let aMushrooms = [];
-let bMushrooms = [];
-let memoryTrials = [];
-
-// ========================= LOGGING HELPERS =========================
-function _ensureParticipantTrials() {
-  if (typeof participantData === 'undefined' || !participantData) return false;
-  if (!Array.isArray(participantData.trials)) participantData.trials = [];
-  return true;
-}
-
-function _timeElapsedSafe() {
-  if (typeof participantData === 'undefined' || !participantData) return null;
-  if (typeof participantData.startTime !== 'number') return null;
-  return performance.now() - participantData.startTime;
-}
-
-function _cleanImageName(s) {
-  if (!s) return null;
-  const str = String(s);
-  const m = str.match(/[^\\/]+\.(png|jpg|jpeg|webp)$/i);
-  if (!m) return null;
-  return m[0].replace(/^.*images_balanced[\\/]/i, '').replace(/^.*[\\/]/, '');
-}
-
-function memoryTypeKey(m) {
-  if (typeof window.expTypeKeyFromRow === 'function') return window.expTypeKeyFromRow(m);
-  return `${m.color}|${m.cap}|${m.stem}`;
-}
-
-function _normSeenStatus(s) {
-  return (String(s || '').startsWith('seen')) ? 'seen' : 'unseen';
-}
-
-function _packMushForLog(m) {
-  if (!m) return null;
-  return {
-    name: m.name ?? null,
-    image: m.imagefilename ?? null,
-    value: (typeof m.value === 'number' ? m.value : null),
-    color: m.color ?? null,
-    cap: m.cap ?? null,
-    stem: m.stem ?? null,
-    type_key: m.type_key ?? (typeof memoryTypeKey === 'function' ? memoryTypeKey(m) : null),
-    memory_status: m.memory_status ?? null,
-    seen_in_learning: (m.seen_in_learning ?? null),
-    dNN: (Number.isFinite(m.dNN) ? m.dNN : null),
-    difficulty: (m.difficulty ?? null),
-    difficulty_label: (m.difficulty_label ?? null),
-    xy_cap: (m.xy_cap ?? null),
-    xy_stem: (m.xy_stem ?? null),
-  };
-}
-
-function _currentTrialMeta() {
-  const tr = (Array.isArray(memoryTrials) && memoryTrials[memory_currentQuestion]) ? memoryTrials[memory_currentQuestion] : null;
-  if (!tr) {
-    return {
-      trial_index: memory_currentQuestion,
-      trial_uid: null,
-      block: null,
-      pair_type: null,
-      color: null,
-      unseen_difficulty: null,
-      unseen_difficulty_label: null,
-      unseen_dNN: null
-    };
-  }
-  return {
-    trial_index: (typeof tr.trial_index === 'number' ? tr.trial_index : memory_currentQuestion),
-    trial_uid: tr.trial_uid ?? null,
-    block: tr.block ?? null,
-    pair_type: tr.pair_type ?? null,
-    color: tr.color ?? null,
-    unseen_difficulty: tr.unseen_difficulty ?? null,
-    unseen_difficulty_label: tr.unseen_difficulty_label ?? null,
-    unseen_dNN: tr.unseen_dNN ?? null,
-    trial_index_pre_shuffle: tr.trial_index_pre_shuffle ?? null
-  };
-}
-
-function memoryLogEvent(row) {
-  if (!_ensureParticipantTrials()) return;
-  const base = {
-    id: participantData.id,
-    time_elapsed: _timeElapsedSafe(),
-    memory_phase: "memory_2afc_value",
-    memory_total_trials: memory_totalQuestions
-  };
-  participantData.trials.push({ ...base, ...row });
-}
-
-// ========================= TOO FAST OVERLAY =========================
 function showMemoryTooFastWarning(seconds = MEMORY_TOO_FAST_SECONDS) {
   return new Promise((resolve) => {
     let overlay = document.getElementById('memoryTooFastOverlay');
@@ -183,59 +93,22 @@ function showMemoryTooFastWarning(seconds = MEMORY_TOO_FAST_SECONDS) {
   });
 }
 
-// ========================= CATALOG HELPERS =========================
-function memoryImageSrc(imagefilename) {
-  if (!imagefilename) return '';
-  return `TexturePack/mushroom_pack/images_balanced/${imagefilename}`;
+// --- Type key that matches your exploration/OOO "72 types" as closely as possible ---
+function memoryTypeKey(m) {
+  if (typeof window.expTypeKeyFromRow === 'function') return window.expTypeKeyFromRow(m);
+  return `${m.color}|${m.cap}|${m.stem}`;
 }
 
-function _normalizeMush(row) {
-  if (!row) return null;
-
-  let raw = row.imagefilename || row.filename || row.image || '';
-  const imagefilename = String(raw)
-    .replace(/^.*images_balanced\//i, '')
-    .replace(/^.*[\\/]/, '');
-
-  const name = row.name || (imagefilename ? imagefilename.replace(/\.[^.]+$/, '') : 'mushroom');
-
-  const color = row.color ?? row.col ?? null;
-  const cap   = row.cap   ?? row.cap_size ?? row.cap_zone ?? null;
-  const stem  = row.stem  ?? row.stem_width ?? row.stem_zone ?? null;
-
-  return {
-    name,
-    imagefilename,
-    value: row.value ?? 0,
-    color,
-    cap,
-    stem
-  };
+// --- Normalize any logged image path to the catalog base filename ---
+function _cleanImageName(s) {
+  if (!s) return null;
+  const str = String(s);
+  const m = str.match(/[^\\/]+\.(png|jpg|jpeg|webp)$/i);
+  if (!m) return null;
+  return m[0].replace(/^.*images_balanced[\\/]/i, '').replace(/^.*[\\/]/, '');
 }
 
-function _isSkyCatalogRow(row) {
-  const env = String(row?.room || row?.env || row?.environment || '').trim().toLowerCase();
-  if (env === 'sky') return true;
-
-  const raw = String(row?.filename || row?.imagefilename || row?.image || '').toLowerCase();
-  if (raw.includes('/sky_mushroom/') || raw.includes('\\sky_mushroom\\')) return true;
-  if (raw.includes('rainbow_mushroom.png')) return true;
-
-  return false;
-}
-
-function _getCatalogPool() {
-  const pool = Array.isArray(window.mushroomCatalogRows) ? window.mushroomCatalogRows : [];
-  const out = [];
-  for (const r of pool) {
-    if (_isSkyCatalogRow(r)) continue;
-    const n = _normalizeMush(r);
-    if (!n || !n.imagefilename) continue;
-    out.push(n);
-  }
-  return out;
-}
-
+// --- Collect ALL "seen" mushroom filenames from the learning/exploration logs ---
 function _getSeenImageSet() {
   const seen = new Set();
   const trials = (typeof participantData !== 'undefined' && participantData?.trials) ? participantData.trials : [];
@@ -283,7 +156,12 @@ function _getSeenImageSet() {
   return seen;
 }
 
-// ========================= UTIL: SHUFFLE/SAMPLE =========================
+// Globals the memory phase expects
+let aMushrooms = [];
+let bMushrooms = [];
+let memoryTrials = [];
+
+// --- Utility: shuffle ---
 function _shuffle(arr) {
   for (let i = arr.length - 1; i > 0; i--) {
     const j = (Math.random() * (i + 1)) | 0;
@@ -292,26 +170,63 @@ function _shuffle(arr) {
   return arr;
 }
 
-function _typeColorFromKey(typeKey) {
-  return String(typeKey || "").split("|")[0];
+function memoryImageSrc(imagefilename) {
+  if (!imagefilename) return '';
+  return `TexturePack/mushroom_pack/images_balanced/${imagefilename}`;
 }
 
-function _pickAndRemove(arr) {
-  const idx = (Math.random() * arr.length) | 0;
-  return arr.splice(idx, 1)[0];
+// --- Normalize a mushroom row/object to a consistent shape used by memory UI ---
+function _normalizeMush(row) {
+  if (!row) return null;
+
+  let raw = row.imagefilename || row.filename || row.image || '';
+  const imagefilename = String(raw)
+    .replace(/^.*images_balanced\//i, '')
+    .replace(/^.*[\\/]/, '');
+
+  const name = row.name || (imagefilename ? imagefilename.replace(/\.[^.]+$/, '') : 'mushroom');
+
+  const color = row.color ?? row.col ?? null;
+  const cap   = row.cap   ?? row.cap_size ?? row.cap_zone ?? null;
+  const stem  = row.stem  ?? row.stem_width ?? row.stem_zone ?? null;
+
+  return {
+    name,
+    imagefilename,
+    value: row.value ?? 0,
+    color,
+    cap,
+    stem
+  };
 }
 
-function _sampleK(arr, k) {
-  const tmp = arr.slice();
-  _shuffle(tmp);
-  return tmp.slice(0, Math.min(k, tmp.length));
+function _isSkyCatalogRow(row) {
+  const env = String(row?.room || row?.env || row?.environment || '').trim().toLowerCase();
+  if (env === 'sky') return true;
+
+  const raw = String(row?.filename || row?.imagefilename || row?.image || '').toLowerCase();
+  if (raw.includes('/sky_mushroom/') || raw.includes('\\sky_mushroom\\')) return true;
+  if (raw.includes('rainbow_mushroom.png')) return true;
+
+  return false;
 }
 
-function _ensureArray(x) {
-  return Array.isArray(x) ? x : [];
+// --- Get the full catalog pool ---
+function _getCatalogPool() {
+  const pool = Array.isArray(window.mushroomCatalogRows) ? window.mushroomCatalogRows : [];
+  const out = [];
+  for (const r of pool) {
+    if (_isSkyCatalogRow(r)) continue;
+    const n = _normalizeMush(r);
+    if (!n || !n.imagefilename) continue;
+    out.push(n);
+  }
+  return out;
 }
 
 // ========================= DIFFICULTY / XY SPACE HELPERS =========================
+
+// You can customize these mappings if your catalog uses different labels.
 function _toScalar(v) {
   if (v === null || v === undefined) return null;
   if (typeof v === "number" && Number.isFinite(v)) return v;
@@ -356,12 +271,43 @@ function _distNorm(a, b) {
   return Math.sqrt(dx*dx + dy*dy);
 }
 
+function _typeColorFromKey(typeKey) {
+  return String(typeKey || "").split("|")[0];
+}
+
+function _pickAndRemove(arr) {
+  const idx = (Math.random() * arr.length) | 0;
+  return arr.splice(idx, 1)[0];
+}
+
+function _sampleK(arr, k) {
+  const tmp = arr.slice();
+  _shuffle(tmp);
+  return tmp.slice(0, Math.min(k, tmp.length));
+}
+
+function _ensureArray(x) {
+  return Array.isArray(x) ? x : [];
+}
+
 /**
  * Build per-color XY space from SEEN mushrooms, then compute for each UNSEEN candidate:
  *   dNN = distance to nearest seen (same color) in normalized space
  * and bin unseen into {close, mid, far} per color using tertiles.
+ *
+ * Returns:
+ *   difficultyByColor: Map(color -> { close: [m...], mid: [m...], far: [m...], thresholds: {t1,t2}, meta: {...} })
+ *
+ * Notes:
+ * - Only considers mushrooms that are UNUSED (not in usedImages)
+ * - Difficulty mapping: close => 3 (hard), mid => 2, far => 1 (easy)
  */
-function buildUnseenDifficultyBinsByColor({ pool, seenSet, usedImages }) {
+function buildUnseenDifficultyBinsByColor({
+  pool,
+  seenSet,
+  usedImages
+}) {
+  // color -> { seenPts: [{xn,yn,m,base}], unseenPts: [{xn,yn,m,base,dNN}] }
   const byColorPts = new Map();
 
   for (const m of pool) {
@@ -384,20 +330,18 @@ function buildUnseenDifficultyBinsByColor({ pool, seenSet, usedImages }) {
 
     const pt = { ...xy, m, base, type_key: typeKey };
     byColorPts.get(color)[isSeen ? "seenPts" : "unseenPts"].push(pt);
-
-    m.type_key = typeKey;
-    m.seen_in_learning = isSeen ? 1 : 0;
   }
 
+  // Normalize per color using union points (seen+unseen)
   for (const [color, obj] of byColorPts.entries()) {
     const all = obj.seenPts.concat(obj.unseenPts);
     if (all.length >= 2) _minmaxNorm(all);
   }
 
+  // Compute dNN for unseen
   for (const [color, obj] of byColorPts.entries()) {
     const S = obj.seenPts;
     if (!S || S.length === 0) continue;
-
     for (const u of obj.unseenPts) {
       let best = Infinity;
       for (const s of S) {
@@ -405,75 +349,81 @@ function buildUnseenDifficultyBinsByColor({ pool, seenSet, usedImages }) {
         if (d < best) best = d;
       }
       u.dNN = best;
-
+      // store for logging
       u.m.dNN = best;
       u.m.xy_cap = u.x;
       u.m.xy_stem = u.y;
     }
   }
 
+  // Bin unseen per color into close/mid/far using tertiles of dNN
   const difficultyByColor = new Map();
 
   for (const [color, obj] of byColorPts.entries()) {
     const S = obj.seenPts;
     const U = obj.unseenPts.filter(u => Number.isFinite(u.dNN));
 
-    if (!S || S.length === 0) continue;
-    if (!U || U.length === 0) continue;
+    if (!S || S.length === 0) {
+      // Without seen points, we can't compute difficulty; skip color
+      continue;
+    }
+    if (U.length === 0) continue;
 
-    const U_sorted = U.slice().sort((a, b) => a.dNN - b.dNN);
-
-    const k = Math.floor(U_sorted.length / 3);
-    const rem = U_sorted.length - 3 * k;
-
-    const closeN = k + rem;
-
-    const closePts = U_sorted.slice(0, closeN);
-    const midPts   = U_sorted.slice(closeN, closeN + k);
-    const farPts   = U_sorted.slice(closeN + k, closeN + 2 * k);
+    const ds = U.map(u => u.dNN).sort((a,b)=>a-b);
+    const t1 = ds[Math.floor(ds.length * 1/3)];
+    const t2 = ds[Math.floor(ds.length * 2/3)];
 
     const close = [];
     const mid = [];
     const far = [];
 
-    for (const u of closePts) {
-      u.m.difficulty_label = "close";
-      u.m.difficulty = 3;
-      close.push(u.m);
-    }
-    for (const u of midPts) {
-      u.m.difficulty_label = "mid";
-      u.m.difficulty = 2;
-      mid.push(u.m);
-    }
-    for (const u of farPts) {
-      u.m.difficulty_label = "far";
-      u.m.difficulty = 1;
-      far.push(u.m);
-    }
+    for (const u of U) {
+      let label, diff;
+      if (u.dNN <= t1) { label = "close"; diff = 3; close.push(u.m); }
+      else if (u.dNN <= t2) { label = "mid"; diff = 2; mid.push(u.m); }
+      else { label = "far"; diff = 1; far.push(u.m); }
 
-    const t1 = closePts.length ? closePts[closePts.length - 1].dNN : null;
-    const t2 = midPts.length ? midPts[midPts.length - 1].dNN : null;
+      u.m.difficulty_label = label;
+      u.m.difficulty = diff;
+    }
 
     difficultyByColor.set(color, {
       close, mid, far,
       thresholds: { t1, t2 },
-      meta: { nSeen: S.length, nUnseen: U_sorted.length, kPerBin: k, remainderToClose: rem }
+      meta: { nSeen: S.length, nUnseen: U.length }
     });
   }
 
   return difficultyByColor;
 }
 
-// ========================= EXTRA TRIAL CONSTRUCTION =========================
+// ========================= TRIAL CONSTRUCTION =========================
+
+/**
+ * Append 32 within-color SU trials:
+ * - 4 trials per color (8 colors -> 32)
+ * - each trial is 1 seen + 1 unseen (unused in base 36)
+ * - unseen selection uses difficulty bins based on dNN to nearest seen (same color)
+ * - difficulty schedule per color default: [3,2,2,1] (hard, mid, mid, easy)
+ * - fallback toward MOST DIFFICULT if bins are insufficient (close > mid > far)
+ * - after appending, shuffle ALL trials (total 68), rebuild aMushrooms/bMushrooms
+ */
 function appendWithinColorSUTrialsAndShuffleTotal({
   trialsPerColor = 4,
   nColorsWanted = 8,
   typesPerColorExpected = 9,
+  useTypesPerColor = 8,          // kept for your original structural assumption
   maxAttemptsPerColor = 400,
+
+  // Difficulty schedule for the UNSEEN prompts in the extra block.
+  // 3=close(hard), 2=mid, 1=far(easy)
+  // You can change this if you want a different per-color mix.
   difficultySchedule = [3,2,2,1]
 } = {}) {
 
+  // -----------------------
+  // 1) usedImages from existing trials (base 36)
+  // -----------------------
   const usedImages = new Set();
   const baseTrials = Array.isArray(memoryTrials) ? memoryTrials : [];
 
@@ -486,9 +436,13 @@ function appendWithinColorSUTrialsAndShuffleTotal({
     if (rb) usedImages.add(rb);
   }
 
+  // -----------------------
+  // 2) Build availability by type (seen/unseen) excluding usedImages
+  // -----------------------
   const pool = _getCatalogPool();
   const seenSet = _getSeenImageSet();
 
+  // typeKey -> { seen: [...], unseen: [...] } (only NOT used in base)
   const byTypeAvail = new Map();
 
   for (const m of pool) {
@@ -508,6 +462,7 @@ function appendWithinColorSUTrialsAndShuffleTotal({
     byTypeAvail.get(typeKey)[isSeen ? "seen" : "unseen"].push(m);
   }
 
+  // color -> [typeKey...]
   const typesByColor = new Map();
   for (const typeKey of byTypeAvail.keys()) {
     const color = _typeColorFromKey(typeKey);
@@ -516,6 +471,7 @@ function appendWithinColorSUTrialsAndShuffleTotal({
     typesByColor.get(color).push(typeKey);
   }
 
+  // Choose colors that still have full structure after excluding base trials
   let candidateColors = Array.from(typesByColor.keys()).filter(c => {
     const tks = typesByColor.get(c) || [];
     return tks.length >= typesPerColorExpected;
@@ -531,24 +487,37 @@ function appendWithinColorSUTrialsAndShuffleTotal({
   _shuffle(candidateColors);
   const colors = candidateColors.slice(0, nColorsWanted);
 
-  const difficultyByColor = buildUnseenDifficultyBinsByColor({ pool, seenSet, usedImages });
+  // -----------------------
+  // 2.5) Build difficulty bins for UNSEEN by color using SEEN XY space
+  // -----------------------
+  const difficultyByColor = buildUnseenDifficultyBinsByColor({
+    pool,
+    seenSet,
+    usedImages
+  });
 
+  // -----------------------
+  // 3) Build 4 SU trials per color with difficulty-controlled UNSEEN
+  // -----------------------
   const appended = [];
-  let appendedCounter = 0;
 
   for (const color of colors) {
     const typeKeysAll = (typesByColor.get(color) || []).slice();
     _shuffle(typeKeysAll);
-    const typeKeys = typeKeysAll.slice(0, typesPerColorExpected);
+    const typeKeys = typeKeysAll.slice(0, typesPerColorExpected); // take exactly 9
 
     let success = false;
 
     for (let attempt = 0; attempt < maxAttemptsPerColor; attempt++) {
+      // types that can supply at least one seen exemplar
       const seenCapable = typeKeys.filter(t => (byTypeAvail.get(t)?.seen?.length || 0) > 0);
+
+      // You still want 4 seen items per color (one per trial)
       if (seenCapable.length < trialsPerColor) break;
 
       const seenTypes = _sampleK(seenCapable, trialsPerColor);
 
+      // Pick 4 SEEN items (unused)
       const seenItems = [];
       let okSeen = true;
 
@@ -563,12 +532,14 @@ function appendWithinColorSUTrialsAndShuffleTotal({
       }
       if (!okSeen || seenItems.length !== trialsPerColor) continue;
 
+      // Unseen candidates by difficulty for this color
       const bins = difficultyByColor.get(color);
       if (!bins) {
-        console.warn(`[memory] No difficulty bins found for color="${color}".`);
+        console.warn(`[memory] No difficulty bins found for color="${color}". (No seen space or no unseen available)`);
         continue;
       }
 
+      // Copy bins (we will remove picks) and also ensure they are still unused given usedImages updates above
       const filt = (arr) => _ensureArray(arr).filter(m => {
         const base = _cleanImageName(m.imagefilename) || m.imagefilename;
         return base && !usedImages.has(base);
@@ -578,6 +549,7 @@ function appendWithinColorSUTrialsAndShuffleTotal({
       let mid   = filt(bins.mid);
       let far   = filt(bins.far);
 
+      // Need 4 unseen total (with fallback to hardest if bins are short)
       const schedule = (Array.isArray(difficultySchedule) && difficultySchedule.length === trialsPerColor)
         ? difficultySchedule.slice()
         : [3,2,2,1];
@@ -585,6 +557,9 @@ function appendWithinColorSUTrialsAndShuffleTotal({
       const unseenItems = [];
 
       const pullFromBin = (diff) => {
+        // fallback order: requested -> harder -> harder
+        // We interpret "fallback to most difficult" as: if you wanted easy but none left, use mid else close.
+        // For any shortage, ultimately use close if available.
         if (diff === 1) {
           if (far.length) return _pickAndRemove(far);
           if (mid.length) return _pickAndRemove(mid);
@@ -594,12 +569,13 @@ function appendWithinColorSUTrialsAndShuffleTotal({
         if (diff === 2) {
           if (mid.length) return _pickAndRemove(mid);
           if (close.length) return _pickAndRemove(close);
-          if (far.length) return _pickAndRemove(far);
+          if (far.length) return _pickAndRemove(far); // last resort
           return null;
         }
+        // diff === 3
         if (close.length) return _pickAndRemove(close);
         if (mid.length) return _pickAndRemove(mid);
-        if (far.length) return _pickAndRemove(far);
+        if (far.length) return _pickAndRemove(far); // last resort
         return null;
       };
 
@@ -610,10 +586,13 @@ function appendWithinColorSUTrialsAndShuffleTotal({
       }
 
       if (unseenItems.length !== trialsPerColor) {
-        console.warn(`[memory] Could not pick ${trialsPerColor} unseen items for color="${color}". Retrying...`);
+        // Undo seen picks in usedImages? Not necessary; we'll just retry attempt but usedImages got "burned".
+        // To avoid burning, we should NOT add seen picks to usedImages until we succeed, but we keep it minimal:
+        console.warn(`[memory] Could not pick ${trialsPerColor} unseen items for color="${color}" with fallback. Retrying...`);
         continue;
       }
 
+      // Finalize unseen picks: mark usedImages + memory_status already set
       let okUnseen = true;
       for (const u of unseenItems) {
         const base = _cleanImageName(u.imagefilename) || u.imagefilename;
@@ -623,23 +602,25 @@ function appendWithinColorSUTrialsAndShuffleTotal({
       }
       if (!okUnseen) continue;
 
+      // Pair up trials: seenItems[i] with unseenItems[i]
+      // Randomize which side is seen/unseen per trial.
       _shuffle(seenItems);
       _shuffle(unseenItems);
 
       for (let i = 0; i < trialsPerColor; i++) {
         let left = seenItems[i];
         let right = unseenItems[i];
+
         if (Math.random() < 0.5) [left, right] = [right, left];
 
         appended.push({
-          trial_uid: `extra_${color}_${appendedCounter++}`,
-          trial_index_pre_shuffle: (baseTrials.length + appended.length),
           trial_index: (baseTrials.length + appended.length),
           block: "within_color_extra",
           color,
           left,
           right,
           pair_type: "SU",
+          // for analysis: store difficulty metadata for the UNSEEN item
           unseen_difficulty: unseenItems[i]?.difficulty ?? null,
           unseen_difficulty_label: unseenItems[i]?.difficulty_label ?? null,
           unseen_dNN: unseenItems[i]?.dNN ?? null,
@@ -651,10 +632,13 @@ function appendWithinColorSUTrialsAndShuffleTotal({
     }
 
     if (!success) {
-      console.warn(`[memory] Could not build ${trialsPerColor} SU trials for color="${color}".`);
+      console.warn(`[memory] Could not build ${trialsPerColor} SU trials for color="${color}" under constraints.`);
     }
   }
 
+  // -----------------------
+  // 4) Append, shuffle TOTAL trials (68), rebuild arrays
+  // -----------------------
   for (const tr of appended) baseTrials.push(tr);
 
   if (baseTrials.length !== 68) {
@@ -663,8 +647,9 @@ function appendWithinColorSUTrialsAndShuffleTotal({
 
   _shuffle(baseTrials);
 
+  // re-index after shuffle
   for (let i = 0; i < baseTrials.length; i++) {
-    baseTrials[i].trial_index = i; // post-shuffle index actually used by the task
+    baseTrials[i].trial_index = i;
   }
 
   memoryTrials = baseTrials;
@@ -672,7 +657,11 @@ function appendWithinColorSUTrialsAndShuffleTotal({
   bMushrooms = memoryTrials.map(t => t.right);
   memory_totalQuestions = memoryTrials.length;
 
+  // debug summary
   const extraOnly = memoryTrials.filter(t => t.block === "within_color_extra");
+  const suCount = extraOnly.filter(t => t.pair_type === "SU").length;
+
+  // difficulty breakdown (extra only)
   const dCounts = { 1:0, 2:0, 3:0, null:0 };
   for (const tr of extraOnly) {
     const d = tr.unseen_difficulty;
@@ -681,12 +670,13 @@ function appendWithinColorSUTrialsAndShuffleTotal({
   }
 
   console.log(
-    `[memory] Appended extra trials=${extraOnly.length}. Total trials=${memory_totalQuestions}. ` +
-    `Extra unseen difficulty: d3=${dCounts[3]}, d2=${dCounts[2]}, d1=${dCounts[1]}, null=${dCounts.null}`
+    `[memory] Appended extra trials=${extraOnly.length} (SU=${suCount}). Total trials=${memory_totalQuestions}. ` +
+    `Extra unseen difficulty counts: d3(close/hard)=${dCounts[3]}, d2(mid)=${dCounts[2]}, d1(far/easy)=${dCounts[1]}, null=${dCounts.null}`
   );
 }
 
 // =========================== BASE 36 TRIAL GENERATION ===========================
+
 async function preloadMushroomPairs() {
   const pool = _getCatalogPool();
   if (pool.length < 2) {
@@ -698,7 +688,7 @@ async function preloadMushroomPairs() {
     return;
   }
 
-  const desiredPairs = Memory_debug ? 2 : MEMORY_TRIALS;
+  const desiredPairs = (typeof Memory_debug !== 'undefined' && Memory_debug) ? 2 : MEMORY_TRIALS;
   const desiredItems = desiredPairs * 2;
   const targetSeenItems = Math.floor(desiredItems / 2);
 
@@ -785,41 +775,32 @@ async function preloadMushroomPairs() {
 
   const nPairs = Math.min(desiredPairs, Math.floor(selectedItems.length / 2));
 
-  // Build trials WITH meta for logging
+  memory_totalQuestions = nPairs;
+  aMushrooms = [];
+  bMushrooms = [];
   memoryTrials = [];
+
   for (let i = 0; i < nPairs; i++) {
     const left = selectedItems[i * 2];
     const right = selectedItems[i * 2 + 1];
-
-    const Ls = _normSeenStatus(left.memory_status);
-    const Rs = _normSeenStatus(right.memory_status);
-    const pair_type = (Ls === 'seen' && Rs === 'seen') ? 'SS' : (Ls === 'unseen' && Rs === 'unseen') ? 'UU' : 'SU';
-
-    memoryTrials.push({
-      trial_uid: `base_${i}`,
-      trial_index_pre_shuffle: i,
-      trial_index: i,
-      block: "base",
-      pair_type,
-      color: null,
-      left,
-      right
-    });
+    aMushrooms.push(left);
+    bMushrooms.push(right);
+    memoryTrials.push({ left, right });
   }
 
-  aMushrooms = memoryTrials.map(t => t.left);
-  bMushrooms = memoryTrials.map(t => t.right);
-  memory_totalQuestions = memoryTrials.length;
+  // ===================== DEBUG PRINTS =====================
+  const normStatus = (s) => (String(s || '').startsWith('seen') ? 'seen' : 'unseen');
 
-  // Debug prints
   const uniqTypes = new Set(selectedItems.map(x => x.type_key || memoryTypeKey(x))).size;
-  const seenCount = selectedItems.filter(x => _normSeenStatus(x.memory_status) === 'seen').length;
-  const unseenCount = selectedItems.filter(x => _normSeenStatus(x.memory_status) === 'unseen').length;
+  const seenCount = selectedItems.filter(x => normStatus(x.memory_status) === 'seen').length;
+  const unseenCount = selectedItems.filter(x => normStatus(x.memory_status) === 'unseen').length;
 
   let ss = 0, su = 0, uu = 0;
   for (const tr of memoryTrials) {
-    if (tr.pair_type === 'SS') ss++;
-    else if (tr.pair_type === 'UU') uu++;
+    const L = normStatus(tr.left.memory_status);
+    const R = normStatus(tr.right.memory_status);
+    if (L === 'seen' && R === 'seen') ss++;
+    else if (L === 'unseen' && R === 'unseen') uu++;
     else su++;
   }
 
@@ -831,31 +812,36 @@ async function preloadMushroomPairs() {
 
   const seq = memoryTrials.map((tr, i) => ({
     trial: i + 1,
-    L_status: _normSeenStatus(tr.left.memory_status),
+    L_status: normStatus(tr.left.memory_status),
     L_type: tr.left.type_key,
     L_img: tr.left.imagefilename,
-    R_status: _normSeenStatus(tr.right.memory_status),
+    R_status: normStatus(tr.right.memory_status),
     R_type: tr.right.type_key,
     R_img: tr.right.imagefilename,
   }));
   console.table(seq);
 
   if (desiredItems === 72 && uniqTypes < 72) {
-    console.warn(`[memory] WARNING: Could not reach 72 unique types. Got ${uniqTypes}.`);
+    console.warn(
+      `[memory] WARNING: Could not reach 72 unique types. ` +
+      `Got ${uniqTypes}. Check catalog unique type count or type-key mapping.`
+    );
   }
 
-  // Append extra 32 only when not debug
+  // ===================== APPEND EXTRA 32 (ONLY WHEN NOT DEBUG) =====================
   if (!Memory_debug) {
     appendWithinColorSUTrialsAndShuffleTotal({
       trialsPerColor: 4,
       nColorsWanted: 8,
       typesPerColorExpected: 9,
-      difficultySchedule: [3,2,2,1]
+      useTypesPerColor: 8,
+      difficultySchedule: [3,2,2,1] // (hard, mid, mid, easy) with fallback to hard
     });
   }
 }
 
 // =========================== INIT & MAIN LOOP ===========================
+
 async function Memory_initGame() {
   await preloadMushroomPairs();
 
@@ -885,9 +871,8 @@ function Memory_startSelectorPhase() {
 }
 
 function showMushrooms() {
-  const tr = memoryTrials[memory_currentQuestion];
-  const a = tr?.left;
-  const b = tr?.right;
+  const a = aMushrooms[memory_currentQuestion];
+  const b = bMushrooms[memory_currentQuestion];
 
   if (!a || !b) {
     console.warn('[memory] No mushrooms for trial', memory_currentQuestion, '-> completing memory.');
@@ -911,6 +896,7 @@ function showMushrooms() {
 }
 
 // ========================== PROGRESS BAR ===========================
+
 function ensureMemoryProgressUI() {
   const phase = document.getElementById('memorySelectorPhase');
   if (!phase) return;
@@ -965,39 +951,51 @@ function updateMemoryProgressBar() {
 
   const inner = document.getElementById('memoryProgressInner');
   const label = document.getElementById('memoryProgressLabel');
+
   if (!inner) return;
 
-  const pct = Math.max(0, Math.min(100, (memory_currentQuestion / memory_totalQuestions) * 100));
+  const pct = Math.max(
+    0,
+    Math.min(100, (memory_currentQuestion / memory_totalQuestions) * 100)
+  );
   inner.style.width = pct + '%';
 
   if (label) {
     const displayTrial = Math.min(memory_currentQuestion + 1, memory_totalQuestions);
-    const percentagecompleted = Math.round(100 * displayTrial / memory_totalQuestions);
+    const percentagecompleted = Math.round(100*displayTrial/memory_totalQuestions);
     label.textContent = `${percentagecompleted}% Completed`;
   }
 }
 
-// ========================== SELECTOR UI ===========================
+// Move the selector box to highlight the currently selected side
 function updateSelector() {
   const selector = document.getElementById('selectorBox');
   const phase = document.getElementById('memorySelectorPhase');
+
   if (!selector || !phase) return;
 
   let targetBox;
 
-  if (memory_selectedSide === 'left') targetBox = document.getElementById('leftMushroomBox');
-  else if (memory_selectedSide === 'right') targetBox = document.getElementById('rightMushroomBox');
-  else targetBox = document.getElementById('middleSpacer');
+  if (memory_selectedSide === 'left') {
+    targetBox = document.getElementById('leftMushroomBox');
+  } else if (memory_selectedSide === 'right') {
+    targetBox = document.getElementById('rightMushroomBox');
+  } else {
+    targetBox = document.getElementById('middleSpacer');
+  }
 
   if (!targetBox) return;
 
   const containerRect = phase.getBoundingClientRect();
   const targetRect = targetBox.getBoundingClientRect();
-  const leftPos = targetRect.left - containerRect.left + (targetRect.width - selector.offsetWidth) / 2;
+
+  const leftPos =
+    targetRect.left - containerRect.left + (targetRect.width - selector.offsetWidth) / 2;
   selector.style.left = `${leftPos}px`;
 }
 
 // ========================== CHOICE INDICATOR ===========================
+
 function getChoiceIndicator() {
   const phase = document.getElementById('memorySelectorPhase');
   if (!phase) return null;
@@ -1031,38 +1029,42 @@ function animateChoiceIndicator(targetBox, onDone) {
 }
 
 // ========================== KEY HANDLER & CHOICE ===========================
+
 function Memory_selectorKeyHandler(e) {
   if (memoryPaused) return;
   if (memory_awaitingAnswer) return;
 
-  if (e.key === 'ArrowLeft') handleMemoryChoice('left');
-  else if (e.key === 'ArrowRight') handleMemoryChoice('right');
+  if (e.key === 'ArrowLeft') {
+    handleMemoryChoice('left');
+  } else if (e.key === 'ArrowRight') {
+    handleMemoryChoice('right');
+  }
 }
 
 function handleMemoryChoice(side) {
   if (memoryPaused) return;
 
-  const tr = memoryTrials[memory_currentQuestion];
-  const a = tr?.left;
-  const b = tr?.right;
+  const a = aMushrooms[memory_currentQuestion];
+  const b = bMushrooms[memory_currentQuestion];
   if (!a || !b) return;
 
   const rtChoice = performance.now() - memory_trialStartTime;
-  const meta = _currentTrialMeta();
 
   if (ENFORCE_TOO_FAST_ON_CHOICE && rtChoice < MEMORY_TOO_FAST_MS) {
     memoryPaused = true;
     memory_awaitingAnswer = true;
 
-    memoryLogEvent({
-      trial_type: 'memory_choice',
-      memory_stage: 'choice',
-      event: 'too_fast',
-      attempted_side: side,
-      threshold_ms: MEMORY_TOO_FAST_MS,
-      rt: rtChoice,
-      ...meta
-    });
+    if (participantData?.trials) {
+      participantData.trials.push({
+        id: participantData.id,
+        trial_type: 'memory_choice',
+        trial_index: memory_currentQuestion,
+        event: 'too_fast',
+        rt: rtChoice,
+        threshold_ms: MEMORY_TOO_FAST_MS,
+        time_elapsed: performance.now() - participantData.startTime
+      });
+    }
 
     showMemoryTooFastWarning(MEMORY_TOO_FAST_SECONDS).then(() => {
       memoryPaused = false;
@@ -1077,8 +1079,8 @@ function handleMemoryChoice(side) {
   updateSelector();
   memory_awaitingAnswer = true;
 
-  const selected = (side === 'left') ? a : b;
-  const other    = (side === 'left') ? b : a;
+  const selected = side === 'left' ? a : b;
+  const other = side === 'left' ? b : a;
 
   let correct = null;
   if (typeof selected.value === 'number' && typeof other.value === 'number') {
@@ -1087,34 +1089,33 @@ function handleMemoryChoice(side) {
     else correct = null;
   }
 
-  memoryLogEvent({
-    trial_type: 'memory_choice',
-    memory_stage: 'choice',
-    ...meta,
+  if (typeof participantData !== 'undefined' && participantData && participantData.trials) {
+    participantData.trials.push({
+      id: participantData.id,
+      trial_type: 'memory_choice',
+      trial_index: memory_currentQuestion,
+      left_mushroom: { name: a.name, image: a.imagefilename, value: a.value },
+      right_mushroom: { name: b.name, image: b.imagefilename, value: b.value },
+      selected_side: side,
+      selected_mushroom: { name: selected.name, image: selected.imagefilename, value: selected.value },
+      other_mushroom: { name: other.name, image: other.imagefilename, value: other.value },
+      correct: correct,
+      rt: rtChoice,
+      time_elapsed: performance.now() - participantData.startTime
+    });
+  }
 
-    left_mushroom: _packMushForLog(a),
-    right_mushroom: _packMushForLog(b),
-    selected_mushroom: _packMushForLog(selected),
-    other_mushroom: _packMushForLog(other),
-
-    selected_side: side,
-    correct: correct,
-    rt: rtChoice
-  });
-
-  const targetBox = (side === 'left')
-    ? document.getElementById('leftMushroomBox')
-    : document.getElementById('rightMushroomBox');
+  const targetBox =
+    side === 'left'
+      ? document.getElementById('leftMushroomBox')
+      : document.getElementById('rightMushroomBox');
 
   animateChoiceIndicator(targetBox, () => {
     if (ENABLE_SIMILARITY_TEST) {
-      // If extra SU trials: target the UNSEEN mushroom so your difficulty manipulation affects prompt data.
-      if (meta.block === "within_color_extra") {
-        const cand = [a, b].filter(m => String(m?.memory_status || '').startsWith('unseen'));
-        memory_promptMushroom = cand.length ? cand[0] : ((Math.random() < 0.5) ? a : b);
-      } else {
-        memory_promptMushroom = (Math.random() < 0.5) ? a : b;
-      }
+      // keep your current behavior (randomly prompt one of the two)
+      // NOTE: if you want the difficulty manipulation to specifically affect the UNSEEN prompt,
+      // you should change this to target the unseen item for "within_color_extra" trials.
+      memory_promptMushroom = (Math.random() < 0.5) ? a : b;
       showMemoryChoicePrompt(memory_promptMushroom);
     } else {
       proceedToNextMemoryTrial();
@@ -1131,8 +1132,6 @@ function proceedToNextMemoryTrial() {
   const prompt = document.getElementById('memoryPrompt');
   if (prompt) prompt.remove();
 
-  window.removeEventListener('keydown', handleMemoryResponse);
-
   if (memory_currentQuestion >= memory_totalQuestions) {
     completeMemory();
   } else {
@@ -1140,28 +1139,29 @@ function proceedToNextMemoryTrial() {
   }
 }
 
-// ========================== OPTIONAL NEW/OLD PROMPT ===========================
+// ========================== OPTIONAL SIMILARITY TEST ===========================
+
 function handleMemoryResponse(e) {
   if (!ENABLE_SIMILARITY_TEST) return;
   if (memoryPaused) return;
-  if (!memory_awaitingAnswer) return;
-  if (!['1', '2'].includes(e.key)) return;
+  if (!memory_awaitingAnswer || !['1', '2'].includes(e.key)) return;
 
   const rtPrompt = performance.now() - memory_promptStartTime;
-  const meta = _currentTrialMeta();
 
   if (ENFORCE_TOO_FAST_ON_PROMPT && rtPrompt < MEMORY_TOO_FAST_MS) {
     memoryPaused = true;
 
-    memoryLogEvent({
-      trial_type: 'oldnew_response',
-      memory_stage: 'prompt',
-      event: 'too_fast',
-      attempted_key: e.key,
-      threshold_ms: MEMORY_TOO_FAST_MS,
-      rt: rtPrompt,
-      ...meta
-    });
+    if (participantData?.trials) {
+      participantData.trials.push({
+        id: participantData.id,
+        trial_type: 'oldnew_response',
+        trial_index: memory_currentQuestion,
+        event: 'too_fast',
+        rt: rtPrompt,
+        threshold_ms: MEMORY_TOO_FAST_MS,
+        time_elapsed: performance.now() - participantData.startTime
+      });
+    }
 
     showMemoryTooFastWarning(MEMORY_TOO_FAST_SECONDS).then(() => {
       memoryPaused = false;
@@ -1171,24 +1171,24 @@ function handleMemoryResponse(e) {
     return;
   }
 
-  // '1' = new, '2' = old
-  const response_label = (e.key === '1') ? 'new' : 'old';
-  const is_old_truth = (memory_promptMushroom?.seen_in_learning === 1);
-  const response_is_old = (e.key === '2');
-  const prompt_correct = (is_old_truth === response_is_old) ? 1 : 0;
-
-  memoryLogEvent({
-    trial_type: 'oldnew_response',
-    memory_stage: 'prompt',
-    ...meta,
-
-    tested_mushroom: _packMushForLog(memory_promptMushroom),
-    response: e.key,
-    response_label,
-    truth_old_learning: is_old_truth ? 1 : 0,
-    correct: prompt_correct,
-    rt: rtPrompt
-  });
+  if (typeof participantData !== 'undefined' && participantData && participantData.trials) {
+    participantData.trials.push({
+      id: participantData.id,
+      trial_type: 'oldnew_response',
+      trial_index: memory_currentQuestion,
+      tested_mushroom: {
+        name: memory_promptMushroom?.name ?? null,
+        image: memory_promptMushroom?.imagefilename ?? null,
+        value: memory_promptMushroom?.value ?? null,
+        dNN: memory_promptMushroom?.dNN ?? null,
+        difficulty: memory_promptMushroom?.difficulty ?? null,
+        difficulty_label: memory_promptMushroom?.difficulty_label ?? null
+      },
+      response: e.key, // '1' = new, '2' = old (your current prompt text)
+      rt: rtPrompt,
+      time_elapsed: performance.now() - participantData.startTime
+    });
+  }
 
   memory_awaitingAnswer = false;
   memory_chosenMushroom = null;
@@ -1232,11 +1232,11 @@ function showMemoryChoicePrompt(mushroom) {
   document.body.appendChild(promptDiv);
 
   memory_promptStartTime = performance.now();
-  window.removeEventListener('keydown', handleMemoryResponse);
   window.addEventListener('keydown', handleMemoryResponse);
 }
 
 // ========================== CLEANUP & NEXT PHASE ===========================
+
 function completeMemory() {
   window.removeEventListener('keydown', Memory_selectorKeyHandler);
   window.removeEventListener('keydown', handleMemoryResponse);
