@@ -14,7 +14,7 @@ let memory_promptStartTime = null; // for prompt RT
 let memory_awaitingAnswer = false;
 let memory_chosenMushroom = null;
 
-let Memory_debug = true;
+let Memory_debug = false;
 let memory_totalQuestions = Memory_debug ? 2 : 36;
 
 let memory_promptMushroom = null; // the mushroom shown in the new/old prompt
@@ -1256,4 +1256,144 @@ function completeMemory() {
   } else {
     console.warn('[memory] initTaskOOO() not found; memory phase ended with no next phase.');
   }
+}
+
+
+//debug for catalog and lure bin
+// ========================= CATALOG NUMERIC CHECK (for lure-bin) =========================
+// Paste this once (e.g., near _getCatalogPool or before Memory_initGame).
+// Requires: window.mushroomCatalogRows OR your normalized pool; optionally uses _toScalar if defined.
+
+function _isFiniteNumber(x) {
+  return (typeof x === "number" && Number.isFinite(x));
+}
+
+function _asNumberMaybe(v) {
+  // 1) already number
+  if (_isFiniteNumber(v)) return v;
+
+  // 2) try your _toScalar mapping if available (thin/med/thick -> -1/0/1, etc.)
+  if (typeof _toScalar === "function") {
+    const s = _toScalar(v);
+    if (_isFiniteNumber(s)) return s;
+  }
+
+  // 3) try plain numeric cast
+  const n = Number(String(v ?? "").trim());
+  return Number.isFinite(n) ? n : null;
+}
+
+function checkCatalogNumericForLureBin({
+  rows = (Array.isArray(window.mushroomCatalogRows) ? window.mushroomCatalogRows : []),
+  showExamples = 8
+} = {}) {
+  let total = 0;
+
+  let cap_num = 0, cap_bad = 0, cap_missing = 0;
+  let stem_num = 0, stem_bad = 0, stem_missing = 0;
+
+  const badExamples = []; // store rows with non-numeric cap/stem after conversion
+  const missExamples = []; // store rows with missing cap/stem
+
+  for (const r of rows) {
+    if (!r || typeof r !== "object") continue;
+    total++;
+
+    // Try multiple possible field names (match your _normalizeMush logic)
+    const capRaw  = (r.cap ?? r.cap_size ?? r.cap_zone ?? r.cap_roundness ?? null);
+    const stemRaw = (r.stem ?? r.stem_width ?? r.stem_zone ?? r.stem_width_zone ?? null);
+
+    const capN  = _asNumberMaybe(capRaw);
+    const stemN = _asNumberMaybe(stemRaw);
+
+    if (capRaw === null || capRaw === undefined || String(capRaw).trim() === "") {
+      cap_missing++;
+      if (missExamples.length < showExamples) missExamples.push({ which: "cap", capRaw, stemRaw, row: r });
+    } else if (capN === null) {
+      cap_bad++;
+      if (badExamples.length < showExamples) badExamples.push({ which: "cap", capRaw, stemRaw, row: r });
+    } else {
+      cap_num++;
+    }
+
+    if (stemRaw === null || stemRaw === undefined || String(stemRaw).trim() === "") {
+      stem_missing++;
+      if (missExamples.length < showExamples) missExamples.push({ which: "stem", capRaw, stemRaw, row: r });
+    } else if (stemN === null) {
+      stem_bad++;
+      if (badExamples.length < showExamples) badExamples.push({ which: "stem", capRaw, stemRaw, row: r });
+    } else {
+      stem_num++;
+    }
+  }
+
+  const report = {
+    total_rows: total,
+    cap: { numeric_or_mappable: cap_num, missing: cap_missing, non_numeric: cap_bad },
+    stem:{ numeric_or_mappable: stem_num, missing: stem_missing, non_numeric: stem_bad },
+    bad_examples: badExamples.map(e => ({
+      which: e.which,
+      capRaw: e.capRaw,
+      stemRaw: e.stemRaw,
+      filename: e.row?.imagefilename ?? e.row?.filename ?? e.row?.image ?? null,
+      color: e.row?.color ?? e.row?.col ?? null
+    })),
+    missing_examples: missExamples.map(e => ({
+      which: e.which,
+      capRaw: e.capRaw,
+      stemRaw: e.stemRaw,
+      filename: e.row?.imagefilename ?? e.row?.filename ?? e.row?.image ?? null,
+      color: e.row?.color ?? e.row?.col ?? null
+    }))
+  };
+
+  // "Ready" if a strong majority of rows have both mappable cap & stem (tweak threshold if you want)
+  const bothGood = Math.max(0, total - (cap_missing + cap_bad)) + Math.max(0, total - (stem_missing + stem_bad));
+  // The above is loose; simpler strict readiness:
+  const capReady  = (cap_num / Math.max(1, total)) >= 0.95;
+  const stemReady = (stem_num / Math.max(1, total)) >= 0.95;
+
+  window.CATALOG_LUREBIN_REPORT = report;
+  window.CATALOG_LUREBIN_READY = (capReady && stemReady);
+
+  console.log("[catalog] Lure-bin numeric readiness:", {
+    ready: window.CATALOG_LUREBIN_READY,
+    capReady, stemReady,
+    ...report
+  });
+
+  if (!window.CATALOG_LUREBIN_READY) {
+    console.warn("[catalog] Not fully numeric/mappable for lure-bin. See CATALOG_LUREBIN_REPORT.bad_examples.");
+  }
+
+  return report;
+}
+
+// Call it once after catalog load:
+checkCatalogNumericForLureBin();
+
+
+// ========================= OPTIONAL: SAFE LURE-BIN COMPUTE =========================
+// Example lure-bin: based on distance in (cap,stem) space from a reference set.
+// If cap/stem are categorical, _toScalar mapping makes it still work.
+
+function computeLureBinForMush(m, {
+  // thresholds in normalized Euclidean distance (tune to your task)
+  t_close = 0.20,   // "more similar" (hard lure)
+  t_mid   = 0.45    // "less similar" (easier lure)
+} = {}) {
+  // Expect m.cap / m.stem (or similar); use the same conversion as your XY difficulty code
+  const x = _asNumberMaybe(m?.cap);
+  const y = _asNumberMaybe(m?.stem);
+  if (x === null || y === null) return null;
+
+  // Example: if you already computed m.dNN (distance to nearest seen in normalized space),
+  // you can bin directly from that:
+  const d = Number.isFinite(m.dNN) ? m.dNN : null;
+  if (d === null) return null;
+
+  // lure_bin: 2 = closer (hard), 1 = farther (easy)  [match your own convention]
+  if (d <= t_close) return 2;
+  if (d <= t_mid)   return 1;
+  return 1; // everything beyond mid treated as easy by default
 }
