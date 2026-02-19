@@ -5,7 +5,7 @@ let env_deter ='sky'
 let leftDoorType = null;
 let rightDoorType = null;
 let doorsAssigned = false;
-let currentRoom = null;
+let currentRoom = 'sky';
 let roomRepetitionMap = {};  // e.g., { "lava": 0, "forest": 2 }
 let roomChoiceStartTime = null;
 
