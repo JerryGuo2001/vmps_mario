@@ -706,7 +706,7 @@ function worldToScreenX(xWorld) { return xWorld - cameraOffset; }
 function getCharacterScreenX() { return getCharacterScreenXFromWorld(); }
 function getCharacterWorldX() { ensureWorldPosInit(); return character.worldX; }
 
-function wrapWorldXLeftEdge(xWorld) {
+async function wrapWorldXLeftEdge(xWorld) {
   const maxX = worldWidth - character.width; // last valid left position
   if (maxX <= 0) return 0;
 
@@ -714,7 +714,11 @@ function wrapWorldXLeftEdge(xWorld) {
   if (xWorld < 0) return 0;
 
   // If you pass the right edge, appear on the far left
-  if (xWorld > maxX) return 0;
+  if (xWorld > maxX){ 
+    groundPlatforms = generateGroundPlatforms(worldWidth, 200, 400);
+    mushrooms = await generateMushroom(5);
+    return 0
+  };
 
   return xWorld;
 }
