@@ -6,7 +6,7 @@ let exploration_debug=true
 // turn it off when you don't want practice
 let practice_explore_on_off=true
 if (practice_explore_on_off){
-  totalQuestions=1
+  totalQuestions=3
 }
 if (exploration_debug==true){
   totalQuestions_setup = 2;
