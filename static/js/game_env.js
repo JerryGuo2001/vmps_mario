@@ -706,7 +706,7 @@ function worldToScreenX(xWorld) { return xWorld - cameraOffset; }
 function getCharacterScreenX() { return getCharacterScreenXFromWorld(); }
 function getCharacterWorldX() { ensureWorldPosInit(); return character.worldX; }
 
-async function wrapWorldXLeftEdge(xWorld) {
+function wrapWorldXLeftEdge(xWorld) {
   const maxX = worldWidth - character.width; // last valid left position
   if (maxX <= 0) return 0;
 
@@ -714,9 +714,7 @@ async function wrapWorldXLeftEdge(xWorld) {
   if (xWorld < 0) return 0;
 
   // If you pass the right edge, appear on the far left
-  if (xWorld > maxX){
-    return 0
-  }
+  if (xWorld > maxX) return 0;
 
   return xWorld;
 }
