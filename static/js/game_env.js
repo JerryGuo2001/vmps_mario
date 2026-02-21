@@ -714,7 +714,11 @@ function wrapWorldXLeftEdge(xWorld) {
   if (xWorld < 0) return 0;
 
   // If you pass the right edge, appear on the far left
-  if (xWorld > maxX) return 0;
+  if (xWorld > maxX){
+    groundPlatforms = generateGroundPlatforms(worldWidth, 200, 400);
+    generateMushroom(5).then(ms => { mushrooms = ms; }).catch(err => console.warn('[init mushrooms]', err));
+    return 0;
+  }
 
   return xWorld;
 }
