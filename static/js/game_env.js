@@ -1540,23 +1540,154 @@ function getRespawnSpot() {
 let freezeTime = 0; // Variable to track freeze time
 
 async function checkHP_canvas4() {
-  if (currentCanvas !== 4) return;
+  // ---------------------------
+  // One-time state (kept inside this function)
+  // ---------------------------
+  const S = (checkHP_canvas4._death ||= {
+    overlay: null,
+    text: null,
+    timer: null,
+    active: false
+  });
 
-  // NEW: once exit is unlocked, death should not respawn this room (auto-advance handles it)
-  if (roomProceedUnlocked) return;
+  function ensureOverlay() {
+    if (S.overlay && S.text) return;
+
+    let overlay = document.getElementById('death-overlay');
+    let text = document.getElementById('death-countdown');
+
+    if (!overlay) {
+      overlay = document.createElement('div');
+      overlay.id = 'death-overlay';
+      Object.assign(overlay.style, {
+        position: 'fixed',
+        inset: '0',
+        width: '100vw',
+        height: '100vh',
+        background: 'rgba(0,0,0,0.55)',
+        zIndex: '999999',
+        display: 'none',
+        pointerEvents: 'none' // set to 'auto' if you want to block clicks
+      });
+
+      text = document.createElement('div');
+      text.id = 'death-countdown';
+      Object.assign(text.style, {
+        position: 'absolute',
+        left: '50%',
+        top: '40%',
+        transform: 'translate(-50%, -50%)',
+        color: '#fff',
+        fontFamily: 'Arial, sans-serif',
+        fontSize: '64px',
+        fontWeight: '700',
+        textShadow: '0 4px 12px rgba(0,0,0,0.6)'
+      });
+
+      overlay.appendChild(text);
+      document.body.appendChild(overlay);
+    } else if (!text) {
+      text = document.createElement('div');
+      text.id = 'death-countdown';
+      Object.assign(text.style, {
+        position: 'absolute',
+        left: '50%',
+        top: '40%',
+        transform: 'translate(-50%, -50%)',
+        color: '#fff',
+        fontFamily: 'Arial, sans-serif',
+        fontSize: '64px',
+        fontWeight: '700',
+        textShadow: '0 4px 12px rgba(0,0,0,0.6)'
+      });
+      overlay.appendChild(text);
+    }
+
+    S.overlay = overlay;
+    S.text = text;
+  }
+
+  function hideOverlay() {
+    S.active = false;
+    if (S.timer) {
+      clearInterval(S.timer);
+      S.timer = null;
+    }
+    if (S.overlay) S.overlay.style.display = 'none';
+  }
+
+  function tickOverlay() {
+    if (!S.active) return;
+
+    // If we left Canvas 4 or room is unlocked, don't show death overlay
+    if (currentCanvas !== 4 || roomProceedUnlocked) {
+      hideOverlay();
+      return;
+    }
+
+    // Use freezeTime itself (it is decremented in updateGame)
+    const msLeft = Math.max(0, Number(freezeTime) || 0);
+    const secLeft = Math.ceil(msLeft / 1000);
+
+    if (S.text) S.text.textContent = String(secLeft);
+
+    if (msLeft <= 0) hideOverlay();
+  }
+
+  function showOverlay() {
+    ensureOverlay();
+    S.active = true;
+    S.overlay.style.display = 'block';
+
+    // Immediate render + keep synced while updateGame is in freezeTime branch
+    tickOverlay();
+
+    if (S.timer) clearInterval(S.timer);
+    S.timer = setInterval(tickOverlay, 50);
+  }
+
+  // ---------------------------
+  // Original logic (with overlay)
+  // ---------------------------
+  if (currentCanvas !== 4) {
+    if (S.active) hideOverlay();
+    return;
+  }
+
+  // once exit is unlocked, death should not respawn this room
+  if (roomProceedUnlocked) {
+    if (S.active) hideOverlay();
+    return;
+  }
+
+  // keep overlay synced if it's already active
+  if (S.active) tickOverlay();
 
   if (character.hp <= 0 && freezeTime === 0) {
-    freezeTime = 1000;
+    freezeTime = 5000;
+
+    // NEW: dim + countdown during freezeTime
+    showOverlay();
+
+    // Optional: clear held keys so Mario doesn't "lurch" after freeze ends
+    if (keys) {
+      keys['ArrowLeft'] = keys['ArrowRight'] = keys['ArrowUp'] = false;
+      keys['e'] = keys['q'] = keys['p'] = false;
+    }
+
     currentCanvas = 4;
     character.hp = BASE_START_HP;
+
     const respawn = getRespawnSpot();
     ensureWorldPosInit(); character.worldX = respawn.x;
     character.y = respawn.y;
     cameraOffset = 0;
+
     mushrooms = await generateMushroom(5);
-    handleTextInteraction_canvas4()
+    handleTextInteraction_canvas4();
   }
 }
+
 
 function handleMovement_canvas4() {
   ensureWorldPosInit();
