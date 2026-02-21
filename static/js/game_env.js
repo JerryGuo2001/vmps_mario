@@ -1664,7 +1664,7 @@ async function checkHP_canvas4() {
   if (S.active) tickOverlay();
 
   if (character.hp <= 0 && freezeTime === 0) {
-    freezeTime = 5000;
+    freezeTime = 3000;
 
     // NEW: dim + countdown during freezeTime
     showOverlay();
