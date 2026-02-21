@@ -714,11 +714,9 @@ async function wrapWorldXLeftEdge(xWorld) {
   if (xWorld < 0) return 0;
 
   // If you pass the right edge, appear on the far left
-  if (xWorld > maxX){ 
-    groundPlatforms = generateGroundPlatforms(worldWidth, 200, 400);
-    mushrooms = await generateMushroom(5);
+  if (xWorld > maxX){
     return 0
-  };
+  }
 
   return xWorld;
 }
