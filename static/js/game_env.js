@@ -1541,13 +1541,17 @@ let freezeTime = 0; // Variable to track freeze time
 
 async function checkHP_canvas4() {
   // ---------------------------
-  // One-time state (kept inside this function)
+  // Persistent state
   // ---------------------------
   const S = (checkHP_canvas4._death ||= {
     overlay: null,
     text: null,
     timer: null,
-    active: false
+    active: false,
+
+    // NEW: edge-trigger gating
+    armed: false,     // becomes true after first frame in canvas4
+    prevHp: null      // previous frame HP
   });
 
   function ensureOverlay() {
@@ -1567,7 +1571,7 @@ async function checkHP_canvas4() {
         background: 'rgba(0,0,0,0.55)',
         zIndex: '999999',
         display: 'none',
-        pointerEvents: 'none' // set to 'auto' if you want to block clicks
+        pointerEvents: 'none'
       });
 
       text = document.createElement('div');
@@ -1619,16 +1623,14 @@ async function checkHP_canvas4() {
   function tickOverlay() {
     if (!S.active) return;
 
-    // If we left Canvas 4 or room is unlocked, don't show death overlay
+    // If we left Canvas 4 or room is unlocked, don't show overlay
     if (currentCanvas !== 4 || roomProceedUnlocked) {
       hideOverlay();
       return;
     }
 
-    // Use freezeTime itself (it is decremented in updateGame)
     const msLeft = Math.max(0, Number(freezeTime) || 0);
     const secLeft = Math.ceil(msLeft / 1000);
-
     if (S.text) S.text.textContent = String(secLeft);
 
     if (msLeft <= 0) hideOverlay();
@@ -1639,7 +1641,6 @@ async function checkHP_canvas4() {
     S.active = true;
     S.overlay.style.display = 'block';
 
-    // Immediate render + keep synced while updateGame is in freezeTime branch
     tickOverlay();
 
     if (S.timer) clearInterval(S.timer);
@@ -1647,29 +1648,58 @@ async function checkHP_canvas4() {
   }
 
   // ---------------------------
-  // Original logic (with overlay)
+  // Phase / canvas gating + edge-trigger arming
   // ---------------------------
   if (currentCanvas !== 4) {
+    // leaving canvas4 resets the detector
+    S.armed = false;
+    S.prevHp = null;
     if (S.active) hideOverlay();
     return;
   }
 
-  // once exit is unlocked, death should not respawn this room
+  // once exit is unlocked, death should not happen anymore in this room
   if (roomProceedUnlocked) {
+    S.armed = false;
+    S.prevHp = null;
     if (S.active) hideOverlay();
     return;
   }
 
-  // keep overlay synced if it's already active
+  // keep overlay synced if already active
   if (S.active) tickOverlay();
 
-  if (character.hp <= 0 && freezeTime === 0) {
+  const hpNow = Number(character?.hp);
+  if (!Number.isFinite(hpNow)) {
+    // can't reason about HP; just don't trigger
+    return;
+  }
+
+  // Arm on the FIRST frame in Canvas 4:
+  // this prevents "death" from firing if the trial starts at hp=0.
+  if (!S.armed) {
+    S.armed = true;
+    S.prevHp = hpNow;
+    return;
+  }
+
+  // Edge-trigger: only fire when crossing from >0 to <=0
+  const prev = Number(S.prevHp);
+  const crossedToZero = (Number.isFinite(prev) && prev > 0 && hpNow <= 0);
+
+  // update memory for next frame
+  S.prevHp = hpNow;
+
+  // ---------------------------
+  // Death logic (only on crossing)
+  // ---------------------------
+  if (crossedToZero && freezeTime === 0) {
     freezeTime = 3000;
 
-    // NEW: dim + countdown during freezeTime
+    // show dim + countdown during freezeTime
     showOverlay();
 
-    // Optional: clear held keys so Mario doesn't "lurch" after freeze ends
+    // Optional: clear held keys so Mario doesn't lurch after freeze ends
     if (keys) {
       keys['ArrowLeft'] = keys['ArrowRight'] = keys['ArrowUp'] = false;
       keys['e'] = keys['q'] = keys['p'] = false;

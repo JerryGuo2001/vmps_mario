@@ -269,7 +269,7 @@ function createCharacter() {
         velocityY: 0,
         speed: 0,
         onBlock: false,
-        hp: 0,
+        hp: BASE_START_HP,
         acceleration : 0.2,
         deceleration: 0.2,
         max_speed :6
