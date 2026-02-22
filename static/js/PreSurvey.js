@@ -1,6 +1,7 @@
 // ========================== PreSurvey.js ==========================
 // 8-page “Build the best mushroom” (ONLY pages 1–8 from PostSurvey builder).
-// Flow: startPreSurvey(onDone) -> shows overlay -> records into participantData.trials +
+// Adds an INTRO instruction page (Page 0) before the 8 builder pages.
+// Flow: startPreSurvey(onDone) -> intro -> 8 builder pages -> records into participantData.trials +
 // participantData.preSurvey -> hides overlay -> calls onDone() (to start OOO instructions/task).
 
 (function () {
@@ -10,7 +11,7 @@
 
   // 8-color order for the 8 builder pages
   const BUILDER_COLORS = ['black','white','red','green','blue','cyan','magenta','yellow'];
-  const TOTAL_PAGES = 8;
+  const TOTAL_PAGES = 8; // builder pages count (intro is page 0, not included)
 
   // Style tokens (match your PostSurvey vibe)
   const THEME = {
@@ -23,6 +24,17 @@
     radius: "16px",
     focusShadow: "0 0 0 3px rgba(66, 133, 244, 0.25)"
   };
+
+  // -------------------- Instruction text --------------------
+
+  function getPreSurveyIntroText() {
+    return [
+      "In the next section, you will design mushrooms using two slider bars.",
+      "You will be asked to design the MOST TASTY mushroom.",
+      "Move BOTH sliders to set the mushroom’s features and reveal the preview.",
+      "Click Start to begin."
+    ].join(" ");
+  }
 
   function getBuilderInstructionText(color) {
     const c = String(color || "").trim().toUpperCase();
@@ -44,11 +56,27 @@
     return box;
   }
 
+  function makePrimaryButton(label) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.textContent = label || "Start";
+    btn.style.border = "none";
+    btn.style.borderRadius = "12px";
+    btn.style.padding = "12px 18px";
+    btn.style.fontSize = "16px";
+    btn.style.fontWeight = "700";
+    btn.style.cursor = "pointer";
+    btn.style.background = "#1F6FEB";
+    btn.style.color = "#FFFFFF";
+    btn.style.boxShadow = "0 6px 16px rgba(31, 111, 235, 0.25)";
+    return btn;
+  }
+
   // Scroll lock restore
   const _prev = { htmlOverflow: null, bodyOverflow: null, bodyMinHeight: null, bodyBg: null };
 
   // State
-  let _pageIndex = 0;
+  let _pageIndex = 0;   // 0..7 builder pages
   let _pageStartT = null;
   let _onDone = null;
 
@@ -57,6 +85,8 @@
 
   // Builder data: color -> selection object
   const _builderData = Object.create(null);
+
+  // -------------------- Entry --------------------
 
   async function startPreSurvey(onDone) {
     if (_started) return;
@@ -131,6 +161,7 @@
     pageRoot.id = "prePageRoot";
     card.appendChild(pageRoot);
 
+    // Ensure catalog is ready
     pageRoot.innerHTML = "";
     pageRoot.appendChild(makeLoadingBlock("Loading mushroom catalog…"));
 
@@ -152,7 +183,10 @@
     _catalogIndex = buildCatalogIndex(_catalogRows);
 
     _pageIndex = 0;
-    renderPage(card, overlay);
+
+    // ✅ NEW: Show intro/instruction page BEFORE page 1/8
+    renderIntroPage(card, overlay);
+
     overlay.scrollTop = 0;
   }
 
@@ -281,6 +315,44 @@
   }
 
   // -------------------- Page rendering --------------------
+
+  // ✅ NEW: Intro / instruction page before the 8 builder pages
+  function renderIntroPage(card, overlay) {
+    const root = document.getElementById("prePageRoot");
+    const sub  = document.getElementById("preSubTitle");
+    const prog = document.getElementById("preProgressText");
+    if (!root) return;
+
+    root.innerHTML = "";
+    overlay.scrollTop = 0;
+
+    if (prog) prog.textContent = `Page 0 of ${TOTAL_PAGES}`;
+    _pageStartT = performance.now();
+
+    if (sub) {
+      sub.style.margin = "0 0 12px 0";
+      sub.style.fontSize = "18px";
+      sub.style.fontWeight = "800";
+      sub.style.color = THEME.text;
+      sub.style.letterSpacing = "0.2px";
+      sub.textContent = "Instructions";
+    }
+
+    root.appendChild(makeInstructionBlock(getPreSurveyIntroText()));
+
+    const row = document.createElement("div");
+    row.style.display = "flex";
+    row.style.justifyContent = "flex-end";
+    row.style.marginTop = "10px";
+
+    const startBtn = makePrimaryButton("Start");
+    startBtn.addEventListener("click", () => {
+      renderPage(card, overlay); // begin builder pages
+    });
+
+    row.appendChild(startBtn);
+    root.appendChild(row);
+  }
 
   function renderPage(card, overlay) {
     const root = document.getElementById("prePageRoot");
