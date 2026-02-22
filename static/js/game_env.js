@@ -1694,7 +1694,7 @@ async function checkHP_canvas4() {
   // Death logic (only on crossing)
   // ---------------------------
   if (crossedToZero && freezeTime === 0) {
-    freezeTime = 3000;
+    freezeTime = 5000;
 
     // show dim + countdown during freezeTime
     showOverlay();
