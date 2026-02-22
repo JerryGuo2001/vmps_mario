@@ -16,8 +16,6 @@ window.onload = () => {
   preloadAllInstructions().catch(() => {/* ignore */});
 };
 
-
-// --- REPLACE startWithID() ---
 function startWithID() {
   const idInput = document.getElementById('participantIdInput').value.trim();
   if (!idInput) {
@@ -27,19 +25,31 @@ function startWithID() {
   participantData.id = idInput;
   participantData.startTime = performance.now(); // ✅ set here
 
-  // ✅ Hide welcome immediately so instructions are the only thing visible
+  // ✅ Hide welcome immediately so only the next UI is visible
   const w = document.getElementById('welcome');
   if (w) w.style.display = 'none';
-  //debug mode on, delet the following testing code and re make the section below non-commented
-  // window.startPostSurvey();
-  //debug mode section end
-  // Show OOO instructions first (if configured); otherwise start OOO immediately.
-  if (typeof showPhaseInstructions === 'function' && INSTR_FOLDERS && INSTR_FOLDERS.ooo) {
-    showPhaseInstructions('ooo', () => {
-      initTaskOOO(); // start OOO after instructions
+
+  // ✅ Start PRE-SURVEY first, then OOO instructions + OOO
+  if (typeof startPreSurvey === "function") {
+    startPreSurvey(() => {
+      // Show OOO instructions first (if configured); otherwise start OOO immediately.
+      if (typeof showPhaseInstructions === 'function' && INSTR_FOLDERS && INSTR_FOLDERS.ooo) {
+        showPhaseInstructions('ooo', () => {
+          initTaskOOO(); // start OOO after instructions
+        });
+      } else {
+        initTaskOOO(); // fallback
+      }
     });
   } else {
-    initTaskOOO(); // fallback
+    console.warn("[startWithID] startPreSurvey() not found; skipping pre-survey.");
+
+    // fallback to your original behavior
+    if (typeof showPhaseInstructions === 'function' && INSTR_FOLDERS && INSTR_FOLDERS.ooo) {
+      showPhaseInstructions('ooo', () => initTaskOOO());
+    } else {
+      initTaskOOO();
+    }
   }
 }
 
