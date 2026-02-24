@@ -96,7 +96,7 @@ async function drawObstacles() {
                 resetRoomVisitState();
 
 
-                expRegenPlatformsAndRocks();
+                groundPlatforms = generateGroundPlatforms(worldWidth, 200, 400);
                 mushrooms = await generateMushroom(5);
                 handleTextInteraction_canvas4()
                 // Log room choice
@@ -160,7 +160,7 @@ async function drawObstacles() {
                 currentRoom = env_deter;
                 resetRoomVisitState();
 
-                expRegenPlatformsAndRocks();
+                groundPlatforms = generateGroundPlatforms(worldWidth, 200, 400);
                 mushrooms = await generateMushroom(5);
                 handleTextInteraction_canvas4()
 
