@@ -715,7 +715,7 @@ function wrapWorldXLeftEdge(xWorld) {
 
   // If you pass the right edge, appear on the far left
   if (xWorld > maxX){
-    groundPlatforms = generateGroundPlatforms(worldWidth, 200, 400);
+    expRegenPlatformsAndRocks();
     generateMushroom(5).then(ms => { mushrooms = ms; }).catch(err => console.warn('[init mushrooms]', err));
     return 0;
   }
@@ -789,6 +789,208 @@ function generateGroundPlatforms(worldWidth, minHeight, maxHeight, numSections =
 
   return platforms;
 }
+
+// ================= ROCK OBSTACLES (Canvas 4, WORLD space) =================
+const ROCK_SRC       = 'TexturePack/rock.png';
+const ROCK_W         = 70;   // obstacle width (px)
+const ROCK_H         = 50;   // obstacle height (px)
+const ROCK_X_MARGIN  = 70;   // keep away from platform edges
+const ROCK_DEBUG_BOX = false; // set true to draw hitboxes
+
+let rocks = [];
+
+const rockSprite = new Image();
+rockSprite.src = ROCK_SRC;
+
+function rockRectWorld(r) {
+  const left = r.x - r.w / 2;
+  const right = r.x + r.w / 2;
+  const top = r.y;
+  const bottom = r.y + r.h;
+  return { left, right, top, bottom };
+}
+
+// Generate 1 rock PER platform section
+function expGenerateRocksForPlatforms(plats) {
+  const out = [];
+  if (!Array.isArray(plats)) return out;
+
+  for (let i = 0; i < plats.length; i++) {
+    const p = plats[i];
+    const span = (p.endX - p.startX);
+
+    // platform too small to safely place a rock
+    if (!Number.isFinite(span) || span < (ROCK_W + 2 * ROCK_X_MARGIN)) continue;
+
+    const xMin = p.startX + ROCK_X_MARGIN + ROCK_W / 2;
+    const xMax = p.endX   - ROCK_X_MARGIN - ROCK_W / 2;
+    const x = Math.round(xMin + Math.random() * Math.max(1, (xMax - xMin)));
+
+    out.push({
+      x,                 // center X in WORLD space
+      y: p.y - ROCK_H,   // top Y so it sits ON the platform
+      w: ROCK_W,
+      h: ROCK_H,
+      platformIndex: i
+    });
+  }
+
+  return out;
+}
+
+// Single entry point: whenever platforms are regenerated, regenerate rocks too.
+function expRegenPlatformsAndRocks() {
+  expRegenPlatformsAndRocks();
+  rocks = expGenerateRocksForPlatforms(groundPlatforms);
+}
+
+// Draw rocks in Canvas 4 (behind Mario; called from drawBackground_canvas4)
+function expDrawRocks_canvas4() {
+  if (!Array.isArray(rocks) || !rocks.length) return;
+
+  for (const r of rocks) {
+    const x = worldToScreenX(r.x - r.w / 2);
+    const y = r.y;
+
+    if (rockSprite.complete) {
+      ctx.drawImage(rockSprite, x, y, r.w, r.h);
+    } else {
+      ctx.fillStyle = 'rgba(90,90,90,0.9)';
+      ctx.fillRect(x, y, r.w, r.h);
+      ctx.strokeStyle = '#000';
+      ctx.strokeRect(x, y, r.w, r.h);
+    }
+
+    if (ROCK_DEBUG_BOX) {
+      ctx.save();
+      ctx.strokeStyle = 'yellow';
+      ctx.setLineDash([6, 4]);
+      ctx.strokeRect(x, y, r.w, r.h);
+      ctx.restore();
+    }
+  }
+}
+
+// Side collision resolution (run after horizontal movement, before vertical)
+function expResolveRockSideCollisions(prevRect) {
+  if (!Array.isArray(rocks) || !rocks.length || !character) return;
+
+  const now = charRectWorld();
+  const EPS = 0.001;
+
+  for (const r of rocks) {
+    const rr = rockRectWorld(r);
+
+    const vOver = (now.bottom > rr.top + 1) && (now.top < rr.bottom - 1);
+    const hOver = horizOverlap(now.left, now.right, rr.left, rr.right);
+    if (!vOver || !hOver) continue;
+
+    const fromLeft  = (prevRect.right <= rr.left + EPS)  && (now.right > rr.left + EPS);
+    const fromRight = (prevRect.left  >= rr.right - EPS) && (now.left  < rr.right - EPS);
+
+    if (fromLeft || (!fromRight && character.speed > 0)) {
+      character.worldX = rr.left - character.width - EPS;
+      character.speed = 0;
+    } else if (fromRight || character.speed < 0) {
+      character.worldX = rr.right + EPS;
+      character.speed = 0;
+    }
+  }
+}
+
+// Find the earliest landing surface (rock top OR ground top) during a fall
+function expFindLandingSurface(xLeft, xRight, oldBottom, newBottom) {
+  let best = null; // { kind:'rock'|'ground', y, rock?, plat? }
+
+  // rocks first
+  if (Array.isArray(rocks)) {
+    for (const r of rocks) {
+      const rr = rockRectWorld(r);
+      if (!horizOverlap(xLeft, xRight, rr.left, rr.right)) continue;
+
+      if (oldBottom <= rr.top && newBottom >= rr.top) {
+        if (!best || rr.top < best.y) best = { kind: 'rock', y: rr.top, rock: r };
+      }
+    }
+  }
+
+  // ground platforms
+  const overlaps = overlappingGroundPlatformsWorld(xLeft, xRight);
+  for (const p of overlaps) {
+    if (oldBottom <= p.y && newBottom >= p.y) {
+      if (!best || p.y < best.y) best = { kind: 'ground', y: p.y, plat: p };
+    }
+  }
+
+  return best;
+}
+
+// Ceiling hit (jumping up into rock bottom)
+function expResolveRockCeiling(xLeft, xRight, oldTop, newTop) {
+  if (!Array.isArray(rocks) || !rocks.length) return false;
+
+  for (const r of rocks) {
+    const rr = rockRectWorld(r);
+    if (!horizOverlap(xLeft, xRight, rr.left, rr.right)) continue;
+
+    const ceilingY = rr.bottom; // rock bottom
+    if (oldTop >= ceilingY && newTop <= ceilingY) {
+      character.y = ceilingY;
+      character.velocityY = 0;
+      return true;
+    }
+  }
+  return false;
+}
+
+// Safety: if we ever end up embedded in rock, push out along smallest penetration axis
+function expEnforceNotInsideRocks() {
+  if (!Array.isArray(rocks) || !rocks.length) return;
+
+  const now = charRectWorld();
+  const EPS = 0.1;
+
+  for (const r of rocks) {
+    const rr = rockRectWorld(r);
+    const hOver = horizOverlap(now.left, now.right, rr.left, rr.right);
+    const vOver = (now.bottom > rr.top + EPS) && (now.top < rr.bottom - EPS);
+    if (!hOver || !vOver) continue;
+
+    const penL = now.right - rr.left;
+    const penR = rr.right - now.left;
+    const penT = now.bottom - rr.top;
+    const penB = rr.bottom - now.top;
+
+    const minX = Math.min(penL, penR);
+    const minY = Math.min(penT, penB);
+
+    if (minX < minY) {
+      if (penL < penR) character.worldX -= (penL + EPS);
+      else             character.worldX += (penR + EPS);
+      character.speed = 0;
+    } else {
+      if (penT < penB) {
+        character.y -= (penT + EPS);
+        if (character.velocityY > 0) character.velocityY = 0;
+      } else {
+        character.y += (penB + EPS);
+        if (character.velocityY < 0) character.velocityY = 0;
+      }
+    }
+  }
+}
+
+function expIsStandingOnRock(xLeft, xRight, bottomY, eps = 0.75) {
+  if (!Array.isArray(rocks) || !rocks.length) return false;
+  for (const r of rocks) {
+    const rr = rockRectWorld(r);
+    if (horizOverlap(xLeft, xRight, rr.left, rr.right) && Math.abs(bottomY - rr.top) <= eps) {
+      return true;
+    }
+  }
+  return false;
+}
+
 
 
 // ------- Small helpers (fixed) -------
@@ -1129,7 +1331,8 @@ async function generateMushroom(count = 5) {
 
 
 // Generate new platforms each time with varied height
-let groundPlatforms = generateGroundPlatforms(worldWidth, 200, 400);
+let groundPlatforms = [];
+expRegenPlatformsAndRocks();
 // Initial spawn
 let mushrooms = [];
 generateMushroom(5).then(ms => { mushrooms = ms; }).catch(err => console.warn('[init mushrooms]', err));
@@ -1162,6 +1365,7 @@ function drawBackground_canvas4() {
     } else {
       groundImage.onload = () => drawBackground_canvas4();
     }
+    expDrawRocks_canvas4();
   });
 }
 
@@ -1721,6 +1925,7 @@ async function checkHP_canvas4() {
 
 function handleMovement_canvas4() {
   ensureWorldPosInit();
+  const prevRect = charRectWorld(); // WORLD rect before any movement
   atLeftEdge = cameraOffset <= 0;
   atRightEdge = cameraOffset >= worldWidth - canvas.width;
 
@@ -1760,6 +1965,7 @@ function handleMovement_canvas4() {
   // Otherwise, keep your normal wall-collision rule.
   if (willWrap || !hitsGroundWall(proposedWorldX, character.y)) {
     character.worldX = proposedWorldX;
+    expResolveRockSideCollisions(prevRect);
   }
 
 
@@ -1770,33 +1976,36 @@ function handleMovement_canvas4() {
 
   // 2) resolve mys-box first (can change y/vel and trigger freezes)
   const _boxCanJump = (typeof drawMysBox === 'function') ? drawMysBox() : false;
-
-  // 3) robust ground: use full horizontal overlap (not just feet)
+  // 3) robust vertical resolution: ROCKS + GROUND
   const xL = character.worldX;
   const xR = character.worldX + character.width;
-  const overlaps = overlappingGroundPlatformsWorld(xL, xR);
 
-  // continuous landing test (works even with big velocity)
   const oldY = character.y;
+  const oldTop = oldY;
   const oldBottom = oldY + character.height;
+
   const newY = oldY + character.velocityY;
+  const newTop = newY;
   const newBottom = newY + character.height;
 
-  if (character.velocityY >= 0 && overlaps.length) {
-    const landingPlat = findLandingPlatform(overlaps, oldBottom, newBottom);
-    if (landingPlat) {
-      character.y = landingPlat.y - character.height;
+  if (character.velocityY < 0) {
+    // jumping up: stop on rock bottoms if we hit them
+    const hitCeiling = expResolveRockCeiling(xL, xR, oldTop, newTop);
+    if (!hitCeiling) character.y = newY;
+  } else {
+    // falling/downward: land on earliest surface (rock top OR ground top)
+    const landing = expFindLandingSurface(xL, xR, oldBottom, newBottom);
+    if (landing) {
+      character.y = landing.y - character.height;
       character.velocityY = 0;
     } else {
       character.y = newY;
     }
-  } else {
-    // going up or no overlaps
-    character.y = newY;
   }
 
-  // 4) safety clamp: if we somehow ended up under an overlapping platform, snap on top
-  // (recompute overlaps to be extra safe at platform seams)
+  // 4) safety clamps: rocks + ground
+  expEnforceNotInsideRocks();
+
   const overlapsNow = overlappingGroundPlatformsWorld(
     character.worldX,
     character.worldX + character.width
@@ -1805,10 +2014,10 @@ function handleMovement_canvas4() {
     enforceNotBelowOverlappingPlatform(overlapsNow);
   }
 
-
-  // 5) grounded test for jumping (based on overlap platforms)
+  // 5) grounded test for jumping (ground OR rock)
   const bottomNow = character.y + character.height;
-  const onGround = overlaps.some(p => Math.abs(bottomNow - p.y) <= 0.75);
+  const onGround = overlapsNow.some(p => Math.abs(bottomNow - p.y) <= 0.75) ||
+                   expIsStandingOnRock(xL, xR, bottomNow, 0.75);
 
 
   if (keys['ArrowUp'] && (onGround || _boxCanJump)) {
