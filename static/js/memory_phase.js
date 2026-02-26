@@ -24,6 +24,24 @@ const EXTRA_WITHIN_COLOR_PER_COLOR = 4;
 // Preferred color order (matches your 8-color setup)
 const MEMORY_COLOR_ORDER = ['red','green','blue','cyan','magenta','yellow','black','white'];
 
+// ===================== LURE BIN CONFIG =====================
+// Fixed across participants (constant thresholding)
+const MEMORY_SAMPLE_SPREAD = {
+  cap_roundness: [0.6, 1.6],
+  stem_width:    [6, 12],
+};
+
+// Distance is computed in normalized 2D space:
+// cap_norm in [0,1], stem_norm in [0,1], Euclidean distance
+// Bin rule (fixed across participants):
+//   lure_bin = 2 (hard): distance <= cutoff
+//   lure_bin = 1 (easy): distance > cutoff
+const MEMORY_LURE_DISTANCE_CUTOFF_NORM = 0.20;
+
+// Per-color target split for extra 4 trials:
+// 2 easy (bin1) + 2 hard (bin2)
+const MEMORY_LURE_TARGET_PER_COLOR = { 1: 2, 2: 2 };
+
 // ---------------- TOO-FAST PAUSE (MEMORY) ----------------
 const MEMORY_TOO_FAST_MS = 300;
 const MEMORY_TOO_FAST_SECONDS = 5;
@@ -109,6 +127,57 @@ function _normColor(c) {
   return String(c || '').trim().toLowerCase();
 }
 
+function _memNum(v) {
+  if (v === null || v === undefined) return NaN;
+  if (typeof v === 'number') return Number.isFinite(v) ? v : NaN;
+  const s = String(v).trim();
+  if (!s || s.toLowerCase() === 'na' || s.toLowerCase() === 'undefined') return NaN;
+  const n = Number(s);
+  return Number.isFinite(n) ? n : NaN;
+}
+
+function _clip01(x) {
+  return Math.max(0, Math.min(1, x));
+}
+
+function _normByRange(v, minV, maxV) {
+  const n = _memNum(v);
+  if (!Number.isFinite(n)) return NaN;
+  if (!Number.isFinite(minV) || !Number.isFinite(maxV) || maxV <= minV) return NaN;
+  return _clip01((n - minV) / (maxV - minV));
+}
+
+function _lureDistanceNorm2D(a, b) {
+  if (!a || !b) return NaN;
+  const [capMin, capMax] = MEMORY_SAMPLE_SPREAD.cap_roundness;
+  const [stemMin, stemMax] = MEMORY_SAMPLE_SPREAD.stem_width;
+
+  const aCap = _normByRange(a.cap_roundness_value, capMin, capMax);
+  const aStem = _normByRange(a.stem_width_value, stemMin, stemMax);
+  const bCap = _normByRange(b.cap_roundness_value, capMin, capMax);
+  const bStem = _normByRange(b.stem_width_value, stemMin, stemMax);
+
+  if (![aCap, aStem, bCap, bStem].every(Number.isFinite)) return NaN;
+
+  const dx = aCap - bCap;
+  const dy = aStem - bStem;
+  return Math.sqrt(dx * dx + dy * dy);
+}
+
+function _lureBinFromDistanceNorm(dNorm) {
+  if (!Number.isFinite(dNorm)) return null;
+  return (dNorm > MEMORY_LURE_DISTANCE_CUTOFF_NORM) ? 1 : 2; // easy=1, hard=2
+}
+
+function _isNewForLure(m) {
+  if (!m) return false;
+  const status = String(m.memory_status || '');
+  if (status.includes('unseen')) return true;
+  // fallback if status missing
+  if (m.seen_image === 0) return true;
+  return false;
+}
+
 // --- Build TYPE-level seen set (existing behavior) ---
 function _getSeenTypeSet() {
   const seenTypes = new Set();
@@ -126,7 +195,7 @@ function _getSeenTypeSet() {
   return seenTypes;
 }
 
-// --- Build IMAGE-level seen set from participant logs (uses mushroomObjOrId if present) ---
+// --- Build IMAGE-level seen set from participant logs (robust fallback) ---
 function _getSeenImageSet() {
   const seenImgs = new Set();
   const trials = (typeof participantData !== 'undefined' && participantData?.trials) ? participantData.trials : [];
@@ -164,6 +233,25 @@ function _getSeenImageSet() {
   return seenImgs;
 }
 
+// --- Build IMAGE-level seen set specifically from exploration phase (used for lure anchors) ---
+function _getExploreSeenImageSet() {
+  const seenImgs = new Set();
+  const trials = (typeof participantData !== 'undefined' && participantData?.trials) ? participantData.trials : [];
+
+  for (const tr of trials) {
+    if (!tr || typeof tr !== 'object') continue;
+    if (tr.trial_type !== 'explore_seen') continue;
+
+    const name = _cleanImageName(tr.imagefilename || tr.image || tr.filename);
+    if (name) seenImgs.add(name);
+  }
+
+  // Fallback if exploration logs are absent
+  if (seenImgs.size === 0) return _getSeenImageSet();
+
+  return seenImgs;
+}
+
 // ===================== GLOBALS =====================
 let aMushrooms = [];   // left mushrooms per trial
 let bMushrooms = [];   // right mushrooms per trial
@@ -195,8 +283,10 @@ function _normalizeMush(row) {
   const name = row.name || (imagefilename ? imagefilename.replace(/\.[^.]+$/, '') : 'mushroom');
 
   const color = (row.color_name ?? row.color ?? row.col ?? null);
-  const cap   = (row.cap_roundness ?? row.cap ?? row.cap_size ?? row.cap_zone ?? null);
-  const stem  = (row.stem_width ?? row.stem ?? row.stem_zone ?? null);
+
+  // Keep raw fields for type-key function compatibility
+  const capRaw  = (row.cap_roundness ?? row.cap ?? row.cap_size ?? row.cap_zone ?? null);
+  const stemRaw = (row.stem_width ?? row.stem ?? row.stem_zone ?? null);
 
   let value = row.value ?? 0;
   if (value !== 'reset') {
@@ -204,7 +294,24 @@ function _normalizeMush(row) {
     value = Number.isFinite(n) ? n : 0;
   }
 
-  return { name, imagefilename, value, color, cap, stem };
+  // Numeric values for lure distance
+  const capRoundnessValue = _memNum(row.cap_roundness ?? row.cap_round ?? row.cap ?? null);
+  const stemWidthValue    = _memNum(row.stem_width ?? row.stem_w ?? row.stem ?? null);
+
+  return {
+    name,
+    imagefilename,
+    value,
+    color,
+
+    // keep raw fields (for fallback type key if needed)
+    cap: capRaw,
+    stem: stemRaw,
+
+    // canonical numeric metrics for lure distance
+    cap_roundness_value: capRoundnessValue,
+    stem_width_value: stemWidthValue,
+  };
 }
 
 function _isSkyCatalogRow(row) {
@@ -248,6 +355,160 @@ function _pickOnePreferUnused(arr, usedImgSet) {
   return src[(Math.random() * src.length) | 0];
 }
 
+// ===================== LURE ANCHOR HELPERS =====================
+function _buildExploreSeenAnchorContext(pool, exploreSeenImageSet) {
+  const allSeen = [];
+  const byType = new Map();
+  const byColor = new Map();
+
+  for (const m of pool) {
+    const imgKey = _cleanImageName(m.imagefilename);
+    if (!imgKey || !exploreSeenImageSet.has(imgKey)) continue;
+
+    const typeKey = m.type_key || memoryTypeKey(m);
+    const color = _normColor(m.color);
+
+    allSeen.push(m);
+
+    if (typeKey) {
+      if (!byType.has(typeKey)) byType.set(typeKey, []);
+      byType.get(typeKey).push(m);
+    }
+
+    if (color) {
+      if (!byColor.has(color)) byColor.set(color, []);
+      byColor.get(color).push(m);
+    }
+  }
+
+  return { allSeen, byType, byColor };
+}
+
+function _nearestSeenForLure(unseenM, anchorCtx) {
+  if (!unseenM || !anchorCtx) {
+    return {
+      distance_norm: NaN,
+      lure_bin: null,
+      anchor_image: null,
+      anchor_type: null,
+      anchor_color: null,
+      anchor_scope: null,
+    };
+  }
+
+  const unseenType = unseenM.type_key || memoryTypeKey(unseenM);
+  const unseenColor = _normColor(unseenM.color);
+  const unseenImg = _cleanImageName(unseenM.imagefilename);
+
+  let anchors = [];
+  let anchor_scope = null;
+
+  const sameType = unseenType ? (anchorCtx.byType.get(unseenType) || []) : [];
+  const sameColor = unseenColor ? (anchorCtx.byColor.get(unseenColor) || []) : [];
+
+  if (sameType.length > 0) {
+    anchors = sameType;
+    anchor_scope = 'type';
+  } else if (sameColor.length > 0) {
+    anchors = sameColor;
+    anchor_scope = 'color';
+  } else if (anchorCtx.allSeen.length > 0) {
+    anchors = anchorCtx.allSeen;
+    anchor_scope = 'global';
+  }
+
+  if (!anchors.length) {
+    return {
+      distance_norm: NaN,
+      lure_bin: null,
+      anchor_image: null,
+      anchor_type: null,
+      anchor_color: null,
+      anchor_scope: null,
+    };
+  }
+
+  let best = null;
+  for (const s of anchors) {
+    const sImg = _cleanImageName(s.imagefilename);
+    if (unseenImg && sImg && unseenImg === sImg) continue;
+
+    const d = _lureDistanceNorm2D(unseenM, s);
+    if (!Number.isFinite(d)) continue;
+
+    if (!best || d < best.distance_norm) {
+      best = { distance_norm: d, anchor: s };
+    }
+  }
+
+  if (!best) {
+    return {
+      distance_norm: NaN,
+      lure_bin: null,
+      anchor_image: null,
+      anchor_type: null,
+      anchor_color: null,
+      anchor_scope,
+    };
+  }
+
+  return {
+    distance_norm: best.distance_norm,
+    lure_bin: _lureBinFromDistanceNorm(best.distance_norm),
+    anchor_image: best.anchor?.imagefilename || null,
+    anchor_type: best.anchor?.type_key || memoryTypeKey(best.anchor),
+    anchor_color: _normColor(best.anchor?.color) || null,
+    anchor_scope,
+  };
+}
+
+// Add lure metadata to a mushroom (used for BOTH base and extra trials)
+// Only "new/unseen" mushrooms get lure_bin / distance; seen mushrooms get nulls.
+function _annotateMushLureMeta(m, lureAnchorCtx, extraFields = {}) {
+  if (!m) return m;
+
+  const out = { ...m };
+
+  if (_isNewForLure(out)) {
+    const lure = _nearestSeenForLure(out, lureAnchorCtx);
+    out.lure_bin = lure.lure_bin ?? null;
+    out.lure_distance_norm = Number.isFinite(lure.distance_norm) ? lure.distance_norm : null;
+    out.lure_anchor_image = lure.anchor_image || null;
+    out.lure_anchor_type = lure.anchor_type || null;
+    out.lure_anchor_color = lure.anchor_color || null;
+    out.lure_anchor_scope = lure.anchor_scope || null;
+  } else {
+    out.lure_bin = null;
+    out.lure_distance_norm = null;
+    out.lure_anchor_image = null;
+    out.lure_anchor_type = null;
+    out.lure_anchor_color = null;
+    out.lure_anchor_scope = null;
+  }
+
+  return Object.assign(out, extraFields || {});
+}
+
+// Trial-level lure summary (works for base + extra)
+function _summarizeTrialLureMeta(left, right) {
+  const leftIsLure = left && _isNewForLure(left);
+  const rightIsLure = right && _isNewForLure(right);
+
+  const lureSides = [];
+  if (leftIsLure) lureSides.push('left');
+  if (rightIsLure) lureSides.push('right');
+
+  const lureBins = [];
+  if (leftIsLure && left.lure_bin != null) lureBins.push(left.lure_bin);
+  if (rightIsLure && right.lure_bin != null) lureBins.push(right.lure_bin);
+
+  return {
+    lure_sides: lureSides,
+    lure_bin_summary: (lureBins.length === 1 ? lureBins[0] : null), // single-lure trials
+    lure_bins_present: lureBins.slice(),
+  };
+}
+
 // ===================== CORE: BUILD TRIALS (36 base + 32 extra, then SHUFFLE ALL 68) =====================
 async function preloadMushroomPairs() {
   const pool = _getCatalogPool();
@@ -263,10 +524,11 @@ async function preloadMushroomPairs() {
   const desiredBasePairs = (Memory_debug ? 2 : BASE_MEMORY_TRIALS);
   const desiredBaseItems = desiredBasePairs * 2;
 
-  const seenTypeSet  = _getSeenTypeSet();   // type-level
-  const seenImageSet = _getSeenImageSet();  // image-level (for enforcing SU per trial robustly)
+  const seenTypeSet = _getSeenTypeSet();                 // type-level
+  const seenImageSet = _getSeenImageSet();               // image-level
+  const exploreSeenImageSet = _getExploreSeenImageSet(); // exploration-only anchors for lure distance
 
-  // --- Build buckets by type, and also tag each exemplar as seen/unseen at IMAGE-level ---
+  // --- Build buckets by type ---
   // byType: typeKey -> { color, seen:[], unseen:[], seen_ex:[], unseen_ex:[] }
   const byType = new Map();
   for (const m of pool) {
@@ -276,10 +538,10 @@ async function preloadMushroomPairs() {
     if (!byType.has(typeKey)) {
       byType.set(typeKey, {
         color: _normColor(m.color),
-        // type-level (base behavior)
+        // type-level seen/unseen (used in base trial coverage)
         seen: [],
         unseen: [],
-        // image-level (extra trials SU constraint)
+        // image-level seen/unseen (used in extra SU trials)
         seen_ex: [],
         unseen_ex: [],
       });
@@ -287,14 +549,14 @@ async function preloadMushroomPairs() {
 
     m.type_key = typeKey;
 
-    // Type-level seen flag (old behavior)
+    // Type-level seen flag (base 72-type logic)
     const isSeenType = seenTypeSet.has(typeKey);
     m.seen_in_learning = isSeenType ? 1 : 0;
     byType.get(typeKey)[isSeenType ? 'seen' : 'unseen'].push(m);
 
-    // Image-level seen flag (new, used for extra SU)
+    // Image-level seen flag (extra SU logic and lure "newness" fallback)
     const imgKey = _cleanImageName(m.imagefilename);
-    const isSeenImg = (imgKey && seenImageSet.has(imgKey));
+    const isSeenImg = !!(imgKey && seenImageSet.has(imgKey));
     m.seen_image = isSeenImg ? 1 : 0;
     byType.get(typeKey)[isSeenImg ? 'seen_ex' : 'unseen_ex'].push(m);
   }
@@ -309,7 +571,10 @@ async function preloadMushroomPairs() {
     return;
   }
 
-  // ===================== BASE 36 (UNCHANGED LOGIC, but we’ll track used images) =====================
+  // Build lure-anchor context from exploration-seen images
+  const lureAnchorCtx = _buildExploreSeenAnchorContext(pool, exploreSeenImageSet);
+
+  // ===================== BASE 36 (72-type coverage pool, across-color random pairing) =====================
   const nTypesWanted = Math.min(desiredBaseItems, allTypes.length);
   const targetSeenItems = Math.floor(nTypesWanted / 2);
 
@@ -343,14 +608,15 @@ async function preloadMushroomPairs() {
     let chosen = null;
     if (isSeenTypeTarget && bucket.seen.length > 0) {
       chosen = bucket.seen[(Math.random() * bucket.seen.length) | 0];
-      chosen.memory_status = 'seen';
+      chosen = { ...chosen, memory_status: 'seen' };
     } else {
       if (bucket.unseen.length > 0) {
         chosen = bucket.unseen[(Math.random() * bucket.unseen.length) | 0];
-        chosen.memory_status = 'unseen';
+        chosen = { ...chosen, memory_status: 'unseen' };
       } else if (bucket.seen.length > 0) {
+        // fallback preserves generation even if a type has no unseen-type exemplar
         chosen = bucket.seen[(Math.random() * bucket.seen.length) | 0];
-        chosen.memory_status = 'seen_fallback';
+        chosen = { ...chosen, memory_status: 'seen_fallback' };
       }
     }
     if (chosen) baseSelectedItems.push(chosen);
@@ -361,43 +627,71 @@ async function preloadMushroomPairs() {
 
   const basePairs = Math.min(desiredBasePairs, Math.floor(baseSelectedItems.length / 2));
   const baseTrials = [];
-  for (let i = 0; i < basePairs; i++) {
-    const left = baseSelectedItems[i * 2];
-    const right = baseSelectedItems[i * 2 + 1];
-    baseTrials.push({ left, right, is_extra: 0 });
-  }
 
-  // Track used images from the base 36 so extras can use UN-USED mushrooms
+  // Track used images from base so extra trials prefer novel-to-memory exemplars
   const usedImgSet = new Set();
+
   const markUsed = (m) => {
     const k = _cleanImageName(m?.imagefilename);
     if (k) usedImgSet.add(k);
   };
-  for (const tr of baseTrials) {
-    markUsed(tr.left);
-    markUsed(tr.right);
+
+  for (let i = 0; i < basePairs; i++) {
+    let left = baseSelectedItems[i * 2];
+    let right = baseSelectedItems[i * 2 + 1];
+
+    // Add lure metadata to BOTH base and extra question families
+    left = _annotateMushLureMeta(left, lureAnchorCtx);
+    right = _annotateMushLureMeta(right, lureAnchorCtx);
+
+    const lureSummary = _summarizeTrialLureMeta(left, right);
+
+    baseTrials.push({
+      left,
+      right,
+      is_extra: 0,
+
+      // base trial can have 0/1/2 new mushrooms, so keep summary + arrays
+      desired_lure_bin: null,
+      lure_bin: lureSummary.lure_bin_summary, // if exactly one lure
+      lure_bins_present: lureSummary.lure_bins_present,
+      lure_side: (lureSummary.lure_sides.length === 1 ? lureSummary.lure_sides[0] : null),
+      lure_sides: lureSummary.lure_sides,
+
+      lure_distance_norm: null,
+      lure_anchor_image: null,
+      lure_anchor_type: null,
+      lure_anchor_scope: null,
+      lure_bin_source: null,
+      extra_reason: null,
+      color: null,
+      seen_type: null,
+      unseen_type: null,
+    });
+
+    markUsed(left);
+    markUsed(right);
   }
 
-  // ===================== EXTRA 32 (APPEND-ONLY): 4 per color, each trial = 2 UNIQUE TYPES (one seen image, one unseen image) =====================
+  // ===================== EXTRA 32 (within-color SU, assigned type + assigned lure-bin first) =====================
   const extraTrials = _buildExtraWithinColorTrials({
     pool,
     byType,
     usedImgSet,
     perColor: EXTRA_WITHIN_COLOR_PER_COLOR,
     totalWanted: EXTRA_WITHIN_COLOR_TRIALS_TOTAL,
+    lureAnchorCtx,
   });
 
   // ===================== COMBINE + SHUFFLE ALL TRIALS (68 total) =====================
   let combined = baseTrials.concat(extraTrials);
 
-  // In debug mode, keep small
   if (Memory_debug) {
-    combined = combined.slice(0, 4); // small sanity set
+    combined = combined.slice(0, 4);
   }
 
   _shuffle(combined);
 
-  // Write into arrays the rest of the task expects
   memoryTrials = combined;
   aMushrooms = combined.map(tr => tr.left);
   bMushrooms = combined.map(tr => tr.right);
@@ -405,21 +699,50 @@ async function preloadMushroomPairs() {
 
   // ===================== DEBUG PRINTS =====================
   console.log(`[memory] Base trials=${baseTrials.length}, Extra trials=${extraTrials.length}, Total=${combined.length}`);
+  console.log(`[memory] lure cutoff (norm)=${MEMORY_LURE_DISTANCE_CUTOFF_NORM}`);
+
   const seq = combined.map((tr, i) => ({
     trial: i + 1,
     extra: tr.is_extra ? 1 : 0,
     color: tr.color || null,
+
     L_status: tr.left?.memory_status || null,
     L_type: tr.left?.type_key || null,
     L_img: tr.left?.imagefilename || null,
+    L_lure_bin: tr.left?.lure_bin ?? null,
+    L_lure_d: Number.isFinite(tr.left?.lure_distance_norm) ? Number(tr.left.lure_distance_norm.toFixed(3)) : null,
+
     R_status: tr.right?.memory_status || null,
     R_type: tr.right?.type_key || null,
     R_img: tr.right?.imagefilename || null,
+    R_lure_bin: tr.right?.lure_bin ?? null,
+    R_lure_d: Number.isFinite(tr.right?.lure_distance_norm) ? Number(tr.right.lure_distance_norm.toFixed(3)) : null,
+
+    trial_lure_bin: tr.lure_bin ?? null,
+    lure_bins_present: Array.isArray(tr.lure_bins_present) ? tr.lure_bins_present.join(',') : null,
+    lure_side: tr.lure_side || null,
+    lure_sides: Array.isArray(tr.lure_sides) ? tr.lure_sides.join(',') : null,
+    desired_lure_bin: tr.desired_lure_bin ?? null,
+    lure_bin_source: tr.lure_bin_source || null,
+    lure_anchor_scope: tr.lure_anchor_scope || null,
     extra_reason: tr.extra_reason || null,
   }));
   console.table(seq);
 
-  // Optional: log if we failed to create enough extras
+  const baseBinCounts = { 1: 0, 2: 0, null: 0 };
+  const extraBinCounts = { 1: 0, 2: 0, null: 0 };
+
+  for (const tr of combined) {
+    const bucket = tr.is_extra ? extraBinCounts : baseBinCounts;
+    for (const m of [tr.left, tr.right]) {
+      if (!_isNewForLure(m)) continue;
+      const k = (m?.lure_bin == null) ? 'null' : String(m.lure_bin);
+      bucket[k] = (bucket[k] || 0) + 1;
+    }
+  }
+  console.log('[memory] base new-mushroom lure-bin counts:', baseBinCounts);
+  console.log('[memory] extra new-mushroom lure-bin counts:', extraBinCounts);
+
   if (!Memory_debug && extraTrials.length < EXTRA_WITHIN_COLOR_TRIALS_TOTAL) {
     console.warn(`[memory] WARNING: requested extra=${EXTRA_WITHIN_COLOR_TRIALS_TOTAL}, built=${extraTrials.length}. Check seen/unseen coverage per color/type.`);
   }
@@ -428,66 +751,155 @@ async function preloadMushroomPairs() {
 // Build extra trials:
 // - exactly 4 per color (if possible)
 // - each trial uses 2 DISTINCT type_keys
-// - one mushroom is SEEN (image-level), one is UNSEEN (image-level)
-// - both mushrooms must be UN-USED by base trials (prefer strict; fallback if needed)
-// - randomize side assignment
-function _buildExtraWithinColorTrials({ pool, byType, usedImgSet, perColor, totalWanted }) {
+// - one seen (image-level) + one unseen (image-level)
+// - IMPORTANT: assign (type + desired lure bin) first, then search unseen candidate WITHIN that assigned type
+// - if desired lure bin not available in assigned type, fallback to opposite bin (same type/condition)
+// - strict unused first, then relaxed
+function _buildExtraWithinColorTrials({ pool, byType, usedImgSet, perColor, totalWanted, lureAnchorCtx }) {
   const colors = _getColorsPresent(pool);
   const wanted = Math.min(totalWanted, colors.length * perColor);
 
   const extras = [];
 
-  // Helper: pick a seen/unseen exemplar from a specific type, with strict unused preference
-  function pickFromType(typeKey, which /* 'seen_ex'|'unseen_ex' */, strictUnused = true) {
+  // ---------- helpers ----------
+  function _candidateListByUnused(arr, strictUnused = true) {
+    if (!Array.isArray(arr) || !arr.length) return [];
+    if (!strictUnused) return arr.slice();
+    return arr.filter(m => {
+      const k = _cleanImageName(m.imagefilename);
+      return k && !usedImgSet.has(k);
+    });
+  }
+
+  function pickSeenFromType(typeKey, strictUnused = true) {
     const bucket = byType.get(typeKey);
-    const arr = bucket?.[which] || [];
+    const arr = _candidateListByUnused(bucket?.seen_ex || [], strictUnused);
+    if (!arr.length) return null;
+    return _pickOnePreferUnused(arr, usedImgSet);
+  }
+
+  // TYPE-FIRST + BIN-FIRST inside assigned unseen type
+  function pickUnseenFromTypeByAssignedTypeAndBin(unseenTypeKey, desiredBin, strictUnused = true) {
+    const bucket = byType.get(unseenTypeKey);
+    const arr0 = bucket?.unseen_ex || [];
+    if (!arr0.length) return null;
+
+    const arr = _candidateListByUnused(arr0, strictUnused);
     if (!arr.length) return null;
 
-    if (strictUnused) {
-      const cand = arr.filter(m => {
-        const k = _cleanImageName(m.imagefilename);
-        return k && !usedImgSet.has(k);
-      });
-      if (cand.length) return cand[(Math.random() * cand.length) | 0];
-      return null;
+    const oppositeBin = (desiredBin === 1) ? 2 : 1;
+
+    // Compute lure metrics for ALL candidates in this assigned type
+    const scored = arr.map(m => {
+      // tag as unseen_extra for lure newness semantics before annotation
+      const baseM = { ...m, memory_status: 'unseen_extra', extra_trial: 1 };
+      const lure = _nearestSeenForLure(baseM, lureAnchorCtx);
+      return { m: baseM, lure };
+    });
+
+    const valid = scored.filter(x => Number.isFinite(x.lure?.distance_norm));
+    const desired = valid.filter(x => x.lure?.lure_bin === desiredBin);
+    const opposite = valid.filter(x => x.lure?.lure_bin === oppositeBin);
+
+    // Desired first -> opposite fallback (same assigned type)
+    let chosenPool = null;
+    let fallbackMode = 'target_bin';
+    let actualBin = null;
+
+    if (desired.length) {
+      chosenPool = desired;
+      actualBin = desiredBin;
+      fallbackMode = 'target_bin';
+    } else if (opposite.length) {
+      chosenPool = opposite;
+      actualBin = oppositeBin;
+      fallbackMode = 'fallback_opposite_bin';
+    } else if (valid.length) {
+      chosenPool = valid;
+      actualBin = valid[0]?.lure?.lure_bin ?? null;
+      fallbackMode = 'fallback_any_valid';
+    } else if (scored.length) {
+      chosenPool = scored;
+      actualBin = null;
+      fallbackMode = 'fallback_no_anchor_distance';
     } else {
-      return _pickOnePreferUnused(arr, usedImgSet);
+      return null;
     }
+
+    // Tie-break: hard => smallest distance, easy => largest distance
+    const sortDirBin = actualBin ?? desiredBin;
+    chosenPool.sort((a, b) => {
+      const da = Number.isFinite(a.lure?.distance_norm) ? a.lure.distance_norm : (sortDirBin === 2 ? Infinity : -Infinity);
+      const db = Number.isFinite(b.lure?.distance_norm) ? b.lure.distance_norm : (sortDirBin === 2 ? Infinity : -Infinity);
+      return (sortDirBin === 2) ? (da - db) : (db - da);
+    });
+
+    const picked = chosenPool[0];
+    return {
+      m: picked.m,
+      lure: picked.lure,
+      desired_lure_bin: desiredBin,
+      actual_lure_bin: actualBin,
+      lure_bin_source: fallbackMode,
+    };
   }
 
-  // Precompute type keys by color
-  const typesByColor = new Map(); // color -> [typeKey]
-  for (const [t, bucket] of byType.entries()) {
-    const c = _normColor(bucket.color);
-    if (!c) continue;
-    if (!typesByColor.has(c)) typesByColor.set(c, []);
-    typesByColor.get(c).push(t);
-  }
-
-  // Make one SU trial from two distinct types
-  function pushSUDistinctTypes(color, seenTypeKey, unseenTypeKey, strictUnused = true, reason = '') {
+  function pushTrialForAssignedTypeAndBin({
+    color,
+    seenTypeKey,
+    unseenTypeKey,
+    desiredLureBin,
+    strictUnused = true,
+    reason = ''
+  }) {
     if (!seenTypeKey || !unseenTypeKey) return false;
     if (seenTypeKey === unseenTypeKey) return false;
 
-    let seenM = pickFromType(seenTypeKey, 'seen_ex', strictUnused);
-    let unseenM = pickFromType(unseenTypeKey, 'unseen_ex', strictUnused);
+    let seenM = pickSeenFromType(seenTypeKey, strictUnused);
+    let unseenPick = pickUnseenFromTypeByAssignedTypeAndBin(unseenTypeKey, desiredLureBin, strictUnused);
 
-    // If strict failed, relax once
-    if ((!seenM || !unseenM) && strictUnused) {
-      seenM = seenM || pickFromType(seenTypeKey, 'seen_ex', false);
-      unseenM = unseenM || pickFromType(unseenTypeKey, 'unseen_ex', false);
-      reason = reason ? (reason + '|relaxed_unused') : 'relaxed_unused';
+    let finalReason = reason;
+
+    // Relax unused constraint if needed (same assigned types + same desired bin logic)
+    if ((!seenM || !unseenPick) && strictUnused) {
+      seenM = seenM || pickSeenFromType(seenTypeKey, false);
+      unseenPick = unseenPick || pickUnseenFromTypeByAssignedTypeAndBin(unseenTypeKey, desiredLureBin, false);
+      finalReason = finalReason ? `${finalReason}|relaxed_unused` : 'relaxed_unused';
     }
 
-    if (!seenM || !unseenM) return false;
+    if (!seenM || !unseenPick) return false;
 
-    // clone + tag
-    const s = { ...seenM, memory_status: 'seen_extra', extra_trial: 1 };
-    const u = { ...unseenM, memory_status: 'unseen_extra', extra_trial: 1 };
+    // annotate seen + unseen mushrooms
+    const s = _annotateMushLureMeta(
+      { ...seenM, memory_status: 'seen_extra', extra_trial: 1 },
+      lureAnchorCtx
+    );
+
+    const uBase = {
+      ...unseenPick.m,
+      memory_status: 'unseen_extra',
+      extra_trial: 1,
+      desired_lure_bin: unseenPick.desired_lure_bin ?? null,
+      lure_bin_source: unseenPick.lure_bin_source || null,
+    };
+
+    let u = _annotateMushLureMeta(uBase, lureAnchorCtx);
+
+    // Force actual bin metadata from the picker if available (keeps target/fallback exact)
+    if (unseenPick.actual_lure_bin != null) u.lure_bin = unseenPick.actual_lure_bin;
+    if (Number.isFinite(unseenPick?.lure?.distance_norm)) u.lure_distance_norm = unseenPick.lure.distance_norm;
+    if (unseenPick?.lure) {
+      u.lure_anchor_image = unseenPick.lure.anchor_image || u.lure_anchor_image || null;
+      u.lure_anchor_type = unseenPick.lure.anchor_type || u.lure_anchor_type || null;
+      u.lure_anchor_color = unseenPick.lure.anchor_color || u.lure_anchor_color || null;
+      u.lure_anchor_scope = unseenPick.lure.anchor_scope || u.lure_anchor_scope || null;
+    }
 
     const leftFirst = Math.random() < 0.5;
     const left = leftFirst ? s : u;
     const right = leftFirst ? u : s;
+
+    const lureSummary = _summarizeTrialLureMeta(left, right);
 
     extras.push({
       left,
@@ -496,10 +908,23 @@ function _buildExtraWithinColorTrials({ pool, byType, usedImgSet, perColor, tota
       color,
       seen_type: seenTypeKey,
       unseen_type: unseenTypeKey,
-      extra_reason: reason || 'distinct_types_su',
+
+      desired_lure_bin: unseenPick.desired_lure_bin ?? null,
+      lure_bin: u.lure_bin ?? lureSummary.lure_bin_summary ?? null,
+      lure_bins_present: lureSummary.lure_bins_present,
+      lure_side: leftFirst ? 'right' : 'left',
+      lure_sides: lureSummary.lure_sides,
+
+      lure_bin_source: u.lure_bin_source || unseenPick.lure_bin_source || null,
+      lure_distance_norm: Number.isFinite(u.lure_distance_norm) ? u.lure_distance_norm : null,
+      lure_anchor_image: u.lure_anchor_image || null,
+      lure_anchor_type: u.lure_anchor_type || null,
+      lure_anchor_scope: u.lure_anchor_scope || null,
+
+      extra_reason: finalReason || 'assigned_type_then_lurebin',
     });
 
-    // mark used
+    // mark used images
     const lk = _cleanImageName(left.imagefilename);
     const rk = _cleanImageName(right.imagefilename);
     if (lk) usedImgSet.add(lk);
@@ -508,54 +933,97 @@ function _buildExtraWithinColorTrials({ pool, byType, usedImgSet, perColor, tota
     return true;
   }
 
+  // ---------- precompute types by color ----------
+  const typesByColor = new Map(); // color -> [typeKey]
+  for (const [t, bucket] of byType.entries()) {
+    const c = _normColor(bucket.color);
+    if (!c) continue;
+    if (!typesByColor.has(c)) typesByColor.set(c, []);
+    typesByColor.get(c).push(t);
+  }
+
+  // ---------- build extras ----------
   for (const color of colors) {
     if (extras.length >= wanted) break;
 
     const typeKeys = (typesByColor.get(color) || []).slice();
     _shuffle(typeKeys);
 
-    // Partition types that have at least one seen_ex / unseen_ex
     const seenTypes = typeKeys.filter(t => (byType.get(t)?.seen_ex?.length || 0) > 0);
     const unseenTypes = typeKeys.filter(t => (byType.get(t)?.unseen_ex?.length || 0) > 0);
 
-    // If either side is empty, we cannot guarantee SU by image-level
-    if (seenTypes.length === 0 || unseenTypes.length === 0) {
+    if (!seenTypes.length || !unseenTypes.length) {
       console.warn(`[memory-extra] color=${color}: insufficient seen_ex or unseen_ex types. seenTypes=${seenTypes.length}, unseenTypes=${unseenTypes.length}`);
+      continue;
     }
 
-    // Enforce "2 unique types per question": pick pairs of (seenType, unseenType) with seenType != unseenType
-    // We also try to avoid reusing the same type within a color’s extra block.
-    const usedTypesThisColor = new Set();
+    // Define lure-bin targets FIRST (requested logic): 2 easy + 2 hard per color
+    const targetBins = [];
+    for (let i = 0; i < (MEMORY_LURE_TARGET_PER_COLOR[1] || 0); i++) targetBins.push(1);
+    for (let i = 0; i < (MEMORY_LURE_TARGET_PER_COLOR[2] || 0); i++) targetBins.push(2);
+    while (targetBins.length < perColor) targetBins.push(2);
+    if (targetBins.length > perColor) targetBins.length = perColor;
+    _shuffle(targetBins);
 
+    const usedTypesThisColor = new Set();
     let made = 0;
-    let safety = 2000;
+    let safety = 5000;
 
     while (made < perColor && extras.length < wanted && safety-- > 0) {
-      // pick a seen-type not used (prefer)
-      const sCand = seenTypes.filter(t => !usedTypesThisColor.has(t));
-      const uCand = unseenTypes.filter(t => !usedTypesThisColor.has(t));
+      const desiredLureBin = targetBins[made] || 2;
 
-      const sType = (sCand.length ? sCand : seenTypes)[(Math.random() * (sCand.length ? sCand.length : seenTypes.length)) | 0];
-      const uType = (uCand.length ? uCand : unseenTypes)[(Math.random() * (uCand.length ? uCand.length : unseenTypes.length)) | 0];
+      // STEP 1: assign types first (seen type + unseen type), distinct
+      const sPrefer = seenTypes.filter(t => !usedTypesThisColor.has(t));
+      const uPrefer = unseenTypes.filter(t => !usedTypesThisColor.has(t));
 
-      if (!sType || !uType || sType === uType) continue;
+      const sPool = sPrefer.length ? sPrefer : seenTypes;
+      const uPool = uPrefer.length ? uPrefer : unseenTypes;
 
-      // Prefer strict unused: both mushrooms not used in base or earlier extras
-      const ok = pushSUDistinctTypes(color, sType, uType, true, 'strict_unused');
+      if (!sPool.length || !uPool.length) break;
+
+      const seenTypeKey = sPool[(Math.random() * sPool.length) | 0];
+      let unseenTypeKey = uPool[(Math.random() * uPool.length) | 0];
+
+      if (seenTypeKey === unseenTypeKey) {
+        const alt = uPool.filter(t => t !== seenTypeKey);
+        if (!alt.length) continue;
+        unseenTypeKey = alt[(Math.random() * alt.length) | 0];
+      }
+
+      // STEP 2: within assigned unseen type, try desired lure bin; fallback to opposite bin inside same type
+      const ok = pushTrialForAssignedTypeAndBin({
+        color,
+        seenTypeKey,
+        unseenTypeKey,
+        desiredLureBin,
+        strictUnused: true,
+        reason: `assigned_type_first|want_bin_${desiredLureBin}`
+      });
+
       if (ok) {
-        usedTypesThisColor.add(sType);
-        usedTypesThisColor.add(uType);
+        usedTypesThisColor.add(seenTypeKey);
+        usedTypesThisColor.add(unseenTypeKey);
         made++;
         continue;
       }
 
-      // If strict fails, try relaxed unused but still distinct types
-      const ok2 = pushSUDistinctTypes(color, sType, uType, false, 'relaxed_unused');
+      const ok2 = pushTrialForAssignedTypeAndBin({
+        color,
+        seenTypeKey,
+        unseenTypeKey,
+        desiredLureBin,
+        strictUnused: false,
+        reason: `assigned_type_first|want_bin_${desiredLureBin}|relaxed_start`
+      });
+
       if (ok2) {
-        usedTypesThisColor.add(sType);
-        usedTypesThisColor.add(uType);
+        usedTypesThisColor.add(seenTypeKey);
+        usedTypesThisColor.add(unseenTypeKey);
         made++;
+        continue;
       }
+
+      // Otherwise try another assigned type pair
     }
 
     if (made < perColor) {
@@ -934,27 +1402,93 @@ function handleMemoryChoice(side) {
     else correct = null;
   }
 
+  const meta = memoryTrials?.[memory_currentQuestion] || {};
+
   // Log choice
   if (participantData?.trials) {
-    const meta = memoryTrials?.[memory_currentQuestion] || {};
     participantData.trials.push({
       id: participantData.id,
       trial_type: 'memory_choice',
       trial_index: memory_currentQuestion,
 
-      // extra trial metadata
+      // trial family metadata
       is_extra: meta.is_extra ? 1 : 0,
       color: meta.color || null,
       extra_reason: meta.extra_reason || null,
       seen_type: meta.seen_type || null,
       unseen_type: meta.unseen_type || null,
 
-      left_mushroom: { name: a.name, image: a.imagefilename, value: a.value, type_key: a.type_key, status: a.memory_status },
-      right_mushroom:{ name: b.name, image: b.imagefilename, value: b.value, type_key: b.type_key, status: b.memory_status },
+      // trial-level lure metadata (works for base + extra)
+      desired_lure_bin: meta.desired_lure_bin ?? null,
+      lure_bin: meta.lure_bin ?? null,
+      lure_bins_present: Array.isArray(meta.lure_bins_present) ? meta.lure_bins_present.slice() : null,
+      lure_side: meta.lure_side || null,
+      lure_sides: Array.isArray(meta.lure_sides) ? meta.lure_sides.slice() : null,
+      lure_bin_source: meta.lure_bin_source || null,
+
+      lure_distance_norm: Number.isFinite(meta.lure_distance_norm) ? meta.lure_distance_norm : null,
+      lure_anchor_image: meta.lure_anchor_image || null,
+      lure_anchor_type: meta.lure_anchor_type || null,
+      lure_anchor_scope: meta.lure_anchor_scope || null,
+
+      left_mushroom: {
+        name: a.name,
+        image: a.imagefilename,
+        value: a.value,
+        type_key: a.type_key,
+        status: a.memory_status,
+
+        lure_bin: a.lure_bin ?? null,
+        lure_distance_norm: Number.isFinite(a.lure_distance_norm) ? a.lure_distance_norm : null,
+        lure_anchor_image: a.lure_anchor_image || null,
+        lure_anchor_type: a.lure_anchor_type || null,
+        lure_anchor_scope: a.lure_anchor_scope || null,
+        desired_lure_bin: a.desired_lure_bin ?? null,
+        lure_bin_source: a.lure_bin_source || null,
+      },
+
+      right_mushroom: {
+        name: b.name,
+        image: b.imagefilename,
+        value: b.value,
+        type_key: b.type_key,
+        status: b.memory_status,
+
+        lure_bin: b.lure_bin ?? null,
+        lure_distance_norm: Number.isFinite(b.lure_distance_norm) ? b.lure_distance_norm : null,
+        lure_anchor_image: b.lure_anchor_image || null,
+        lure_anchor_type: b.lure_anchor_type || null,
+        lure_anchor_scope: b.lure_anchor_scope || null,
+        desired_lure_bin: b.desired_lure_bin ?? null,
+        lure_bin_source: b.lure_bin_source || null,
+      },
 
       selected_side: side,
-      selected_mushroom: { name: selected.name, image: selected.imagefilename, value: selected.value, type_key: selected.type_key, status: selected.memory_status },
-      other_mushroom: { name: other.name, image: other.imagefilename, value: other.value, type_key: other.type_key, status: other.memory_status },
+      selected_mushroom: {
+        name: selected.name,
+        image: selected.imagefilename,
+        value: selected.value,
+        type_key: selected.type_key,
+        status: selected.memory_status,
+
+        lure_bin: selected.lure_bin ?? null,
+        lure_distance_norm: Number.isFinite(selected.lure_distance_norm) ? selected.lure_distance_norm : null,
+        desired_lure_bin: selected.desired_lure_bin ?? null,
+        lure_bin_source: selected.lure_bin_source || null,
+      },
+
+      other_mushroom: {
+        name: other.name,
+        image: other.imagefilename,
+        value: other.value,
+        type_key: other.type_key,
+        status: other.memory_status,
+
+        lure_bin: other.lure_bin ?? null,
+        lure_distance_norm: Number.isFinite(other.lure_distance_norm) ? other.lure_distance_norm : null,
+        desired_lure_bin: other.desired_lure_bin ?? null,
+        lure_bin_source: other.lure_bin_source || null,
+      },
 
       correct,
       rt: rtChoice,
@@ -1028,7 +1562,18 @@ function handleMemoryResponse(e) {
       tested_mushroom: {
         name: memory_promptMushroom?.name ?? null,
         image: memory_promptMushroom?.imagefilename ?? null,
-        value: memory_promptMushroom?.value ?? null
+        value: memory_promptMushroom?.value ?? null,
+        type_key: memory_promptMushroom?.type_key ?? null,
+
+        lure_bin: memory_promptMushroom?.lure_bin ?? null,
+        lure_distance_norm: Number.isFinite(memory_promptMushroom?.lure_distance_norm)
+          ? memory_promptMushroom.lure_distance_norm
+          : null,
+        lure_anchor_image: memory_promptMushroom?.lure_anchor_image ?? null,
+        lure_anchor_type: memory_promptMushroom?.lure_anchor_type ?? null,
+        lure_anchor_scope: memory_promptMushroom?.lure_anchor_scope ?? null,
+        desired_lure_bin: memory_promptMushroom?.desired_lure_bin ?? null,
+        lure_bin_source: memory_promptMushroom?.lure_bin_source ?? null,
       },
       response: e.key,
       rt: rtPrompt,
