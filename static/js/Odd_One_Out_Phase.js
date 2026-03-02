@@ -71,7 +71,7 @@ function updateOOOPreloadUI(done, total) {
   const text = document.getElementById('oooPreloadText');
   const inner = document.getElementById('oooPreloadInner');
 
-  if (text) text.textContent = `Loading ${done} / ${total} trials`;
+  if (text) text.textContent = `Loading...`;
   if (inner) {
     const pct = total > 0 ? Math.round((done / total) * 100) : 100;
     inner.style.width = `${pct}%`;
