@@ -41,7 +41,7 @@ function ensureOOOPreloadUI(container, totalToLoad) {
     sub.id = 'oooPreloadText';
     sub.style.fontSize = '14px';
     sub.style.marginBottom = '10px';
-    sub.textContent = `Loading 0 / ${totalToLoad} trials`;
+    sub.textContent = `Loading...`;
 
     const outer = document.createElement('div');
     outer.id = 'oooPreloadOuter';
