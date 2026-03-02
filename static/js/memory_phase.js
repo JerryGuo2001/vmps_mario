@@ -17,9 +17,10 @@ const BASE_MEMORY_TRIALS = 36; // base 36 trials
 const ENABLE_SIMILARITY_TEST = true;
 
 // ===================== EXTRA TRIALS CONFIG (APPEND-ONLY) =====================
-// 4 extra trials per color x 8 colors = 32 extra trials
-const EXTRA_WITHIN_COLOR_TRIALS_TOTAL = 32;
-const EXTRA_WITHIN_COLOR_PER_COLOR = 4;
+// 3 extra trials per color x 8 colors = 24 extra trials
+// (1 close + 1 middle + 1 far per color)
+const EXTRA_WITHIN_COLOR_TRIALS_TOTAL = 24;
+const EXTRA_WITHIN_COLOR_PER_COLOR = 3;
 
 // Preferred color order (matches your 8-color setup)
 const MEMORY_COLOR_ORDER = ['red','green','blue','cyan','magenta','yellow','black','white'];
@@ -538,6 +539,139 @@ function _summarizeTrialLureMeta(left, right) {
   };
 }
 
+// ===================== EXTRA TRIALS VIA mushroom.js HELPER (3 per color: close/middle/far) =====================
+
+function _buildExploreSeenRowIdSetFromCatalog(catalogRows, exploreSeenImageSet) {
+  const seenRowIds = new Set();
+
+  if (!Array.isArray(catalogRows)) return seenRowIds;
+  if (!(exploreSeenImageSet instanceof Set)) return seenRowIds;
+
+  const rowIdFn = (typeof window._safeMushroomRowId === 'function')
+    ? window._safeMushroomRowId
+    : (r) => `${r.color}|${r.stem}|${r.cap}|${_cleanImageName(r.filename || r.imagefilename || r.image || '')}`;
+
+  for (const row of catalogRows) {
+    if (!row || _isSkyCatalogRow(row)) continue;
+
+    const rawImg = row.filename || row.imagefilename || row.image || '';
+    const imgBase = _cleanImageName(rawImg);
+    if (!imgBase || !exploreSeenImageSet.has(imgBase)) continue;
+
+    const color = _normColor(row.color_name ?? row.color ?? row.col ?? null);
+    const stem = _memNum(row.stem_width ?? row.stem_w ?? row.stem ?? row.stem_zone ?? null);
+    const cap  = _memNum(row.cap_roundness ?? row.cap_round ?? row.cap ?? row.cap_size ?? row.cap_zone ?? null);
+
+    const rid = rowIdFn({
+      filename: rawImg,
+      color,
+      stem,
+      cap
+    });
+
+    if (rid) seenRowIds.add(rid);
+  }
+
+  return seenRowIds;
+}
+
+function _buildExtraWithinColorTrials_FromMushroomHelper({ lureAnchorCtx, exploreSeenImageSet }) {
+  const helper = window.buildWithinColorExtraQuestions_3PerColor;
+  const catalogRows = Array.isArray(window.mushroomCatalogRows) ? window.mushroomCatalogRows : [];
+
+  if (typeof helper !== 'function') {
+    console.warn('[memory-extra] buildWithinColorExtraQuestions_3PerColor not found on window.');
+    return [];
+  }
+  if (!catalogRows.length) {
+    console.warn('[memory-extra] window.mushroomCatalogRows is empty.');
+    return [];
+  }
+
+  // Build seenRowIdSet from ACTUAL exploration-seen images (Option B uses exactly one seen + one unseen)
+  const seenRowIdSet = _buildExploreSeenRowIdSetFromCatalog(catalogRows, exploreSeenImageSet);
+
+  const out = helper(catalogRows, {
+    colors: MEMORY_COLOR_ORDER,            // use your preferred order
+    seenRowIdSet,
+    requireSeenUnseenPair: true,           // Option B
+    avoidRowReuseWithinColor: true,
+    shuffleFinal: true,
+    debugLog: true
+  });
+
+  const helperQuestions = Array.isArray(out?.questions) ? out.questions : [];
+  const extras = [];
+
+  for (const q of helperQuestions) {
+    if (!q || !q.left || !q.right) continue;
+
+    // Normalize helper rows into memory-phase mushroom objects
+    let left = _normalizeMush(q.left);
+    let right = _normalizeMush(q.right);
+    if (!left || !right) continue;
+
+    // Determine seen/unseen by rowId membership (helper already enforces 1 seen + 1 unseen)
+    const leftSeen = seenRowIdSet.has(q.leftRowId);
+    const rightSeen = seenRowIdSet.has(q.rightRowId);
+
+    left.type_key = memoryTypeKey(left);
+    right.type_key = memoryTypeKey(right);
+
+    left.memory_status = leftSeen ? 'seen_extra' : 'unseen_extra';
+    right.memory_status = rightSeen ? 'seen_extra' : 'unseen_extra';
+
+    left.seen_image = leftSeen ? 1 : 0;
+    right.seen_image = rightSeen ? 1 : 0;
+
+    left.extra_trial = 1;
+    right.extra_trial = 1;
+
+    // Keep lure metadata annotation (for your existing logging pipeline)
+    left = _annotateMushLureMeta(left, lureAnchorCtx);
+    right = _annotateMushLureMeta(right, lureAnchorCtx);
+
+    const lureSummary = _summarizeTrialLureMeta(left, right);
+
+    extras.push({
+      left,
+      right,
+      is_extra: 1,
+      color: q.color || null,
+
+      // keep compatibility fields
+      seen_type: (left.memory_status.startsWith('seen') ? left.type_key : right.type_key) || null,
+      unseen_type: (left.memory_status.startsWith('unseen') ? left.type_key : right.type_key) || null,
+
+      desired_lure_bin: null, // not used in this new difficulty-based extra builder
+      lure_bin: lureSummary.lure_bin_summary ?? null,
+      lure_bins_present: lureSummary.lure_bins_present,
+      lure_side: (lureSummary.lure_sides.length === 1 ? lureSummary.lure_sides[0] : null),
+      lure_sides: lureSummary.lure_sides,
+
+      lure_bin_source: null,
+      lure_distance_norm: null,    // trial-level single lure summary not central here
+      lure_anchor_image: null,
+      lure_anchor_type: null,
+      lure_anchor_scope: null,
+
+      // NEW metadata from helper (highly useful to log/analyze)
+      extra_reason: `within_color_${q.difficultyLabel}`,
+      difficulty_label: q.difficultyLabel || null,     // close | middle | far
+      difficulty_bin: q.difficultyBin ?? null,         // 1 | 2 | 3
+      metric_name: q.metricName || null,
+      metric_diff: Number.isFinite(q.metricDiff) ? q.metricDiff : null,
+      raw_value_diff: Number.isFinite(q.rawValueDiff) ? q.rawValueDiff : null,
+      separation_mode: q.separationMode || null,       // zero_classifier | range_middle
+      separation_line: Number.isFinite(q.separationLine) ? q.separationLine : null,
+      cross_side: !!q.crossSide,
+    });
+  }
+
+  // Safety trim (should already be 24 if all colors succeed)
+  return extras.slice(0, EXTRA_WITHIN_COLOR_TRIALS_TOTAL);
+}
+
 // ===================== CORE: BUILD TRIALS (36 base + 32 extra, then SHUFFLE ALL 68) =====================
 async function preloadMushroomPairs() {
   const pool = _getCatalogPool();
@@ -702,14 +836,10 @@ async function preloadMushroomPairs() {
     markUsed(right);
   }
 
-  // ===================== EXTRA 32 (within-color SU, assigned type + assigned lure-bin first) =====================
-  const extraTrials = _buildExtraWithinColorTrials({
-    pool,
-    byType,
-    usedImgSet,
-    perColor: EXTRA_WITHIN_COLOR_PER_COLOR,
-    totalWanted: EXTRA_WITHIN_COLOR_TRIALS_TOTAL,
+  // ===================== EXTRA 24 (within-color SU, 1 close + 1 middle + 1 far per color) =====================
+  const extraTrials = _buildExtraWithinColorTrials_FromMushroomHelper({
     lureAnchorCtx,
+    exploreSeenImageSet, // already computed above in preloadMushroomPairs()
   });
 
   // ===================== COMBINE + SHUFFLE ALL TRIALS (68 total) =====================
@@ -1445,6 +1575,14 @@ function handleMemoryChoice(side) {
       extra_reason: meta.extra_reason || null,
       seen_type: meta.seen_type || null,
       unseen_type: meta.unseen_type || null,
+      difficulty_label: meta.difficulty_label || null,
+      difficulty_bin: meta.difficulty_bin ?? null,
+      metric_name: meta.metric_name || null,
+      metric_diff: Number.isFinite(meta.metric_diff) ? meta.metric_diff : null,
+      raw_value_diff: Number.isFinite(meta.raw_value_diff) ? meta.raw_value_diff : null,
+      separation_mode: meta.separation_mode || null,
+      separation_line: Number.isFinite(meta.separation_line) ? meta.separation_line : null,
+      cross_side: (typeof meta.cross_side === 'boolean') ? meta.cross_side : null,
 
       // trial-level lure metadata (works for base + extra)
       desired_lure_bin: meta.desired_lure_bin ?? null,

@@ -577,6 +577,437 @@ function prefetchOOO(i, lookahead = 2) {
 function getOOOCount() { return OOOTriplets.length; }
 function getOOOMeta(i) { return (i>=0 && i<OOOTriplets.length) ? OOOTriplets[i] : null; }
 
+/* ==================== WITHIN-COLOR MEMORY EXTRA BUILDER (SEEN/UNSEEN + CLOSE/MID/FAR) ==================== */
+
+function _isFiniteNum(x) {
+  return typeof x === 'number' && Number.isFinite(x);
+}
+
+function _safeRowId(r) {
+  // Reuse your existing rowId helper if present
+  if (typeof rowId === 'function') return rowId(r);
+  return `${r.color}|${r.stem}|${r.cap}|${basenameFromPath(r.filename || '')}`;
+}
+
+function _shuffleLocal(arr) {
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+  return arr;
+}
+
+function _pairKey(a, b) {
+  const aId = _safeRowId(a);
+  const bId = _safeRowId(b);
+  return aId < bId ? `${aId}__${bId}` : `${bId}__${aId}`;
+}
+
+function _valueSide(v, line) {
+  if (!_isFiniteNum(v) || !_isFiniteNum(line)) return 'unknown';
+  if (v > line) return 'above';
+  if (v < line) return 'below';
+  return 'on_line';
+}
+
+/**
+ * Decide separation line for one color:
+ * - Mixed sign values (neg + pos): line = 0
+ * - Otherwise (all positive or all negative): line = middle of range
+ */
+function _getColorSeparationSpec(rowsForColor) {
+  const vals = (rowsForColor || [])
+    .map(r => r.value)
+    .filter(_isFiniteNum);
+
+  if (vals.length === 0) {
+    return {
+      mode: 'invalid',
+      separationLine: 0,
+      minValue: undefined,
+      maxValue: undefined
+    };
+  }
+
+  const minValue = Math.min(...vals);
+  const maxValue = Math.max(...vals);
+  const hasNeg = minValue < 0;
+  const hasPos = maxValue > 0;
+
+  if (hasNeg && hasPos) {
+    return {
+      mode: 'zero_classifier', // your requested rule
+      separationLine: 0,
+      minValue,
+      maxValue
+    };
+  }
+
+  // all positive OR all negative OR includes zero only on one side
+  return {
+    mode: 'range_middle',
+    separationLine: (minValue + maxValue) / 2,
+    minValue,
+    maxValue
+  };
+}
+
+function _buildWithinColorPairBankBySeparationDistance(catalogRows, opts = {}) {
+  const colors = opts.colors || EIGHT_COLORS;
+  const excludeZeroMetricDiff = (opts.excludeZeroMetricDiff !== false); // default true
+  const excludeTiesOnRawValue = (opts.excludeTiesOnRawValue !== false); // default true
+
+  const bank = {};
+
+  for (const color of colors) {
+    const rows = (catalogRows || []).filter(r =>
+      r &&
+      r.color === color &&
+      r.filename &&
+      _isFiniteNum(r.value)
+    );
+
+    // Stable sort
+    rows.sort((a, b) => {
+      if (a.value !== b.value) return a.value - b.value;
+      if ((a.stem ?? 0) !== (b.stem ?? 0)) return (a.stem ?? 0) - (b.stem ?? 0);
+      return (a.cap ?? 0) - (b.cap ?? 0);
+    });
+
+    const sep = _getColorSeparationSpec(rows);
+    const L = sep.separationLine;
+
+    const pairs = [];
+    for (let i = 0; i < rows.length; i++) {
+      for (let j = i + 1; j < rows.length; j++) {
+        const a = rows[i];
+        const b = rows[j];
+
+        const rawValueDiff = Math.abs(a.value - b.value);
+        if (excludeTiesOnRawValue && rawValueDiff === 0) continue;
+
+        const aDistToLine = Math.abs(a.value - L);
+        const bDistToLine = Math.abs(b.value - L);
+
+        // THIS is the difficulty metric you requested
+        const metricDiff = Math.abs(aDistToLine - bDistToLine);
+
+        if (excludeZeroMetricDiff && metricDiff === 0) continue;
+
+        pairs.push({
+          color,
+          a,
+          b,
+          pairKey: _pairKey(a, b),
+          aId: _safeRowId(a),
+          bId: _safeRowId(b),
+
+          separationMode: sep.mode,
+          separationLine: L,
+
+          aSide: _valueSide(a.value, L),
+          bSide: _valueSide(b.value, L),
+          crossSide: _valueSide(a.value, L) !== _valueSide(b.value, L),
+
+          aDistToLine,
+          bDistToLine,
+          metricDiff,     // used for close/middle/far
+          rawValueDiff    // still useful to log/debug
+        });
+      }
+    }
+
+    // Sort ascending by metricDiff (close -> far)
+    pairs.sort((p1, p2) => {
+      if (p1.metricDiff !== p2.metricDiff) return p1.metricDiff - p2.metricDiff;
+      if (p1.rawValueDiff !== p2.rawValueDiff) return p1.rawValueDiff - p2.rawValueDiff;
+      return p1.pairKey.localeCompare(p2.pairKey);
+    });
+
+    bank[color] = {
+      color,
+      rows,
+      separationMode: sep.mode,
+      separationLine: sep.separationLine,
+      minValue: sep.minValue,
+      maxValue: sep.maxValue,
+      pairsSortedAsc: pairs
+    };
+  }
+
+  return bank;
+}
+
+function _filterPairsForMemoryExtra(pairs, opts = {}) {
+  const {
+    seenRowIdSet = null,
+    requireSeenUnseenPair = true,     // Option B default
+    usedPairKeysGlobal = null,
+    usedRowIdsWithinColor = null
+  } = opts;
+
+  return (pairs || []).filter(p => {
+    if (!p) return false;
+
+    if (usedPairKeysGlobal && usedPairKeysGlobal.has(p.pairKey)) return false;
+
+    if (usedRowIdsWithinColor) {
+      if (usedRowIdsWithinColor.has(p.aId) || usedRowIdsWithinColor.has(p.bId)) return false;
+    }
+
+    if (requireSeenUnseenPair) {
+      if (!(seenRowIdSet instanceof Set)) return false;
+      const aSeen = seenRowIdSet.has(p.aId);
+      const bSeen = seenRowIdSet.has(p.bId);
+      if (aSeen === bSeen) return false; // need exactly one seen + one unseen
+    }
+
+    return true;
+  });
+}
+
+function _pickNearQuantile(sortedPairsAsc, q, opts = {}) {
+  const arr = sortedPairsAsc || [];
+  if (arr.length === 0) return null;
+
+  const {
+    usedPairKeysGlobal = null,
+    usedRowIdsWithinColor = null,
+    avoidRowReuseWithinColor = true
+  } = opts;
+
+  const target = Math.max(0, Math.min(arr.length - 1, Math.round((arr.length - 1) * q)));
+
+  for (let radius = 0; radius < arr.length; radius++) {
+    const idxs = [];
+    if (target - radius >= 0) idxs.push(target - radius);
+    if (radius > 0 && target + radius < arr.length) idxs.push(target + radius);
+    _shuffleLocal(idxs);
+
+    for (const idx of idxs) {
+      const p = arr[idx];
+      if (!p) continue;
+
+      if (usedPairKeysGlobal && usedPairKeysGlobal.has(p.pairKey)) continue;
+
+      if (avoidRowReuseWithinColor && usedRowIdsWithinColor) {
+        if (usedRowIdsWithinColor.has(p.aId) || usedRowIdsWithinColor.has(p.bId)) continue;
+      }
+
+      return p;
+    }
+  }
+
+  return null;
+}
+
+function _makeMemoryExtraPairQuestion(pair, difficultyLabel) {
+  if (!pair) return null;
+
+  // Randomize side
+  const flip = Math.random() < 0.5;
+  const left = flip ? pair.b : pair.a;
+  const right = flip ? pair.a : pair.b;
+
+  const leftVal = left.value;
+  const rightVal = right.value;
+  const correctSide = leftVal > rightVal ? 'left' : (rightVal > leftVal ? 'right' : 'tie');
+
+  return {
+    // General labels
+    question_kind: 'within_color_extra',
+    source: 'within_color_separation_distance',
+    difficultyLabel, // close | middle | far
+    difficultyBin: difficultyLabel === 'close' ? 1 : (difficultyLabel === 'middle' ? 2 : 3),
+
+    // Color + separation info
+    color: pair.color,
+    separationMode: pair.separationMode,   // 'zero_classifier' or 'range_middle'
+    separationLine: pair.separationLine,
+
+    // Metric used for binning
+    metricName: 'abs(abs(v-line)_diff)',
+    metricDiff: pair.metricDiff,
+    rawValueDiff: pair.rawValueDiff,
+
+    // Pair structure info
+    crossSide: pair.crossSide,
+    leftSideOfLine: _valueSide(left.value, pair.separationLine),
+    rightSideOfLine: _valueSide(right.value, pair.separationLine),
+
+    // Stimuli
+    left: {
+      filename: left.filename,
+      color: left.color,
+      stem: left.stem,
+      cap: left.cap,
+      value: left.value
+    },
+    right: {
+      filename: right.filename,
+      color: right.color,
+      stem: right.stem,
+      cap: right.cap,
+      value: right.value
+    },
+
+    // Correct answer for "choose higher value"
+    correctSide,
+
+    // IDs/debug
+    leftRowId: _safeRowId(left),
+    rightRowId: _safeRowId(right),
+    pairKey: pair.pairKey
+  };
+}
+
+/**
+ * Build 3 extra within-color memory questions per color:
+ *   1 close + 1 middle + 1 far
+ *
+ * Option B behavior by default:
+ *   - requireSeenUnseenPair = true (exactly one seen + one unseen)
+ */
+function buildWithinColorExtraQuestions_3PerColor(catalogRows, options = {}) {
+  const colors = options.colors || EIGHT_COLORS;
+  const seenRowIdSet = options.seenRowIdSet || null;
+
+  const requireSeenUnseenPair = (options.requireSeenUnseenPair !== false); // default true (Option B)
+  const avoidRowReuseWithinColor = (options.avoidRowReuseWithinColor !== false); // default true
+  const shuffleFinal = (options.shuffleFinal !== false); // default true
+  const debugLog = !!options.debugLog;
+
+  const pairBank = _buildWithinColorPairBankBySeparationDistance(catalogRows, {
+    colors,
+    excludeZeroMetricDiff: true,
+    excludeTiesOnRawValue: true
+  });
+
+  const usedPairKeysGlobal = new Set();
+  const questions = [];
+  const diagnostics = [];
+
+  for (const color of colors) {
+    const info = pairBank[color];
+    if (!info) {
+      diagnostics.push({ color, ok: false, reason: 'no_bank' });
+      continue;
+    }
+
+    const usedRowIdsWithinColor = new Set();
+
+    let candidates = _filterPairsForMemoryExtra(info.pairsSortedAsc, {
+      seenRowIdSet,
+      requireSeenUnseenPair,
+      usedPairKeysGlobal,
+      usedRowIdsWithinColor: null
+    });
+
+    // Optional preference for mixed-sign colors:
+    // Prefer cross-side pairs first (straddling the separation line), but fallback if too few.
+    if (info.separationMode === 'zero_classifier') {
+      const crossSideOnly = candidates.filter(p => p.crossSide);
+      if (crossSideOnly.length >= 3) {
+        candidates = crossSideOnly;
+      }
+    }
+
+    const picked = { close: null, middle: null, far: null };
+
+    // far first, then close, then middle (usually easiest to satisfy row uniqueness)
+    picked.far = _pickNearQuantile(candidates, 0.85, {
+      usedPairKeysGlobal,
+      usedRowIdsWithinColor,
+      avoidRowReuseWithinColor
+    });
+    if (picked.far) {
+      usedPairKeysGlobal.add(picked.far.pairKey);
+      if (avoidRowReuseWithinColor) {
+        usedRowIdsWithinColor.add(picked.far.aId);
+        usedRowIdsWithinColor.add(picked.far.bId);
+      }
+    }
+
+    picked.close = _pickNearQuantile(candidates, 0.15, {
+      usedPairKeysGlobal,
+      usedRowIdsWithinColor,
+      avoidRowReuseWithinColor
+    });
+    if (picked.close) {
+      usedPairKeysGlobal.add(picked.close.pairKey);
+      if (avoidRowReuseWithinColor) {
+        usedRowIdsWithinColor.add(picked.close.aId);
+        usedRowIdsWithinColor.add(picked.close.bId);
+      }
+    }
+
+    picked.middle = _pickNearQuantile(candidates, 0.50, {
+      usedPairKeysGlobal,
+      usedRowIdsWithinColor,
+      avoidRowReuseWithinColor
+    });
+    if (picked.middle) {
+      usedPairKeysGlobal.add(picked.middle.pairKey);
+      if (avoidRowReuseWithinColor) {
+        usedRowIdsWithinColor.add(picked.middle.aId);
+        usedRowIdsWithinColor.add(picked.middle.bId);
+      }
+    }
+
+    // fallback if row-uniqueness is too strict
+    for (const [label, q] of [['close', 0.15], ['middle', 0.50], ['far', 0.85]]) {
+      if (picked[label]) continue;
+      const fallback = _pickNearQuantile(candidates, q, {
+        usedPairKeysGlobal,
+        usedRowIdsWithinColor: null,
+        avoidRowReuseWithinColor: false
+      });
+      if (fallback) {
+        picked[label] = fallback;
+        usedPairKeysGlobal.add(fallback.pairKey);
+      }
+    }
+
+    const built = [
+      _makeMemoryExtraPairQuestion(picked.close, 'close'),
+      _makeMemoryExtraPairQuestion(picked.middle, 'middle'),
+      _makeMemoryExtraPairQuestion(picked.far, 'far')
+    ].filter(Boolean);
+
+    questions.push(...built);
+
+    diagnostics.push({
+      color,
+      ok: built.length === 3,
+      builtCount: built.length,
+      separationMode: info.separationMode,
+      separationLine: info.separationLine,
+      valueRange: [info.minValue, info.maxValue],
+      candidateCount: candidates.length,
+      built: built.map(q => ({
+        difficulty: q.difficultyLabel,
+        metricDiff: q.metricDiff,
+        rawValueDiff: q.rawValueDiff,
+        crossSide: q.crossSide
+      }))
+    });
+  }
+
+  if (shuffleFinal) _shuffleLocal(questions);
+
+  if (debugLog) {
+    console.log('[memory-extra] buildWithinColorExtraQuestions_3PerColor diagnostics:', diagnostics);
+    console.log(`[memory-extra] Total built = ${questions.length} (target = ${colors.length * 3})`);
+  }
+
+  return {
+    questions,     // final list (24 if all 8 colors succeed)
+    pairBank,
+    diagnostics
+  };
+}
+
+
 /* ==================== OPTIONAL: 2AFC helpers (lazy) ==================== */
 
 function sampleRows(n = 5, colorWhitelist = null) {
@@ -623,17 +1054,19 @@ function getPlatforms(overridePlatforms) {
 /* ==================== BOOTSTRAP ==================== */
 
 (async () => {
-  // Load catalog + build between-color OOO triplets (meta only; no images yet)
   await buildSetAForOOO();
 
-  // Expose globals your task can call on-demand
   window.mushroomCatalogRows   = mushroomCatalogRows;
-  window.OOOTriplets           = OOOTriplets;           // meta only
-  window.getOOOTrial           = getOOOTrial;           // async -> with images
+  window.OOOTriplets           = OOOTriplets;
+  window.getOOOTrial           = getOOOTrial;
   window.prefetchOOO           = prefetchOOO;
   window.getOOOCount           = getOOOCount;
   window.getOOOMeta            = getOOOMeta;
 
   // 2AFC helpers
   window.getRandomPair         = getRandomPair;
+
+  // ✅ ADD THESE
+  window.buildWithinColorExtraQuestions_3PerColor = buildWithinColorExtraQuestions_3PerColor;
+  window._safeMushroomRowId = _safeRowId; // optional helper for memory phase
 })();
