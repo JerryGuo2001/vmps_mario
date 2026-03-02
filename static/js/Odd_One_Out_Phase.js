@@ -5,13 +5,177 @@ let typeOOO = 0;
 let trialStartTimeOOO = null;
 let _oooKeyListenerAttached = false;
 let percentagecompleted
-// We have 72 mushrooms, each used once → 24 trials.
 let OOO_debug= false
 let OOO_TRIALS_TO_RUN
 if (OOO_debug==true){
   OOO_TRIALS_TO_RUN=2
 }else{
   OOO_TRIALS_TO_RUN = 48
+}
+
+// ========================== OOO PRELOAD ===========================
+
+// Toggle if you ever want to skip during debugging
+const OOO_PRELOAD_BEFORE_START = true;
+
+// Concurrency for faster preload without flooding browser/network
+const OOO_PRELOAD_CONCURRENCY = 6;
+
+function ensureOOOPreloadUI(container, totalToLoad) {
+  let wrap = document.getElementById('oooPreloadContainer');
+  if (!wrap) {
+    wrap = document.createElement('div');
+    wrap.id = 'oooPreloadContainer';
+    wrap.style.margin = '24px auto';
+    wrap.style.width = '70%';
+    wrap.style.maxWidth = '700px';
+    wrap.style.textAlign = 'center';
+    wrap.style.fontFamily = 'Arial, sans-serif';
+
+    const title = document.createElement('h3');
+    title.id = 'oooPreloadTitle';
+    title.textContent = 'Preparing images...';
+    title.style.marginBottom = '8px';
+
+    const sub = document.createElement('div');
+    sub.id = 'oooPreloadText';
+    sub.style.fontSize = '14px';
+    sub.style.marginBottom = '10px';
+    sub.textContent = `Loading 0 / ${totalToLoad} trials`;
+
+    const outer = document.createElement('div');
+    outer.id = 'oooPreloadOuter';
+    outer.style.width = '100%';
+    outer.style.height = '14px';
+    outer.style.border = '1px solid #000';
+    outer.style.background = '#eee';
+    outer.style.borderRadius = '7px';
+    outer.style.overflow = 'hidden';
+
+    const inner = document.createElement('div');
+    inner.id = 'oooPreloadInner';
+    inner.style.width = '0%';
+    inner.style.height = '100%';
+    inner.style.background = '#4caf50';
+
+    outer.appendChild(inner);
+    wrap.appendChild(title);
+    wrap.appendChild(sub);
+    wrap.appendChild(outer);
+    container.appendChild(wrap);
+  }
+  return wrap;
+}
+
+function updateOOOPreloadUI(done, total) {
+  const text = document.getElementById('oooPreloadText');
+  const inner = document.getElementById('oooPreloadInner');
+
+  if (text) text.textContent = `Loading ${done} / ${total} trials`;
+  if (inner) {
+    const pct = total > 0 ? Math.round((done / total) * 100) : 100;
+    inner.style.width = `${pct}%`;
+  }
+}
+
+function removeOOOPreloadUI() {
+  const wrap = document.getElementById('oooPreloadContainer');
+  if (wrap) wrap.remove();
+}
+
+// Ensure an image is fully ready + decoded (best effort)
+function waitForImageReady(imgEl) {
+  return new Promise((resolve) => {
+    if (!imgEl) return resolve();
+
+    const finish = async () => {
+      try {
+        // decode() avoids first-paint decode stutter in many browsers
+        if (typeof imgEl.decode === 'function') {
+          await imgEl.decode();
+        }
+      } catch (_) {
+        // decode can reject for cached/cross-origin edge cases; ignore
+      }
+      resolve();
+    };
+
+    if (imgEl.complete && imgEl.naturalWidth > 0) {
+      finish();
+      return;
+    }
+
+    const onLoad = () => {
+      cleanup();
+      finish();
+    };
+    const onError = () => {
+      cleanup();
+      resolve(); // don't block forever on one broken image
+    };
+    const cleanup = () => {
+      imgEl.removeEventListener('load', onLoad);
+      imgEl.removeEventListener('error', onError);
+    };
+
+    imgEl.addEventListener('load', onLoad, { once: true });
+    imgEl.addEventListener('error', onError, { once: true });
+  });
+}
+
+// Preload all selected OOO trials through your existing lazy API cache
+async function preloadOOOTrials(trialIndices) {
+  if (!OOO_PRELOAD_BEFORE_START) return;
+  if (!Array.isArray(trialIndices) || trialIndices.length === 0) return;
+
+  const container = document.getElementById('oddOneOutTaskDiv') || document.body;
+  ensureOOOPreloadUI(container, trialIndices.length);
+
+  let done = 0;
+
+  // Track already-decoded images by src/filename to avoid duplicate work
+  const seenImages = new Set();
+
+  async function loadOne(tripletIdx) {
+    try {
+      const trial = await window.getOOOTrial(tripletIdx);
+      if (trial) {
+        const arr = [trial.a, trial.b, trial.c];
+        for (const m of arr) {
+          if (!m || !m.image) continue;
+          const key = m.filename || m.image.src;
+          if (!seenImages.has(key)) {
+            seenImages.add(key);
+            await waitForImageReady(m.image);
+          }
+        }
+      }
+    } catch (err) {
+      console.warn('[OOO preload] Failed trial', tripletIdx, err);
+      // Continue; don't hard-fail preload if one trial errors
+    } finally {
+      done += 1;
+      updateOOOPreloadUI(done, trialIndices.length);
+    }
+  }
+
+  // Concurrency-limited worker pool
+  let next = 0;
+  const workers = Array.from(
+    { length: Math.min(OOO_PRELOAD_CONCURRENCY, trialIndices.length) },
+    async () => {
+      while (next < trialIndices.length) {
+        const idx = trialIndices[next++];
+        await loadOne(idx);
+      }
+    }
+  );
+
+  await Promise.all(workers);
+
+  // brief visual completion (optional)
+  updateOOOPreloadUI(trialIndices.length, trialIndices.length);
+  removeOOOPreloadUI();
 }
 
 async function initTaskOOO() {
@@ -44,13 +208,13 @@ async function initTaskOOO() {
   const N = Math.min(OOO_TRIALS_TO_RUN, total);
   const allIdx = Array.from({ length: total }, (_, i) => i);
 
-  // simple Fisher–Yates shuffle
+  // Fisher–Yates shuffle
   for (let i = allIdx.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
     [allIdx[i], allIdx[j]] = [allIdx[j], allIdx[i]];
   }
 
-  // We only use N of the available trials (here N should be 24 == total)
+  // Only use N trials
   trialsOOO = allIdx.slice(0, N);
 
   // Reuse or create task container
@@ -67,12 +231,18 @@ async function initTaskOOO() {
     containerOOO.innerHTML = ''; // Clear old content
   }
 
-  // Add question text
+  // -------- PRELOAD BEFORE START --------
+  // Preload exactly the trials that will be used this run.
+  // (If you want *all* available OOO trials regardless of debug N, use allIdx instead of trialsOOO.)
+  await preloadOOOTrials(trialsOOO);
+
+  // Build task UI AFTER preload is done
+  containerOOO.innerHTML = '';
+
   const questionOOO = document.createElement('h2');
   questionOOO.textContent = 'Which one is the odd one out?';
   containerOOO.appendChild(questionOOO);
 
-  // Add image container
   const imgContainerOOO = document.createElement('div');
   imgContainerOOO.style.display = 'flex';
   imgContainerOOO.style.justifyContent = 'center';
@@ -80,7 +250,6 @@ async function initTaskOOO() {
   imgContainerOOO.id = 'imageContainerOOO';
   containerOOO.appendChild(imgContainerOOO);
 
-  // Add key instruction
   const instructionOOO = document.createElement('p');
   instructionOOO.textContent = 'Press 1 for left, 2 for middle, 3 for right.';
   containerOOO.appendChild(instructionOOO);
