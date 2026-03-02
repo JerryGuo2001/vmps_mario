@@ -30,19 +30,19 @@ function startWithID() {
   if (w) w.style.display = 'none';
 
   // ✅ Start PRE-SURVEY first, then OOO instructions + OOO
-  if (typeof startPreSurvey === "function") {
-    startPreSurvey(() => {
-      // Show OOO instructions first (if configured); otherwise start OOO immediately.
-      if (typeof showPhaseInstructions === 'function' && INSTR_FOLDERS && INSTR_FOLDERS.ooo) {
-        showPhaseInstructions('ooo', () => {
-          initTaskOOO(); // start OOO after instructions
-        });
-      } else {
-        initTaskOOO(); // fallback
-      }
-    });
-  } else {
-    console.warn("[startWithID] startPreSurvey() not found; skipping pre-survey.");
+  // if (typeof startPreSurvey === "function") {
+    // startPreSurvey(() => {
+    //   // Show OOO instructions first (if configured); otherwise start OOO immediately.
+    //   if (typeof showPhaseInstructions === 'function' && INSTR_FOLDERS && INSTR_FOLDERS.ooo) {
+    //     showPhaseInstructions('ooo', () => {
+    //       initTaskOOO(); // start OOO after instructions
+    //     });
+    //   } else {
+        // initTaskOOO(); // fallback
+      // }
+  //   });
+  // } else {
+    // console.warn("[startWithID] startPreSurvey() not found; skipping pre-survey.");
 
     // fallback to your original behavior
     if (typeof showPhaseInstructions === 'function' && INSTR_FOLDERS && INSTR_FOLDERS.ooo) {
@@ -50,7 +50,7 @@ function startWithID() {
     } else {
       initTaskOOO();
     }
-  }
+  // }
 }
 
 
