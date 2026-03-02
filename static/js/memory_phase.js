@@ -42,6 +42,23 @@ const MEMORY_LURE_DISTANCE_CUTOFF_NORM = 0.20;
 // 2 easy (bin1) + 2 hard (bin2)
 const MEMORY_LURE_TARGET_PER_COLOR = { 1: 2, 2: 2 };
 
+// Exponential similarity params for lure-bin assignment
+// s(x,y) = exp(-beta * d^tau) + gamma
+const MEMORY_LURE_SIM_BETA = 2;
+const MEMORY_LURE_SIM_TAU = 1;
+const MEMORY_LURE_SIM_GAMMA = 0;
+
+// Keep your existing distance cutoff for compatibility,
+// and convert it to an equivalent similarity cutoff.
+// Old rule: hard if d <= 0.20
+// New equivalent rule: hard if sim >= exp(-2 * 0.20^1) = ~0.6703
+const MEMORY_LURE_SIMILARITY_CUTOFF =
+  Math.exp(
+    -MEMORY_LURE_SIM_BETA *
+    Math.pow(MEMORY_LURE_DISTANCE_CUTOFF_NORM, MEMORY_LURE_SIM_TAU)
+  ) + MEMORY_LURE_SIM_GAMMA;
+
+
 // ---------------- TOO-FAST PAUSE (MEMORY) ----------------
 const MEMORY_TOO_FAST_MS = 300;
 const MEMORY_TOO_FAST_SECONDS = 5;
@@ -164,9 +181,21 @@ function _lureDistanceNorm2D(a, b) {
   return Math.sqrt(dx * dx + dy * dy);
 }
 
+function _expSimilarityFromNormDistance(dNorm, beta = MEMORY_LURE_SIM_BETA, tau = MEMORY_LURE_SIM_TAU, gamma = MEMORY_LURE_SIM_GAMMA) {
+  if (!Number.isFinite(dNorm)) return NaN;
+  if (!Number.isFinite(beta) || !Number.isFinite(tau) || !Number.isFinite(gamma)) return NaN;
+  return Math.exp(-beta * Math.pow(dNorm, tau)) + gamma;
+}
+
 function _lureBinFromDistanceNorm(dNorm) {
   if (!Number.isFinite(dNorm)) return null;
-  return (dNorm > MEMORY_LURE_DISTANCE_CUTOFF_NORM) ? 1 : 2; // easy=1, hard=2
+
+  // Convert normalized distance to exponential similarity
+  const sim = _expSimilarityFromNormDistance(dNorm);
+
+  // Higher similarity = harder lure (closer to seen anchor)
+  // hard=2, easy=1
+  return (sim >= MEMORY_LURE_SIMILARITY_CUTOFF) ? 2 : 1;
 }
 
 function _isNewForLure(m) {

@@ -152,10 +152,6 @@ async function drawObstacles() {
         if (backDoorType && doorImages[backDoorType]) {
             ctx.drawImage(doorImages[backDoorType], backX, doorY, doorWidth, doorHeight);
 
-            // Optional label
-            ctx.fillStyle = '#000';
-            ctx.font = '14px Arial';
-            ctx.fillText('Back', backX + 16, doorY - 8);
         }
 
         // Draw right door
