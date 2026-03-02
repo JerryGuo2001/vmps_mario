@@ -5,6 +5,7 @@ let env_deter ='sky'
 let leftDoorType = null;
 let rightDoorType = null;
 let doorsAssigned = false;
+let backDoorType = null;   // NEW: center door = previous room (if available)
 let currentRoom = 'sky';
 let roomRepetitionMap = {};  // e.g., { "lava": 0, "forest": 2 }
 let roomChoiceStartTime = null;
@@ -31,30 +32,103 @@ doorImages.ocean.src = 'TexturePack/oceanDoor.png';
 doorImages.desert.src = 'TexturePack/desertDoor.png';
 doorImages.cave.src = 'TexturePack/caveDoor.png';
 
+async function enterRoomFromDoor(chosenRoom, chosenSide) {
+    if (!chosenRoom) return;
+
+    // Set chosen room first
+    env_deter = chosenRoom;
+    currentRoom = env_deter;
+
+    // Count entry for the room we are entering (FIXED)
+    const rr = expNormalizeRoom(currentRoom);
+    roomEntryCount[rr] = (roomEntryCount[rr] || 0) + 1;
+
+    // Re-check clear status now that entry count increased
+    checkAndClearRoom(rr);
+
+    resetRoomVisitState();
+
+    groundPlatforms = generateGroundPlatforms(worldWidth, 200, 400);
+    mushrooms = await generateMushroom(5);
+    handleTextInteraction_canvas4();
+
+    // consume key to avoid double-fire across frames
+    keys['e'] = false;
+
+    // Log room choice (record all offered doors)
+    const rt = roomChoiceStartTime ? (performance.now() - roomChoiceStartTime) : null;
+    const timeElapsed = participantData?.startTime ? (performance.now() - participantData.startTime) : null;
+
+    if (typeof participantData !== 'undefined' && participantData?.trials) {
+        participantData.trials.push({
+            id: participantData.id,
+            trial_type: 'room_choice',
+
+            // offered options
+            door_left: leftDoorType || null,
+            door_right: rightDoorType || null,
+            door_back: backDoorType || null,
+
+            // selection
+            chosen_side: chosenSide,   // 'left' | 'right' | 'back'
+            chosen_room: chosenRoom,
+            rt: rt,
+            time_elapsed: timeElapsed
+        });
+    }
+
+    roomChoiceStartTime = null;
+
+    // Track room repetition
+    if (!roomRepetitionMap[currentRoom]) {
+        roomRepetitionMap[currentRoom] = 1;
+    } else {
+        roomRepetitionMap[currentRoom] += 1;
+    }
+
+    // Enter room (Canvas 4)
+    character.x = 10;
+    character.y = canvas.height * 0.8 - character.height;
+    currentCanvas = 4;
+}
+
 async function drawObstacles() {
     if (currentCanvas === 1) {
         if (!doorsAssigned) {
             ensureExplorationIndex();
 
             if (!Array.isArray(availableDoorTypes) || availableDoorTypes.length === 0) {
-            // all rooms cleared
-            completeExplore();
-            return;
+                // all rooms cleared
+                completeExplore();
+                return;
             }
 
             const last = expNormalizeRoom(currentRoom); // room just played
-            let pool = Array.isArray(availableDoorTypes) ? availableDoorTypes.slice() : doorTypes.slice();
 
-            // exclude last room if possible
-            const filtered = pool.filter(r => expNormalizeRoom(r) !== last);
-            if (filtered.length >= 2) pool = filtered;            // enough to exclude safely
-            else if (filtered.length === 1) pool = filtered;      // only one choice left
+            // BACK door = previous non-sky room, only if still available
+            const avail = Array.isArray(availableDoorTypes) ? availableDoorTypes.slice() : doorTypes.slice();
+            const canBack =
+                last &&
+                last !== 'sky' &&
+                avail.some(r => expNormalizeRoom(r) === last);
 
-            const shuffled = pool.sort(() => Math.random() - 0.5);
+            backDoorType = canBack ? last : null;
 
-            leftDoorType = shuffled[0];
-            rightDoorType = shuffled.find(x => x !== leftDoorType) || shuffled[0]; // ensure distinct if possible
+            // LEFT/RIGHT pool excludes the back door room (so it’s a true third option)
+            let sidePool = avail.filter(r => expNormalizeRoom(r) !== expNormalizeRoom(backDoorType));
 
+            // Shuffle
+            sidePool = sidePool.sort(() => Math.random() - 0.5);
+
+            // Pick up to 2 unique side doors
+            leftDoorType = sidePool[0] || null;
+            rightDoorType = sidePool.find(x => x !== leftDoorType) || sidePool[1] || null;
+
+            // Optional fallback if only one side room exists and no back door:
+            // keep two visible doors by duplicating the only option
+            if (!rightDoorType && !backDoorType && leftDoorType) {
+                rightDoorType = leftDoorType;
+            }
 
             doorsAssigned = true;
             roomChoiceStartTime = performance.now(); // Start timer now
@@ -64,144 +138,77 @@ async function drawObstacles() {
         const doorHeight = 75;
         const doorY = canvas.height * 0.8 - doorHeight + 5;
 
-        const leftX = canvas.width * 0.25 - doorWidth / 2;
-        const rightX = canvas.width * 0.75 - doorWidth / 2;
+        // 3-door layout: left / center(back) / right
+        const leftX   = canvas.width * 0.20 - doorWidth / 2;
+        const backX   = canvas.width * 0.50 - doorWidth / 2;  // NEW center door
+        const rightX  = canvas.width * 0.80 - doorWidth / 2;
 
-        // Draw doors using selected images
-        ctx.drawImage(doorImages[leftDoorType], leftX, doorY, doorWidth, doorHeight);
-        ctx.drawImage(doorImages[rightDoorType], rightX, doorY, doorWidth, doorHeight);
+        // Draw left door
+        if (leftDoorType && doorImages[leftDoorType]) {
+            ctx.drawImage(doorImages[leftDoorType], leftX, doorY, doorWidth, doorHeight);
+        }
 
-        // Interaction with left door
-        if (
-            character.x + character.width > leftX &&
-            character.x < leftX + doorWidth &&
-            character.y + character.height > doorY
-        ) {
+        // Draw back door (center) if available
+        if (backDoorType && doorImages[backDoorType]) {
+            ctx.drawImage(doorImages[backDoorType], backX, doorY, doorWidth, doorHeight);
+
+            // Optional label
+            ctx.fillStyle = '#000';
+            ctx.font = '14px Arial';
+            ctx.fillText('Back', backX + 16, doorY - 8);
+        }
+
+        // Draw right door
+        if (rightDoorType && doorImages[rightDoorType]) {
+            ctx.drawImage(doorImages[rightDoorType], rightX, doorY, doorWidth, doorHeight);
+        }
+
+        // Helper for overlap check
+        function touchingDoor(x, y, w, h) {
+            return (
+                character.x + character.width > x &&
+                character.x < x + w &&
+                character.y + character.height > y
+            );
+        }
+
+        // Priority: center(back) first if overlapping, then left, then right
+        // (prevents ambiguity if character stands near center)
+        if (backDoorType && touchingDoor(backX, doorY, doorWidth, doorHeight)) {
+            showPrompt = true;
+            ctx.fillStyle = '#000';
+            ctx.fillText('Press E to go back', backX - 28, doorY - 30);
+
+            if (keys['e']) {
+                await enterRoomFromDoor(backDoorType, 'back');
+            }
+
+        } else if (leftDoorType && touchingDoor(leftX, doorY, doorWidth, doorHeight)) {
             showPrompt = true;
             ctx.fillStyle = '#000';
             ctx.fillText('Press E to enter', leftX - 20, doorY - 30);
 
             if (keys['e']) {
-                // after setting currentRoom = env_deter;
-                const rr = expNormalizeRoom(currentRoom);
-                roomEntryCount[rr] = (roomEntryCount[rr] || 0) + 1;
-
-                // in case you already finished the room earlier, re-check now that entry count increased
-                checkAndClearRoom(rr);
-                updateExploreProgressUI();
-
-                env_deter = leftDoorType;
-                currentRoom = env_deter;
-
-                resetRoomVisitState();
-
-
-                groundPlatforms = generateGroundPlatforms(worldWidth, 200, 400);
-                mushrooms = await generateMushroom(5);
-                handleTextInteraction_canvas4()
-                // Log room choice
-                // consume key so you don’t double-log across frames
-                keys['e'] = false;
-
-                // Log room choice (record BOTH options + chosen)
-                const rt = performance.now() - roomChoiceStartTime;
-                const timeElapsed = performance.now() - participantData.startTime;
-
-                participantData.trials.push({
-                id: participantData.id,
-                trial_type: 'room_choice',
-
-                // what was offered
-                door_left: leftDoorType,
-                door_right: rightDoorType,
-
-                // what they did
-                chosen_side: 'left',
-                chosen_room: leftDoorType,
-                rt: rt,
-                time_elapsed: timeElapsed
-                });
-
-                roomChoiceStartTime = null;
-
-            
-                // Set up room entry
-                if (!roomRepetitionMap[currentRoom]) {
-                    roomRepetitionMap[currentRoom] = 1;
-                }
-                character.x = 10;
-                character.y = canvas.height * 0.8 - character.height;
-                currentCanvas = 4;
+                await enterRoomFromDoor(leftDoorType, 'left');
             }
-            
 
-        }
-
-        // Interaction with right door
-        else if (
-            character.x + character.width > rightX &&
-            character.x < rightX + doorWidth &&
-            character.y + character.height > doorY
-        ) {
+        } else if (rightDoorType && touchingDoor(rightX, doorY, doorWidth, doorHeight)) {
             showPrompt = true;
             ctx.fillStyle = '#000';
             ctx.fillText('Press E to enter', rightX - 20, doorY - 30);
 
             if (keys['e']) {
-                // after setting currentRoom = env_deter;
-                const rr = expNormalizeRoom(currentRoom);
-                roomEntryCount[rr] = (roomEntryCount[rr] || 0) + 1;
-
-                // in case you already finished the room earlier, re-check now that entry count increased
-                checkAndClearRoom(rr);
-                updateExploreProgressUI();
-
-                env_deter = rightDoorType;
-                currentRoom = env_deter;
-                resetRoomVisitState();
-
-                groundPlatforms = generateGroundPlatforms(worldWidth, 200, 400);
-                mushrooms = await generateMushroom(5);
-                handleTextInteraction_canvas4()
-
-                keys['e'] = false;
-
-                const rt = performance.now() - roomChoiceStartTime;
-                const timeElapsed = performance.now() - participantData.startTime;
-
-                participantData.trials.push({
-                id: participantData.id,
-                trial_type: 'room_choice',
-                door_left: leftDoorType,
-                door_right: rightDoorType,
-                chosen_side: 'right',
-                chosen_room: rightDoorType,
-                rt: rt,
-                time_elapsed: timeElapsed
-                });
-
-                roomChoiceStartTime = null;
-
-            
-                // Set up room entry
-                if (!roomRepetitionMap[currentRoom]) {
-                    roomRepetitionMap[currentRoom] = 1;
-                }
-                character.x = 10;
-                character.y = canvas.height * 0.8 - character.height;
-                currentCanvas = 4;
+                await enterRoomFromDoor(rightDoorType, 'right');
             }
-            
 
         } else {
             showPrompt = false;
         }
+
     } else {
         doorsAssigned = false; // reset for next time we enter canvas 1
     }
 }
-2
-
 
 
 
