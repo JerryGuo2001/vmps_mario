@@ -896,21 +896,42 @@ function buildWithinColorExtraQuestions_3PerColor(catalogRows, options = {}) {
 
     const usedRowIdsWithinColor = new Set();
 
-    let candidates = _filterPairsForMemoryExtra(info.pairsSortedAsc, {
+  // --- Candidate selection with fallback ---
+  // Stage 1: strict Option B (exactly one seen + one unseen)
+  function _applyZeroClassifierPreference(arr) {
+    if (info.separationMode !== 'zero_classifier') return arr;
+    const crossSideOnly = (arr || []).filter(p => p.crossSide);
+    // Prefer cross-side only if enough to support 3 bins
+    return (crossSideOnly.length >= 3) ? crossSideOnly : (arr || []);
+  }
+
+  let pairConstraintUsed = 'seen_unseen_xor';
+
+  let candidates = _filterPairsForMemoryExtra(info.pairsSortedAsc, {
+    seenRowIdSet,
+    requireSeenUnseenPair,
+    usedPairKeysGlobal,
+    usedRowIdsWithinColor: null
+  });
+
+  candidates = _applyZeroClassifierPreference(candidates);
+
+  // Stage 2 fallback: if strict gives nothing, relax seen/unseen constraint
+  if (candidates.length === 0) {
+    let relaxedCandidates = _filterPairsForMemoryExtra(info.pairsSortedAsc, {
       seenRowIdSet,
-      requireSeenUnseenPair,
+      requireSeenUnseenPair: false,  // fallback: any pair within color
       usedPairKeysGlobal,
       usedRowIdsWithinColor: null
     });
 
-    // Optional preference for mixed-sign colors:
-    // Prefer cross-side pairs first (straddling the separation line), but fallback if too few.
-    if (info.separationMode === 'zero_classifier') {
-      const crossSideOnly = candidates.filter(p => p.crossSide);
-      if (crossSideOnly.length >= 3) {
-        candidates = crossSideOnly;
-      }
+    relaxedCandidates = _applyZeroClassifierPreference(relaxedCandidates);
+
+    if (relaxedCandidates.length > 0) {
+      candidates = relaxedCandidates;
+      pairConstraintUsed = 'fallback_any_pair';
     }
+  }
 
     const picked = { close: null, middle: null, far: null };
 
@@ -968,11 +989,46 @@ function buildWithinColorExtraQuestions_3PerColor(catalogRows, options = {}) {
       }
     }
 
+    // Fallback 2: if still missing bins, relax seen/unseen constraint (any pair) and fill remaining
+    if (!picked.close || !picked.middle || !picked.far) {
+      let relaxedCandidates2 = _filterPairsForMemoryExtra(info.pairsSortedAsc, {
+        seenRowIdSet,
+        requireSeenUnseenPair: false,   // allow any within-color pair
+        usedPairKeysGlobal,
+        usedRowIdsWithinColor: null
+      });
+
+      relaxedCandidates2 = _applyZeroClassifierPreference(relaxedCandidates2);
+
+      if (relaxedCandidates2.length > 0) {
+        pairConstraintUsed = 'fallback_any_pair';
+
+        for (const [label, q] of [['close', 0.15], ['middle', 0.50], ['far', 0.85]]) {
+          if (picked[label]) continue;
+
+          const fb2 = _pickNearQuantile(relaxedCandidates2, q, {
+            usedPairKeysGlobal,
+            usedRowIdsWithinColor: null,
+            avoidRowReuseWithinColor: false
+          });
+
+          if (fb2) {
+            picked[label] = fb2;
+            usedPairKeysGlobal.add(fb2.pairKey);
+          }
+        }
+      }
+    }
+
     const built = [
       _makeMemoryExtraPairQuestion(picked.close, 'close'),
       _makeMemoryExtraPairQuestion(picked.middle, 'middle'),
       _makeMemoryExtraPairQuestion(picked.far, 'far')
     ].filter(Boolean);
+
+    for (const q of built) {
+      q.pairConstraintUsed = pairConstraintUsed; // 'seen_unseen_xor' or 'fallback_any_pair'
+    }
 
     questions.push(...built);
 
@@ -980,6 +1036,7 @@ function buildWithinColorExtraQuestions_3PerColor(catalogRows, options = {}) {
       color,
       ok: built.length === 3,
       builtCount: built.length,
+      pairConstraintUsed,
       separationMode: info.separationMode,
       separationLine: info.separationLine,
       valueRange: [info.minValue, info.maxValue],
