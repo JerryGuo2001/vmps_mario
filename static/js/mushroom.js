@@ -9,7 +9,7 @@
 
 /* ==================== CONFIG ==================== */
 
-const MAX_TRIALS = 40;
+const MAX_TRIALS = 48;   // prepare 48 unique OOO triplets from the same 72-mushroom base pool
 const IMG_LOAD_TIMEOUT_MS = 5000;
 
 const MUSHROOM_IMG_BASE = 'TexturePack/mushroom_pack';
@@ -266,6 +266,85 @@ function nearestRowFor(color, wantStem, wantCap, idx) {
 function rowId(r) { return `${r.color}|${r.stem}|${r.cap}|${basenameFromPath(r.filename)}`; }
 
 /* ==================== OOO: BETWEEN-COLOR TRIPLETS (72→24) ==================== */
+function shuffleInPlace(arr) {
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+  return arr;
+}
+
+// Order-invariant key for a triplet (so A-B-C == C-A-B)
+function oooTripletKey(tri) {
+  return [rowId(tri.a), rowId(tri.b), rowId(tri.c)].sort().join(' || ');
+}
+
+/**
+ * Build MORE than floor(n/3) OOO trials from the same base pool by running
+ * your existing builder multiple times on reshuffled copies of the same pool,
+ * while preventing exact triplet repeats across passes.
+ *
+ * - Preserves your existing "same logic" because each pass uses buildOOOTrialsFromPool()
+ * - Allows mushroom reuse across passes
+ * - Enforces unique exact triplets across the final set
+ */
+function buildOOOTrialsNoRepeatAcrossPasses(basePool, targetTrials = MAX_TRIALS) {
+  if (!Array.isArray(basePool) || basePool.length < 3) {
+    console.warn('[OOO] basePool too small for OOO.');
+    return [];
+  }
+
+  const perPass = Math.floor(basePool.length / 3); // 72 -> 24
+  if (perPass <= 0) return [];
+
+  const out = [];
+  const seenTriplets = new Set();
+
+  // Safety guard to avoid infinite loops in weird edge cases
+  const MAX_PASSES = 500;
+  let passCount = 0;
+
+  while (out.length < targetTrials && passCount < MAX_PASSES) {
+    passCount++;
+
+    // Fresh shuffled copy each pass
+    const poolCopy = basePool.slice();
+    shuffleInPlace(poolCopy);
+
+    // Reuse your original logic (between-color preference + leftovers)
+    const batch = buildOOOTrialsFromPool(poolCopy);
+
+    let addedThisPass = 0;
+    for (const tri of batch) {
+      const key = oooTripletKey(tri);
+      if (seenTriplets.has(key)) continue;
+
+      seenTriplets.add(key);
+      out.push(tri);
+      addedThisPass++;
+
+      if (out.length >= targetTrials) break;
+    }
+
+    // If somehow no new trials are being added repeatedly, stop
+    if (addedThisPass === 0 && passCount > 10) {
+      console.warn('[OOO] No new unique triplets found in recent pass; stopping early.');
+      break;
+    }
+  }
+
+  if (out.length < targetTrials) {
+    console.warn(
+      `[OOO] Could only build ${out.length} unique triplets (target=${targetTrials}) from base pool size ${basePool.length}.`
+    );
+  }
+
+  // Final shuffle so pass structure is not visible
+  shuffleInPlace(out);
+
+  return out;
+}
+
 
 function buildOOOTrialsFromPool(mushroomPool) {
   // Uses every mushroom at most once.
@@ -461,11 +540,14 @@ async function buildSetAForOOO() {
     basePool = basePool.slice(0, trimmedCount);
   }
 
-  // Build 3-mushroom trials with between-color preference
-  OOOTriplets = buildOOOTrialsFromPool(basePool);
+  // Reset lazy cache when rebuilding triplets
+  _OOOTrialsCache = new Map();
+
+  // Build up to MAX_TRIALS unique triplets from the SAME 72-mushroom base pool
+  OOOTriplets = buildOOOTrialsNoRepeatAcrossPasses(basePool, MAX_TRIALS);
 
   console.log(
-    `[OOO] Prepared ${OOOTriplets.length} OOO trials from ${basePool.length} mushrooms.`
+    `[OOO] Prepared ${OOOTriplets.length} unique OOO trials from ${basePool.length} mushrooms (target=${MAX_TRIALS}).`
   );
   return OOOTriplets.length;
 }

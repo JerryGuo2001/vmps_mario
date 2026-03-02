@@ -6,12 +6,12 @@ let trialStartTimeOOO = null;
 let _oooKeyListenerAttached = false;
 let percentagecompleted
 // We have 72 mushrooms, each used once → 24 trials.
-let OOO_debug= true
+let OOO_debug= false
 let OOO_TRIALS_TO_RUN
 if (OOO_debug==true){
   OOO_TRIALS_TO_RUN=2
 }else{
-  OOO_TRIALS_TO_RUN=24
+  OOO_TRIALS_TO_RUN = 48
 }
 
 async function initTaskOOO() {
