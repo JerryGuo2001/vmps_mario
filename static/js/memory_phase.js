@@ -1169,7 +1169,6 @@ async function preloadMemoryTrialImages(timeoutPerImageMs = 15000) {
   const failed = [];
 
   for (let i = 0; i < list.length; i++) {
-    setMemoryLoadingSub(`Preloading ${i + 1} / ${list.length}`);
     const ok = await _preloadOneImage(list[i], timeoutPerImageMs);
     if (ok) okCount++;
     else failed.push(list[i]);
