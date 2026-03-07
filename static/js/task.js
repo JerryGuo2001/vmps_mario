@@ -4,7 +4,8 @@ const INSTR_SLIDES = {
   practice_explore: [1,2,3,4],
   explore: [1, 2, 3],   
   memory:  [1, 2],
-  ooo:     [1]
+  ooo:     [1],
+  ooo_2: [1]
 };
 
 
@@ -64,6 +65,7 @@ const INSTR_FOLDERS = {
   explore: 'explore_phase',
   memory: 'memory_phase',
   ooo: 'ooo_phase', 
+  ooo_2 : 'ooo_2_phase'
   // You can add more, e.g. ooo: 'ooo_phase'
 };
 

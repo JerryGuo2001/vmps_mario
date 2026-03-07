@@ -9,7 +9,7 @@
 
 /* ==================== CONFIG ==================== */
 
-const MAX_TRIALS = 48;   // prepare 48 unique OOO triplets from the same 72-mushroom base pool
+const MAX_TRIALS = 50;   // prepare 48 unique OOO triplets from the same 72-mushroom base pool
 const IMG_LOAD_TIMEOUT_MS = 5000;
 
 const MUSHROOM_IMG_BASE = 'TexturePack/mushroom_pack';

@@ -10,7 +10,7 @@ let OOO_TRIALS_TO_RUN
 if (OOO_debug==true){
   OOO_TRIALS_TO_RUN=2
 }else{
-  OOO_TRIALS_TO_RUN = 48
+  OOO_TRIALS_TO_RUN = 50
 }
 
 // ========================== OOO PRELOAD ===========================

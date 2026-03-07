@@ -1806,6 +1806,5 @@ function completeMemory() {
 
   document.querySelectorAll('.phase').forEach(div => (div.style.display = 'none'));
 
-  if (typeof initTaskOOO === 'function') initTaskOOO();
-  else console.warn('[memory] initTaskOOO() not found; memory phase ended with no next phase.');
+  showPhaseInstructions('ooo_2', () => initTaskOOO());
 }
