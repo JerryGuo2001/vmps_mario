@@ -1,7 +1,8 @@
 // ========================== PostSurvey.js ==========================
 // Multi-page post-survey:
 //  - Pages 1–8: “Build the best mushroom” per color (stem + cap sliders + live nearest-image preview)
-//  - Page 9: your existing survey (enjoyment/difficulty/strategy + color rank + room rank)
+//  - Page 9: demographics + gaming questions
+//  - Page 10: your existing final survey (enjoyment/difficulty/strategy + color rank + room rank)
 // Writes into participantData.postSurvey and participantData.trials, then downloads CSVs.
 
 (function () {
@@ -38,6 +39,15 @@
     { name: "cave", imgSrc: "TexturePack/caveDoor.png" }
   ];
 
+  const GAME_FREQUENCY_OPTIONS = ["Never", "Rarely", "Sometimes", "Often", "Always"];
+  const GAMER_IDENTITY_OPTIONS = [
+    "Strongly disagree",
+    "Disagree",
+    "Neutral",
+    "Agree",
+    "Strongly agree"
+  ];
+
   // Style tokens
   const THEME = {
     pageBg: "#F3E9C6",     // light khaki
@@ -51,7 +61,6 @@
   };
 
   // -------------------- Builder page instructions (Pages 1–8) --------------------
-  // Your requested phrasing (templated by color).
   function getBuilderInstructionText(color) {
     const c = String(color || "").trim().toUpperCase();
     return `Design the MOST rewarding ${c} mushroom. Click on both sliders to select the value, then the mushroom will show up.`;
@@ -76,8 +85,8 @@
   const _prev = { htmlOverflow: null, bodyOverflow: null, bodyMinHeight: null, bodyBg: null };
 
   // -------------------- Multi-page state --------------------
-  const TOTAL_PAGES = 9; // 8 builder + 1 final survey
-  let _pageIndex = 0;    // 0..8
+  const TOTAL_PAGES = 10; // 8 builder + 1 demographics + 1 final survey
+  let _pageIndex = 0;     // 0..9
   let _pageStartT = null;
 
   let _catalogRows = null;
@@ -85,6 +94,9 @@
 
   // Builder data: color -> selection object
   const _builderData = Object.create(null);
+
+  // Demographics / gaming data
+  let _demographicsData = null;
 
   // -------------------- Entry --------------------
 
@@ -162,12 +174,12 @@
     divider.style.margin = "16px 0 18px 0";
     card.appendChild(divider);
 
-    // Main page root (we re-render into this)
+    // Main page root
     const pageRoot = document.createElement("div");
     pageRoot.id = "psPageRoot";
     card.appendChild(pageRoot);
 
-    // Ensure catalog is ready (fixes your “catalog unfound” issue)
+    // Ensure catalog is ready
     pageRoot.innerHTML = "";
     pageRoot.appendChild(makeLoadingBlock("Loading mushroom catalog…"));
 
@@ -189,11 +201,8 @@
 
     _catalogIndex = buildCatalogIndex(_catalogRows);
 
-    // Start at first builder page
     _pageIndex = 0;
     renderPage(card, overlay);
-
-    // Ensure overlay starts at the top
     overlay.scrollTop = 0;
   }
 
@@ -207,41 +216,30 @@
 
     const id = participantData?.id || "unknown";
 
-    // Prefer the new switchable save functions
     const hasNewTrialSaver = (typeof saveParticipantTrialsCSV === "function");
-    const hasNewGenericSaver = (typeof saveCSVString === "function"); // optional
+    const hasNewGenericSaver = (typeof saveCSVString === "function");
     const hasOldDownloader = (typeof downloadCSV === "function");
 
     try {
-      // -------------------------
       // 1) Save trial-level data
-      // -------------------------
       if (hasNewTrialSaver) {
-        // Uses SAVE_MODE switch internally (local vs vercel)
         await saveParticipantTrialsCSV(participantData.trials || [], `data_${id}.csv`);
       } else if (hasOldDownloader) {
-        // Backward-compatible fallback: local only
         downloadCSV(participantData.trials || [], `data_${id}.csv`);
       } else {
         throw new Error("No saver available for trials (saveParticipantTrialsCSV or downloadCSV missing).");
       }
 
-      // -------------------------
       // 2) Save post-survey data
-      // -------------------------
       if (participantData.postSurvey) {
         if (hasNewGenericSaver && typeof buildTrialsCSVString === "function") {
-          // Reuse your dynamic-header CSV builder by treating survey as a one-row "trial list"
-          // (This preserves the same flatten/dynamic header behavior you already use.)
           const csvString = buildTrialsCSVString([participantData.postSurvey]);
           if (csvString) {
             await saveCSVString(csvString, `survey_${id}.csv`);
           }
         } else if (hasOldDownloader) {
-          // Backward-compatible fallback: local only
           downloadCSV([participantData.postSurvey], `survey_${id}.csv`);
         } else {
-          // Not fatal; trials already saved
           console.warn("[PostSurvey] No saver available for postSurvey CSV; skipping survey save.");
         }
       }
@@ -250,7 +248,6 @@
       alert("Save failed: " + (err?.message || String(err)));
     }
   }
-
 
   // -------------------- Catalog readiness --------------------
 
@@ -291,7 +288,6 @@
   }
 
   function encodeSrc(path) {
-    // your generator uses img.src = r.filename, so we keep that behavior but encode URI safely
     return encodeURI(String(path || ""));
   }
 
@@ -314,7 +310,6 @@
       });
     }
 
-    // min/max per color
     const range = Object.create(null);
     for (const [c, arr] of Object.entries(byColor)) {
       let sMin = Infinity, sMax = -Infinity, cMin = Infinity, cMax = -Infinity;
@@ -355,29 +350,22 @@
       overlay.style.inset = "0";
       overlay.style.zIndex = "999999";
       overlay.style.background = THEME.pageBg;
-
-      // Overlay has its own scroll, independent of body/#main
       overlay.style.overflowY = "auto";
       overlay.style.overflowX = "hidden";
       overlay.style.webkitOverflowScrolling = "touch";
-
       document.body.appendChild(overlay);
     }
     return overlay;
   }
 
   function applyOverlayAndLockBackgroundScroll() {
-    // Store previous styles once
     if (_prev.htmlOverflow === null) _prev.htmlOverflow = document.documentElement.style.overflow;
     if (_prev.bodyOverflow === null) _prev.bodyOverflow = document.body.style.overflow;
     if (_prev.bodyMinHeight === null) _prev.bodyMinHeight = document.body.style.minHeight;
     if (_prev.bodyBg === null) _prev.bodyBg = document.body.style.background;
 
-    // Lock background scroll (overlay will scroll)
     document.documentElement.style.overflow = "hidden";
     document.body.style.overflow = "hidden";
-
-    // Visual: set body bg too (in case overlay has transparency later)
     document.body.style.background = THEME.pageBg;
     document.body.style.minHeight = "100vh";
   }
@@ -404,8 +392,9 @@
     _pageStartT = performance.now();
 
     const isBuilder = (_pageIndex >= 0 && _pageIndex <= 7);
+    const isDemographics = (_pageIndex === 8);
+    const isFinalSurvey = (_pageIndex === 9);
 
-    // Make the page prompt ("question") much more visible on builder pages
     if (sub) {
       sub.style.margin = "0 0 12px 0";
       sub.style.fontSize = isBuilder ? "18px" : "14px";
@@ -417,13 +406,19 @@
     if (isBuilder) {
       const color = BUILDER_COLORS[_pageIndex];
       sub.textContent = `Page ${_pageIndex + 1}/8: ${color.toUpperCase()} mushroom`;
-
-      // ✅ Instruction block (Pages 1–8)
       root.appendChild(makeInstructionBlock(getBuilderInstructionText(color)));
-
       root.appendChild(renderBuilderPage(color, card, overlay));
-    } else {
-      sub.textContent = "Final survey: please answer the following questions.";
+      return;
+    }
+
+    if (isDemographics) {
+      sub.textContent = "Page 9/10: demographics and gaming experience";
+      root.appendChild(renderDemographicsPage(card, overlay));
+      return;
+    }
+
+    if (isFinalSurvey) {
+      sub.textContent = "Page 10/10: final survey";
       root.appendChild(renderFinalSurveyPage(card, overlay));
     }
   }
@@ -448,12 +443,11 @@
       ));
       wrap.appendChild(section);
 
-      const nav = builderNavRow(color, card, overlay, /*canNext*/ false);
+      const nav = builderNavRow(color, card, overlay, false);
       wrap.appendChild(nav.row);
       return wrap;
     }
 
-    // Layout: preview + sliders
     const grid = document.createElement("div");
     grid.style.display = "grid";
     grid.style.gridTemplateColumns = "1fr 1fr";
@@ -464,7 +458,6 @@
     }
     section.appendChild(grid);
 
-    // Preview card
     const prevCard = document.createElement("div");
     prevCard.style.border = "1px solid #E7DEBF";
     prevCard.style.borderRadius = "14px";
@@ -494,7 +487,7 @@
     img.style.border = "1px solid #E7DEBF";
     img.style.background = "#FFFCF1";
     img.alt = `${color} preview`;
-    img.style.display = "none"; // IMPORTANT: hidden until both sliders interacted
+    img.style.display = "none";
     prevCard.appendChild(img);
 
     const meta = document.createElement("div");
@@ -504,7 +497,6 @@
     meta.textContent = "";
     prevCard.appendChild(meta);
 
-    // Controls card
     const ctrlCard = document.createElement("div");
     ctrlCard.style.border = "1px solid #E7DEBF";
     ctrlCard.style.borderRadius = "14px";
@@ -513,7 +505,6 @@
     ctrlCard.style.boxSizing = "border-box";
     grid.appendChild(ctrlCard);
 
-    // Restore prior selection if revisit (safe)
     const prior = _builderData[color] || null;
 
     const stemSlider = makeRangeControl({
@@ -535,7 +526,6 @@
     ctrlCard.appendChild(stemSlider.root);
     ctrlCard.appendChild(capSlider.root);
 
-    // Live state
     const live = {
       color,
       wantStem: null,
@@ -543,15 +533,12 @@
       chosen: null,
       sliderStemPct: prior ? Number(prior.slider_stem_pct) : 50,
       sliderCapPct: prior ? Number(prior.slider_cap_pct) : 50,
-
-      // Gatekeeping:
       touchedStem: false,
       touchedCap: false,
       ready: false
     };
 
-    // Navigation row: start disabled until BOTH sliders touched
-    const nav = builderNavRow(color, card, overlay, /*canNext*/ true, live);
+    const nav = builderNavRow(color, card, overlay, true, live);
 
     function pctToValue(pct, vMin, vMax) {
       if (!Number.isFinite(vMin) || !Number.isFinite(vMax)) return NaN;
@@ -565,7 +552,6 @@
       nav.setEnabled(live.ready);
 
       if (!live.ready) {
-        // Hide preview entirely
         previewPlaceholder.style.display = "block";
         img.style.display = "none";
         img.removeAttribute("src");
@@ -574,7 +560,6 @@
         return;
       }
 
-      // Show preview
       previewPlaceholder.style.display = "none";
       img.style.display = "block";
     }
@@ -586,7 +571,6 @@
       live.sliderStemPct = sPct;
       live.sliderCapPct = cPct;
 
-      // Still compute mapped values internally for nearest lookup
       const wantStem = pctToValue(sPct, rng.stemMin, rng.stemMax);
       const wantCap  = pctToValue(cPct, rng.capMin,  rng.capMax);
       live.wantStem = wantStem;
@@ -613,17 +597,14 @@
       refresh();
     }
 
-    // Mark “interaction” even if the value doesn't change
     ["pointerdown", "mousedown", "touchstart", "keydown"].forEach((evt) => {
       stemSlider.input.addEventListener(evt, () => markTouched("stem"), { passive: true });
       capSlider.input.addEventListener(evt, () => markTouched("cap"), { passive: true });
     });
 
-    // Normal live updates
     stemSlider.input.addEventListener("input", refresh);
     capSlider.input.addEventListener("input", refresh);
 
-    // Initial state: locked, no preview
     updateGatingAndUI();
     meta.textContent = "";
 
@@ -641,7 +622,7 @@
 
     const nextBtn = document.createElement("button");
     nextBtn.type = "button";
-    nextBtn.textContent = (_pageIndex === 7) ? "Next: Survey" : "Next";
+    nextBtn.textContent = (_pageIndex === 7) ? "Next: Demographics" : "Next";
     nextBtn.style.border = "none";
     nextBtn.style.borderRadius = "12px";
     nextBtn.style.padding = "12px 18px";
@@ -658,13 +639,12 @@
       nextBtn.style.opacity = on ? "1" : "0.85";
     }
 
-    // Initial state: if builder page, default locked until liveState.ready
     const initialEnabled = (liveState ? !!liveState.ready : true);
     applyEnabled(initialEnabled);
 
     nextBtn.addEventListener("click", () => {
       if (nextBtn.disabled) return;
-      if (liveState && !liveState.ready) return; // extra guard
+      if (liveState && !liveState.ready) return;
 
       const rt = performance.now() - (_pageStartT || performance.now());
 
@@ -743,7 +723,146 @@
     return out;
   }
 
-  // -------------------- Final survey page (your existing page) --------------------
+  // -------------------- Demographics page --------------------
+
+  function renderDemographicsPage(card, overlay) {
+    const container = document.createElement("div");
+
+    const intro = makeInstructionBlock(
+      "Please answer the following questions about yourself and your video game experience."
+    );
+    container.appendChild(intro);
+
+    const form = document.createElement("form");
+    form.id = "postSurveyDemographicsForm";
+    form.autocomplete = "off";
+    container.appendChild(form);
+
+    form.appendChild(
+      makeTextInputQuestion({
+        name: "gender",
+        label: "1) Gender",
+        placeholder: "Type your answer here",
+        required: true,
+        initial: _demographicsData?.gender || ""
+      })
+    );
+
+    form.appendChild(
+      makeNumberInputQuestion({
+        name: "age",
+        label: "2) Age",
+        placeholder: "Enter your age",
+        required: true,
+        min: 0,
+        max: 120,
+        step: 1,
+        initial: _demographicsData?.age || ""
+      })
+    );
+
+    form.appendChild(
+      makeSingleChoiceQuestion({
+        name: "game_frequency",
+        label: "3) How frequently do you play video games (e.g. on your phone, PC, console, or at an arcade)?",
+        options: GAME_FREQUENCY_OPTIONS,
+        required: true,
+        initial: _demographicsData?.game_frequency || ""
+      })
+    );
+
+    form.appendChild(
+      makeNumberInputQuestion({
+        name: "weekly_game_hours_past_month",
+        label: "4) How many hours of video games do you play weekly on average over the past month (e.g. phone, PC, console, arcade)?",
+        placeholder: "Enter average hours per week",
+        required: true,
+        min: 0,
+        max: 168,
+        step: 0.5,
+        initial: _demographicsData?.weekly_game_hours_past_month || ""
+      })
+    );
+
+    form.appendChild(
+      makeSingleChoiceQuestion({
+        name: "gamer_identity",
+        label: "5) I am a gamer.",
+        options: GAMER_IDENTITY_OPTIONS,
+        required: true,
+        initial: _demographicsData?.gamer_identity || ""
+      })
+    );
+
+    const btnRow = document.createElement("div");
+    btnRow.style.marginTop = "22px";
+    btnRow.style.display = "flex";
+    btnRow.style.justifyContent = "flex-end";
+
+    const nextBtn = document.createElement("button");
+    nextBtn.type = "submit";
+    nextBtn.textContent = "Next: Final Survey";
+    nextBtn.style.border = "none";
+    nextBtn.style.borderRadius = "12px";
+    nextBtn.style.padding = "12px 18px";
+    nextBtn.style.fontSize = "16px";
+    nextBtn.style.fontWeight = "600";
+    nextBtn.style.cursor = "pointer";
+    nextBtn.style.background = "#1F6FEB";
+    nextBtn.style.color = "#FFFFFF";
+    nextBtn.style.boxShadow = "0 6px 16px rgba(31, 111, 235, 0.25)";
+
+    nextBtn.addEventListener("mouseenter", () => {
+      nextBtn.style.transform = "translateY(-1px)";
+      nextBtn.style.boxShadow = "0 8px 18px rgba(31, 111, 235, 0.28)";
+    });
+    nextBtn.addEventListener("mouseleave", () => {
+      nextBtn.style.transform = "translateY(0px)";
+      nextBtn.style.boxShadow = "0 6px 16px rgba(31, 111, 235, 0.25)";
+    });
+    nextBtn.addEventListener("focus", () => {
+      nextBtn.style.outline = "none";
+      nextBtn.style.boxShadow = THEME.focusShadow;
+    });
+    nextBtn.addEventListener("blur", () => {
+      nextBtn.style.boxShadow = "0 6px 16px rgba(31, 111, 235, 0.25)";
+    });
+
+    btnRow.appendChild(nextBtn);
+    form.appendChild(btnRow);
+
+    form.addEventListener("submit", (e) => {
+      e.preventDefault();
+
+      const result = readDemographicsForm(form);
+      if (!result.ok) {
+        alert(result.msg || "Please complete the required fields.");
+        return;
+      }
+
+      _demographicsData = result.data;
+
+      const rt = performance.now() - (_pageStartT || performance.now());
+      const id = participantData?.id || "unknown";
+      const timeElapsed = performance.now() - (participantData?.startTime || performance.now());
+
+      (participantData.trials ||= []).push({
+        id,
+        trial_index: (participantData.trials.length + 1),
+        trial_type: "post_survey_demographics",
+        ...result.data,
+        rt: rt,
+        time_elapsed: timeElapsed
+      });
+
+      _pageIndex = Math.min(_pageIndex + 1, TOTAL_PAGES - 1);
+      renderPage(card, overlay);
+    });
+
+    return container;
+  }
+
+  // -------------------- Final survey page --------------------
 
   function renderFinalSurveyPage(card, overlay) {
     const container = document.createElement("div");
@@ -753,7 +872,6 @@
     form.autocomplete = "off";
     container.appendChild(form);
 
-    // Q1: enjoyment (1–7)
     form.appendChild(
       makeLikertQuestion({
         name: "enjoyment",
@@ -766,7 +884,6 @@
       })
     );
 
-    // Q2: difficulty (1–7)
     form.appendChild(
       makeLikertQuestion({
         name: "difficulty",
@@ -779,7 +896,6 @@
       })
     );
 
-    // Q3: strategy (free text)
     form.appendChild(
       makeTextArea({
         name: "strategy",
@@ -789,7 +905,6 @@
       })
     );
 
-    // Q4: color ranking
     form.appendChild(
       makeColorRankingQuestion({
         name: "color_rank",
@@ -802,7 +917,6 @@
       })
     );
 
-    // Q5: room ranking
     form.appendChild(
       makeColorRankingQuestion({
         name: "room_rank",
@@ -815,7 +929,6 @@
       })
     );
 
-    // Submit button row
     const btnRow = document.createElement("div");
     btnRow.style.marginTop = "22px";
     btnRow.style.display = "flex";
@@ -853,7 +966,6 @@
     btnRow.appendChild(submitBtn);
     form.appendChild(btnRow);
 
-    // Hook submit
     form.addEventListener("submit", (e) => {
       e.preventDefault();
 
@@ -867,11 +979,11 @@
       const id = participantData?.id || "unknown";
       const timeElapsed = now - (participantData?.startTime || now);
 
-      // Merge builder data into the survey data (DO NOT forget to record it)
       const builderFlat = flattenBuilderData(_builderData);
 
       participantData.postSurvey = {
         id,
+        ...(_demographicsData || {}),
         ...result.data,
         ...builderFlat,
         time_elapsed: timeElapsed
@@ -881,6 +993,7 @@
         id,
         trial_index: (participantData.trials.length + 1),
         trial_type: "post_survey",
+        ...(_demographicsData || {}),
         ...result.data,
         ...builderFlat,
         rt: null,
@@ -979,7 +1092,7 @@
     value.style.fontSize = "12px";
     value.style.color = THEME.muted;
     value.textContent = "";
-    value.style.display = "none"; // hide "% selected" display
+    value.style.display = "none";
 
     right.appendChild(input);
     right.appendChild(value);
@@ -988,6 +1101,134 @@
     root.appendChild(right);
 
     return { root, input, value };
+  }
+
+  function makeTextInputQuestion({ name, label, placeholder, required, initial }) {
+    const section = makeSectionCard(label);
+
+    const input = document.createElement("input");
+    input.type = "text";
+    input.name = name;
+    input.placeholder = placeholder || "";
+    input.value = initial || "";
+
+    input.style.width = "100%";
+    input.style.maxWidth = "100%";
+    input.style.boxSizing = "border-box";
+    input.style.display = "block";
+    input.style.marginTop = "6px";
+    input.style.fontSize = "14px";
+    input.style.padding = "12px";
+    input.style.borderRadius = "12px";
+    input.style.border = "1px solid #E7DEBF";
+    input.style.background = "#FFFFFF";
+    input.style.color = THEME.text;
+
+    input.addEventListener("focus", () => {
+      input.style.outline = "none";
+      input.style.boxShadow = THEME.focusShadow;
+      input.style.borderColor = "#CBBE8C";
+    });
+    input.addEventListener("blur", () => {
+      input.style.boxShadow = "none";
+      input.style.borderColor = "#E7DEBF";
+    });
+
+    if (required) input.required = true;
+
+    section.appendChild(input);
+    return section;
+  }
+
+  function makeNumberInputQuestion({ name, label, placeholder, required, min, max, step, initial }) {
+    const section = makeSectionCard(label);
+
+    const input = document.createElement("input");
+    input.type = "number";
+    input.name = name;
+    input.placeholder = placeholder || "";
+    input.value = initial || "";
+    if (min !== undefined && min !== null) input.min = String(min);
+    if (max !== undefined && max !== null) input.max = String(max);
+    if (step !== undefined && step !== null) input.step = String(step);
+
+    input.style.width = "100%";
+    input.style.maxWidth = "100%";
+    input.style.boxSizing = "border-box";
+    input.style.display = "block";
+    input.style.marginTop = "6px";
+    input.style.fontSize = "14px";
+    input.style.padding = "12px";
+    input.style.borderRadius = "12px";
+    input.style.border = "1px solid #E7DEBF";
+    input.style.background = "#FFFFFF";
+    input.style.color = THEME.text;
+
+    input.addEventListener("focus", () => {
+      input.style.outline = "none";
+      input.style.boxShadow = THEME.focusShadow;
+      input.style.borderColor = "#CBBE8C";
+    });
+    input.addEventListener("blur", () => {
+      input.style.boxShadow = "none";
+      input.style.borderColor = "#E7DEBF";
+    });
+
+    if (required) input.required = true;
+
+    section.appendChild(input);
+    return section;
+  }
+
+  function makeSingleChoiceQuestion({ name, label, options, required, initial }) {
+    const section = makeSectionCard(label);
+
+    const wrap = document.createElement("div");
+    wrap.style.display = "flex";
+    wrap.style.gap = "10px";
+    wrap.style.flexWrap = "wrap";
+    wrap.style.marginTop = "6px";
+
+    (options || []).forEach((opt) => {
+      const pill = document.createElement("label");
+      pill.style.display = "inline-flex";
+      pill.style.alignItems = "center";
+      pill.style.gap = "8px";
+      pill.style.padding = "10px 12px";
+      pill.style.border = "1px solid #E7DEBF";
+      pill.style.borderRadius = "999px";
+      pill.style.background = "#FFFFFF";
+      pill.style.cursor = "pointer";
+      pill.style.userSelect = "none";
+
+      const input = document.createElement("input");
+      input.type = "radio";
+      input.name = name;
+      input.value = String(opt);
+      if (required) input.required = true;
+      if (String(initial || "") === String(opt)) input.checked = true;
+
+      input.addEventListener("focus", () => {
+        pill.style.outline = "none";
+        pill.style.boxShadow = THEME.focusShadow;
+      });
+      input.addEventListener("blur", () => {
+        pill.style.boxShadow = "none";
+      });
+
+      const t = document.createElement("span");
+      t.textContent = String(opt);
+      t.style.fontSize = "14px";
+      t.style.fontWeight = "600";
+      t.style.color = THEME.text;
+
+      pill.appendChild(input);
+      pill.appendChild(t);
+      wrap.appendChild(pill);
+    });
+
+    section.appendChild(wrap);
+    return section;
   }
 
   // -------------------- Existing question builders --------------------
@@ -1099,7 +1340,6 @@
     return section;
   }
 
-  // Generic drag-into-slots ranking question (unchanged behavior)
   function makeColorRankingQuestion({ name, label, items, expectedNames, itemRenderer, instructionText }) {
     const section = makeSectionCard(label);
 
@@ -1119,7 +1359,6 @@
     wrap.style.boxSizing = "border-box";
     section.appendChild(wrap);
 
-    // Bank
     const bankCard = document.createElement("div");
     bankCard.style.border = "1px solid #E7DEBF";
     bankCard.style.borderRadius = "14px";
@@ -1149,7 +1388,6 @@
     bankCard.appendChild(bank);
     wrap.appendChild(bankCard);
 
-    // Slots
     const slotsCard = document.createElement("div");
     slotsCard.style.border = "1px solid #E7DEBF";
     slotsCard.style.borderRadius = "14px";
@@ -1172,10 +1410,8 @@
     slotsCard.appendChild(slots);
     wrap.appendChild(slotsCard);
 
-    // Add items to bank
     items.forEach((it) => bank.appendChild(itemRenderer(it)));
 
-    // Create slots (1..N)
     const n = items.length;
     for (let i = 1; i <= n; i++) {
       const slot = document.createElement("div");
@@ -1218,7 +1454,6 @@
 
     attachDragToRank(bank, slots);
 
-    // Responsive stacking for narrow widths
     if (window.matchMedia && window.matchMedia("(max-width: 720px)").matches) {
       wrap.style.gridTemplateColumns = "1fr";
     }
@@ -1362,7 +1597,6 @@
     bankEl.addEventListener("dragover", (e) => e.preventDefault());
     slotsEl.addEventListener("dragover", (e) => e.preventDefault());
 
-    // Drop into a slot
     slotsEl.addEventListener("drop", (e) => {
       e.preventDefault();
       if (!draggingItem) return;
@@ -1375,7 +1609,6 @@
 
       const existing = drop.querySelector(".rank-item");
 
-      // swap if needed
       if (existing && existing !== draggingItem) {
         dragSource.appendChild(existing);
         if (dragSource.classList && dragSource.classList.contains("rank-drop")) {
@@ -1391,7 +1624,6 @@
       }
     });
 
-    // Drop back into bank
     bankEl.addEventListener("drop", (e) => {
       e.preventDefault();
       if (!draggingItem) return;
@@ -1403,6 +1635,40 @@
   }
 
   // -------------------- Read form values --------------------
+
+  function readDemographicsForm(form) {
+    const fd = new FormData(form);
+
+    const gender = String(fd.get("gender") || "").trim();
+    const ageRaw = String(fd.get("age") || "").trim();
+    const frequency = String(fd.get("game_frequency") || "").trim();
+    const weeklyHoursRaw = String(fd.get("weekly_game_hours_past_month") || "").trim();
+    const gamerIdentity = String(fd.get("gamer_identity") || "").trim();
+
+    if (!gender || !ageRaw || !frequency || !weeklyHoursRaw || !gamerIdentity) {
+      return { ok: false, msg: "Please complete all required fields.", data: null };
+    }
+
+    const age = Number(ageRaw);
+    if (!Number.isFinite(age) || age < 0 || age > 120) {
+      return { ok: false, msg: "Please enter a valid age.", data: null };
+    }
+
+    const weeklyHours = Number(weeklyHoursRaw);
+    if (!Number.isFinite(weeklyHours) || weeklyHours < 0 || weeklyHours > 168) {
+      return { ok: false, msg: "Please enter a valid weekly game-hours value.", data: null };
+    }
+
+    const data = {
+      gender: gender,
+      age: String(age),
+      game_frequency: frequency,
+      weekly_game_hours_past_month: String(weeklyHours),
+      gamer_identity: gamerIdentity
+    };
+
+    return { ok: true, data };
+  }
 
   function readSurveyForm(form) {
     const fd = new FormData(form);
