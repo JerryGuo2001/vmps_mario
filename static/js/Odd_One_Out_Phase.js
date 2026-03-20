@@ -480,7 +480,13 @@ function finishTaskOOO() {
   } else if (typeOOO === 1) {
     // Transition to post-survey instead of saving immediately
     if (typeof window.startPostSurvey === 'function') {
-      window.startPostSurvey();
+      startBISBASSurvey(() => {
+        startNeedForCognitionSurvey(() => {
+          startFiveDCRSurvey(() => {
+            window.startPostSurvey();
+          })
+        })
+      })
     } else {
       console.error('[OOO] startPostSurvey() not found. Make sure PostSurvey.js is loaded.');
       alert('Internal error: post-survey not ready. Please contact the researcher.');
