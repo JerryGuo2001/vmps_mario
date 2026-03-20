@@ -56,7 +56,7 @@
       {
         id: "ishihara_1",
         label: "Practice",
-        img: "TexturePack/colorblind/ishihara_1.svg",
+        img: "TexturePack/colorblind/ishihara_1.png",
         correct: "12",
         choices: ["12", "8", "3", "No number"],
         scored: false,
@@ -65,7 +65,7 @@
       {
         id: "ishihara_9",
         label: "Plate 1",
-        img: "TexturePack/colorblind/ishihara_9.svg",
+        img: "TexturePack/colorblind/ishihara_9.png",
         correct: "74",
         choices: ["74", "21", "14", "No number"],
         scored: true,
