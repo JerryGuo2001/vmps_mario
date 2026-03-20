@@ -13,6 +13,11 @@
 //   - Compute the average item score for each dimension separately.
 //   - Reverse-score Stress Tolerance items before averaging that dimension.
 //   - Stress Tolerance items are items 9-12 in this file.
+//
+// Notes:
+//   - Participants do NOT see subsection/dimension headers.
+//   - Original raw responses are still saved.
+//   - Reverse-scored values are also saved separately.
 // =====================================================================
 
 (function () {
@@ -319,14 +324,17 @@
     }
 
     section.appendChild(makeParagraph(
-      'Scoring rule: compute the average item score for each dimension separately. Stress Tolerance items are reverse-scored automatically before that dimension mean is saved.'
+      'Scoring is done automatically after the survey. Stress Tolerance items are reverse-scored for scoring only; original responses are still saved.'
     ));
     wrap.appendChild(section);
 
     const btnRow = makeNavRow();
     const nextBtn = makePrimaryButton('Start Survey');
     nextBtn.addEventListener('click', () => {
-      _pageTimes.push({ page_index: _pageIndex + 1, rt_ms: performance.now() - (_pageStartT || performance.now()) });
+      _pageTimes.push({
+        page_index: _pageIndex + 1,
+        rt_ms: performance.now() - (_pageStartT || performance.now())
+      });
       _pageIndex = 1;
       renderPage(card, overlay);
     });
@@ -343,23 +351,8 @@
     form.autocomplete = 'off';
     wrap.appendChild(form);
 
-    let currentDimension = null;
     for (let i = startIdx; i < endIdx; i++) {
       const item = FIVE_DCR_ITEMS[i];
-
-      if (item.dimension !== currentDimension) {
-        currentDimension = item.dimension;
-        const dimMeta = DIMENSIONS.find(d => d.key === currentDimension);
-        const label = dimMeta ? dimMeta.label : currentDimension;
-
-        const subhead = document.createElement('div');
-        subhead.textContent = label + (dimMeta && dimMeta.reverse ? ' (reverse-scored)' : '');
-        subhead.style.margin = '16px 0 8px 0';
-        subhead.style.fontSize = '16px';
-        subhead.style.fontWeight = '800';
-        subhead.style.color = THEME.text;
-        form.appendChild(subhead);
-      }
 
       form.appendChild(
         makeLikertQuestion({
@@ -382,7 +375,10 @@
       backBtn.type = 'button';
       backBtn.addEventListener('click', () => {
         savePageResponses(form, startIdx, endIdx);
-        _pageTimes.push({ page_index: _pageIndex + 1, rt_ms: performance.now() - (_pageStartT || performance.now()) });
+        _pageTimes.push({
+          page_index: _pageIndex + 1,
+          rt_ms: performance.now() - (_pageStartT || performance.now())
+        });
         _pageIndex -= 1;
         renderPage(card, overlay);
       });
@@ -400,7 +396,10 @@
       const ok = savePageResponses(form, startIdx, endIdx, true);
       if (!ok) return;
 
-      _pageTimes.push({ page_index: _pageIndex + 1, rt_ms: performance.now() - (_pageStartT || performance.now()) });
+      _pageTimes.push({
+        page_index: _pageIndex + 1,
+        rt_ms: performance.now() - (_pageStartT || performance.now())
+      });
 
       if (isLast) {
         finalizeSurvey();
@@ -472,7 +471,9 @@
     for (const dim of DIMENSIONS) {
       const dimItems = FIVE_DCR_ITEMS.filter(item => item.dimension === dim.key);
       const rawVals = dimItems.map(item => Number(_responses[item.n]));
-      const scoredVals = dimItems.map(item => scoreOne(Number(_responses[item.n]), item.reverse, scaleMin, scaleMax));
+      const scoredVals = dimItems.map(item =>
+        scoreOne(Number(_responses[item.n]), item.reverse, scaleMin, scaleMax)
+      );
 
       summary[`fivedcr_${dim.key}_raw_mean`] = mean(rawVals);
       summary[`fivedcr_${dim.key}_mean`] = mean(scoredVals);
