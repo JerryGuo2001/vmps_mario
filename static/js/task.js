@@ -32,7 +32,7 @@ function startWithID() {
 
   // turn below comment on for non-debug
   if (typeof startPreSurvey === "function") {
-    startNeedForCognitionSurvey(() => {
+    startFiveDCRSurvey(() => {
       // Show OOO instructions first (if configured); otherwise start OOO immediately.
       if (typeof showPhaseInstructions === 'function' && INSTR_FOLDERS && INSTR_FOLDERS.ooo) {
         showPhaseInstructions('ooo', () => {
