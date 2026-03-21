@@ -483,7 +483,9 @@ function finishTaskOOO() {
       startBISBASSurvey(() => {
         startNeedForCognitionSurvey(() => {
           startFiveDCRSurvey(() => {
-            window.startPostSurvey();
+            startColorBlindSurvey(() => {
+              window.startPostSurvey();
+            })
           })
         })
       })

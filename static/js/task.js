@@ -13,44 +13,250 @@ window.onload = () => {
   const w = document.getElementById('welcome');
   if (w) w.style.display = 'block';
 
-  // NEW: preload all instruction slides up-front
   preloadAllInstructions().catch(() => {/* ignore */});
 };
 
-function startWithID() {
-  const idInput = document.getElementById('participantIdInput').value.trim();
-  if (!idInput) {
-    alert("Please enter your participant ID.");
-    return;
+const IDLE_TIMEOUT_MS = 15 * 60 * 1000;
+const IDLE_ACTIVITY_EVENTS = [
+  'mousemove',
+  'mousedown',
+  'keydown',
+  'scroll',
+  'touchstart',
+  'touchmove',
+  'pointerdown'
+];
+
+let _idleTimeoutHandle = null;
+let _idleTimeoutArmed = false;
+let _idleSessionEnding = false;
+window.sessionForceEnded = false;
+
+function hideAllTaskScreens() {
+  const ids = [
+    'welcome',
+    'instr-inline',
+    'oddOneOutTaskDiv',
+    'oooProgressContainer',
+    'postSurveyOverlay',
+    'sessionEndedOverlay'
+  ];
+
+  ids.forEach((id) => {
+    const el = document.getElementById(id);
+    if (el) el.style.display = 'none';
+  });
+
+  const phases = document.querySelectorAll('.phase');
+  phases.forEach((phase) => {
+    phase.style.display = 'none';
+  });
+}
+
+function removeKnownTaskListeners() {
+  try { document.removeEventListener('keydown', handleKeyPressOOO); } catch (_) {}
+  try { window.removeEventListener('keydown', handleKeyDown); } catch (_) {}
+  try { window.removeEventListener('keyup', handleKeyUp); } catch (_) {}
+  try { window.removeEventListener('keydown', Memory_selectorKeyHandler); } catch (_) {}
+  try { window.removeEventListener('keydown', handleMemoryResponse); } catch (_) {}
+  try { window.removeEventListener('keydown', iden_handleKeyDown); } catch (_) {}
+
+  try { _oooKeyListenerAttached = false; } catch (_) {}
+  try { trialStartTimeOOO = null; } catch (_) {}
+  try { gameRunning = false; } catch (_) {}
+  try { freezeState = false; } catch (_) {}
+  try { activeMushroom = null; } catch (_) {}
+  try { mushroomDecisionStartTime = null; } catch (_) {}
+}
+
+function showSessionEndedPage(message) {
+  hideAllTaskScreens();
+  removeKnownTaskListeners();
+
+  let overlay = document.getElementById('sessionEndedOverlay');
+  if (!overlay) {
+    overlay = document.createElement('div');
+    overlay.id = 'sessionEndedOverlay';
+    overlay.style.position = 'fixed';
+    overlay.style.inset = '0';
+    overlay.style.zIndex = '100000';
+    overlay.style.display = 'flex';
+    overlay.style.alignItems = 'center';
+    overlay.style.justifyContent = 'center';
+    overlay.style.background = 'rgba(0,0,0,0.78)';
+    overlay.style.padding = '24px';
+
+    const card = document.createElement('div');
+    card.style.width = 'min(680px, 92vw)';
+    card.style.background = '#fff';
+    card.style.borderRadius = '16px';
+    card.style.boxShadow = '0 18px 48px rgba(0,0,0,0.28)';
+    card.style.padding = '28px 30px';
+    card.style.fontFamily = 'system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif';
+    card.style.color = '#1f2328';
+
+    const h2 = document.createElement('h2');
+    h2.textContent = 'Your session has ended';
+    h2.style.margin = '0 0 12px 0';
+    h2.style.fontSize = '28px';
+
+    const p = document.createElement('p');
+    p.id = 'sessionEndedMessage';
+    p.style.margin = '0';
+    p.style.fontSize = '16px';
+    p.style.lineHeight = '1.6';
+
+    card.appendChild(h2);
+    card.appendChild(p);
+    overlay.appendChild(card);
+    document.body.appendChild(overlay);
   }
-  participantData.id = idInput;
-  participantData.startTime = performance.now(); // ✅ set here
 
-  // ✅ Hide welcome immediately so only the next UI is visible
-  const w = document.getElementById('welcome');
-  if (w) w.style.display = 'none';
+  const p = document.getElementById('sessionEndedMessage');
+  if (p) {
+    p.textContent = message || 'You have been force quit of the experiment due to inactivity.';
+  }
 
-  // turn below comment on for non-debug
-  if (typeof startPreSurvey === "function") {
-    startColorBlindSurvey(() => {
-      // Show OOO instructions first (if configured); otherwise start OOO immediately.
-      if (typeof showPhaseInstructions === 'function' && INSTR_FOLDERS && INSTR_FOLDERS.ooo) {
-        showPhaseInstructions('ooo', () => {
-          initTaskOOO(); // start OOO after instructions
-        });
-      } else {
-        initTaskOOO(); // fallback
-      }
+  overlay.style.display = 'flex';
+}
+
+function resetIdleSessionTimeout() {
+  if (!_idleTimeoutArmed || window.sessionForceEnded || !participantData?.id) return;
+
+  clearTimeout(_idleTimeoutHandle);
+  _idleTimeoutHandle = setTimeout(() => {
+    forceEndSessionForInactivity();
+  }, IDLE_TIMEOUT_MS);
+}
+
+function handleIdleActivity() {
+  resetIdleSessionTimeout();
+}
+
+function armIdleSessionTimeout() {
+  if (_idleTimeoutArmed || window.sessionForceEnded) return;
+
+  _idleTimeoutArmed = true;
+  IDLE_ACTIVITY_EVENTS.forEach((evt) => {
+    window.addEventListener(evt, handleIdleActivity, true);
+  });
+  resetIdleSessionTimeout();
+}
+
+function disarmIdleSessionTimeout() {
+  _idleTimeoutArmed = false;
+  clearTimeout(_idleTimeoutHandle);
+  _idleTimeoutHandle = null;
+
+  IDLE_ACTIVITY_EVENTS.forEach((evt) => {
+    window.removeEventListener(evt, handleIdleActivity, true);
+  });
+}
+
+async function participantAlreadyCompleted(id) {
+  if (!id) return false;
+
+  try {
+    if (typeof participantHasCompletedSurvey === 'function') {
+      return await participantHasCompletedSurvey(id);
+    }
+    if (typeof checkAndMaybeResume === 'function') {
+      const status = await checkAndMaybeResume(id);
+      return status === 'completed';
+    }
+  } catch (err) {
+    console.warn('[task] Existing-participant check failed; allowing task to continue.', err);
+  }
+
+  return false;
+}
+
+async function forceEndSessionForInactivity() {
+  if (_idleSessionEnding || window.sessionForceEnded) return;
+  _idleSessionEnding = true;
+  window.sessionForceEnded = true;
+
+  const now = performance.now();
+
+  try {
+    (participantData.trials ||= []).push({
+      id: participantData.id,
+      trial_index: (participantData.trials?.length || 0) + 1,
+      trial_type: 'session_timeout',
+      reason: 'inactive_15min',
+      time_elapsed: participantData?.startTime ? (now - participantData.startTime) : null
     });
-  } else {
-    console.warn("[startWithID] startPreSurvey() not found; skipping pre-survey.");
+  } catch (_) {}
+
+  disarmIdleSessionTimeout();
+  hideAllTaskScreens();
+  removeKnownTaskListeners();
+
+  // 1) Save trial data immediately
+  try {
+    if (participantData?.id && typeof saveParticipantTrialsCSV === 'function') {
+      await saveParticipantTrialsCSV(
+        participantData.trials || [],
+        `data_${participantData.id}.csv`
+      );
+      console.log('[task] Trial data saved on inactivity timeout.');
+    }
+  } catch (err) {
+    console.error('[task] Failed to save trial data on inactivity timeout:', err);
   }
-    // turn below comment off for offical
-    // if (typeof showPhaseInstructions === 'function' && INSTR_FOLDERS && INSTR_FOLDERS.ooo) {
-    //   showPhaseInstructions('ooo', () => initTaskOOO());
-    // } else {
-    //   initTaskOOO();
-    // }
+
+  // 2) Save marker file so they cannot re-enter with same ID
+  try {
+    if (participantData?.id && typeof saveForceQuitMarkerCSV === 'function') {
+      await saveForceQuitMarkerCSV(participantData.id, 'inactive_15min');
+      console.log('[task] Force-quit marker saved.');
+    }
+  } catch (err) {
+    console.error('[task] Failed to save force-quit marker:', err);
+  }
+
+  showSessionEndedPage(
+    'You have been force quit of the experiment due to inactivity. Your session has been ended.'
+  );
+}
+
+async function startWithID() {
+  if (startWithID._busy) return;
+  startWithID._busy = true;
+
+  try {
+    const idInput = document.getElementById('participantIdInput').value.trim();
+    if (!idInput) {
+      alert("Please enter your participant ID.");
+      return;
+    }
+
+    const alreadyCompleted = await participantAlreadyCompleted(idInput);
+    if (alreadyCompleted) {
+      showSessionEndedPage(
+        'This participant ID already has a completed or closed session. You cannot restart the experiment.'
+      );
+      return;
+    }
+
+    participantData.id = idInput;
+    participantData.startTime = performance.now();
+    window.sessionForceEnded = false;
+    _idleSessionEnding = false;
+
+    const w = document.getElementById('welcome');
+    if (w) w.style.display = 'none';
+
+    armIdleSessionTimeout();
+
+
+    showPhaseInstructions('ooo', () => {
+      initTaskOOO();
+    });
+    
+  } finally {
+    startWithID._busy = false;
+  }
 }
 
 

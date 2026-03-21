@@ -2,34 +2,118 @@
 //   SAVE SWITCH (LOCAL vs VERCEL)
 // ===============================
 const SAVE_MODE = "vercel"; // "local" | "vercel"
-const VERCEL_BASE_URL = "https://mario-data.vercel.app"; // <-- change to your NEW vercel link
+const VERCEL_BASE_URL = "https://mario-data.vercel.app"; // <-- change if needed
 
-// Optional: file key prefixing (matches your old style if desired)
 function RUNSHEET_KEY(id, suffix = "") {
-  // Example outputs:
-  // participant_data_<id>.csv
-  // mushroomSets_<id>.csv
   const base = suffix ? `${suffix}_${id}.csv` : `participant_data_${id}.csv`;
   return base;
 }
 
-function RUNSHEET_GET_URL(key) {
-  return `${VERCEL_BASE_URL}/api/runsheet?key=${encodeURIComponent(key)}`;
+function RUNSHEET_GET_URL(key, existsOnly = false) {
+  const url = new URL(`${VERCEL_BASE_URL}/api/runsheet`);
+  url.searchParams.set("key", key);
+  if (existsOnly) url.searchParams.set("exists", "1");
+  return url.toString();
 }
+
 function RUNSHEET_UPLOAD_URL(key) {
   return `${VERCEL_BASE_URL}/api/upload-runsheet?key=${encodeURIComponent(key)}`;
 }
 
-// Disable CSV GET/resume for now (same as before)
-async function fetchExistingCSV(_id) { return null; }
-async function checkAndMaybeResume(_id) { return "none"; }
+function SURVEY_FILE_KEY(id) {
+  return `survey_${id}.csv`;
+}
+
+function TRIALS_FILE_KEY(id) {
+  return `data_${id}.csv`;
+}
+
+// ===============================
+//   EXISTENCE / RESUME HELPERS
+// ===============================
+async function fileExistsOnServer(key) {
+  if (SAVE_MODE !== "vercel" || !key) return false;
+
+  try {
+    const res = await fetch(`${RUNSHEET_GET_URL(key, true)}&_ts=${Date.now()}`, {
+      method: "GET",
+      cache: "no-store",
+    });
+
+    if (res.status === 200) return true;
+    if (res.status === 404) return false;
+
+    const txt = await res.text().catch(() => "");
+    console.warn(`[data_save] exists check unexpected status for "${key}":`, res.status, txt);
+    return false;
+  } catch (err) {
+    console.warn(`[data_save] exists check failed for "${key}":`, err);
+    return false;
+  }
+}
+
+async function participantHasCompletedSurvey(id) {
+  if (!id || SAVE_MODE !== "vercel") return false;
+
+  try {
+    if (await fileExistsOnServer(SURVEY_FILE_KEY(id))) return true;
+    return false;
+  } catch (err) {
+    console.warn("[data_save] Unable to verify existing survey file:", err);
+    return false;
+  }
+}
+
+async function checkAndMaybeResume(id) {
+  if (!id || SAVE_MODE !== "vercel") return "none";
+
+  try {
+    if (await participantHasCompletedSurvey(id)) return "completed";
+
+    if (await fileExistsOnServer(TRIALS_FILE_KEY(id))) return "started";
+    if (await fileExistsOnServer(RUNSHEET_KEY(id, "participant_data"))) return "started";
+
+    return "none";
+  } catch (err) {
+    console.warn("[data_save] Resume check failed:", err);
+    return "none";
+  }
+}
+
+// Save a tiny marker file so the same participant ID cannot restart.
+async function saveForceQuitMarkerCSV(id, reason = "inactive_15min") {
+  if (!id) return null;
+
+  const headers = [
+    "id",
+    "trial_type",
+    "end_reason",
+    "status",
+    "ended_at",
+    "block_reentry"
+  ];
+
+  const row = {
+    id,
+    trial_type: "session_closed",
+    end_reason: reason,
+    status: "force_quit",
+    ended_at: new Date().toISOString(),
+    block_reentry: 1
+  };
+
+  const csvString = [
+    headers.join(","),
+    headers.map((h) => JSON.stringify(row[h] ?? "")).join(",")
+  ].join("\r\n");
+
+  return await saveCSVString(csvString, SURVEY_FILE_KEY(id));
+}
 
 
 // ===============================
 //   CORE HELPERS
 // ===============================
-
-// Build & download a CSV string
 function downloadCSVString(csvString, filename) {
   const blob = new Blob([csvString], { type: "text/csv" });
   const url = URL.createObjectURL(blob);
@@ -40,7 +124,6 @@ function downloadCSVString(csvString, filename) {
   URL.revokeObjectURL(url);
 }
 
-// Upload a CSV string to Vercel (multipart/form-data, field name "file")
 async function uploadCSVStringToVercel(csvString, filename) {
   const blob = new Blob([csvString], { type: "text/csv" });
   const formData = new FormData();
@@ -56,18 +139,15 @@ async function uploadCSVStringToVercel(csvString, filename) {
     throw new Error(`Upload failed (${res.status}): ${text || res.statusText}`);
   }
 
-  // Your old API returns JSON; keep that assumption
   return await res.json().catch(() => ({}));
 }
 
-// Unified "save" that routes based on SAVE_MODE
 async function saveCSVString(csvString, filename) {
   if (SAVE_MODE === "local") {
     downloadCSVString(csvString, filename);
     return { mode: "local", filename };
   }
 
-  // SAVE_MODE === "vercel"
   const result = await uploadCSVStringToVercel(csvString, filename);
   console.log("Vercel upload response:", result);
   return { mode: "vercel", filename, result };
@@ -85,8 +165,7 @@ let participantData = {
 
 
 // ===============================
-//   TRIAL CSV (participant trials)
-//   - keeps your "dynamic headers" behavior
+//   TRIAL CSV
 // ===============================
 function buildTrialsCSVString(data) {
   if (!data || !data.length) return null;
@@ -115,7 +194,6 @@ function buildTrialsCSVString(data) {
 
   const flattenedData = data.map(flatten);
 
-  // Dynamic headers across all trials
   const headerSet = new Set();
   flattenedData.forEach((row) => Object.keys(row).forEach((k) => headerSet.add(k)));
   const headers = Array.from(headerSet);
@@ -130,8 +208,6 @@ function buildTrialsCSVString(data) {
   return csv;
 }
 
-// Replacement for your old downloadCSV(data,...)
-// Now it saves locally OR uploads to Vercel depending on SAVE_MODE.
 async function saveParticipantTrialsCSV(data, filename = null) {
   const csvString = buildTrialsCSVString(data);
   if (!csvString) return;
@@ -186,8 +262,6 @@ function buildMushroomSetCSVString(mushroomSets, participantId) {
   return csv;
 }
 
-// Replacement for your old downloadMushroomSetCSV(...)
-// Now it saves locally OR uploads to Vercel depending on SAVE_MODE.
 async function saveMushroomSetCSV(mushroomSets, participantId, filename = null) {
   const csvString = buildMushroomSetCSVString(mushroomSets, participantId);
   if (!csvString) return;
