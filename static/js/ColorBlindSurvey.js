@@ -9,10 +9,10 @@
 //   1) participantData.colorBlindSurvey -> flat summary object
 //   2) participantData.trials           -> one row per plate + one summary row
 //
-// Notes:
-//   - This is a brief screening task, not a diagnosis.
-//   - This version PRELOADS all plate images before starting.
-//   - It also tries both .png and .svg for plates where needed.
+// This version:
+//   - auto-detects GitHub Pages project base path (e.g. /vmps_mario)
+//   - preloads all images before survey starts
+//   - uses robust image path resolution for GitHub Pages or local hosting
 // =====================================================================
 
 (function () {
@@ -40,7 +40,7 @@
     instructionText:
       "Respond based on your first impression. Please do not zoom or use external assistance.",
     nextAfterPracticeText: "Practice complete. The scored screening items begin next.",
-    imageBasePath: "",
+    imageBasePath: "", // leave empty to auto-detect
     overlayId: "colorBlindSurveyOverlay",
     autoFocusChoices: false,
     allowEscapeToClose: false,
@@ -49,15 +49,11 @@
     showPracticeLabel: true,
     plateHeight: 340,
 
-    // Use absolute paths and allow fallback extensions.
     plates: [
       {
         id: "ishihara_1",
         label: "Practice",
-        imgCandidates: [
-          "TexturePack/colorblind/ishihara_1.png",
-          "TexturePack/colorblind/ishihara_1.svg"
-        ],
+        img: "TexturePack/colorblind/ishihara_1.png",
         correct: "12",
         choices: ["12", "8", "3", "No number"],
         scored: false,
@@ -66,10 +62,7 @@
       {
         id: "ishihara_9",
         label: "Plate 1",
-        imgCandidates: [
-          "TexturePack/colorblind/ishihara_9.png",
-          "TexturePack/colorblind/ishihara_9.svg"
-        ],
+        img: "TexturePack/colorblind/ishihara_9.png",
         correct: "74",
         choices: ["74", "21", "14", "No number"],
         scored: true,
@@ -78,10 +71,7 @@
       {
         id: "ishihara_11",
         label: "Plate 2",
-        imgCandidates: [
-          "TexturePack/colorblind/ishihara_11.png",
-          "TexturePack/colorblind/ishihara_11.svg"
-        ],
+        img: "TexturePack/colorblind/ishihara_11.png",
         correct: "6",
         choices: ["6", "8", "5", "No number"],
         scored: true,
@@ -90,10 +80,7 @@
       {
         id: "ishihara_23",
         label: "Plate 3",
-        imgCandidates: [
-          "TexturePack/colorblind/ishihara_23.png",
-          "TexturePack/colorblind/ishihara_23.svg"
-        ],
+        img: "TexturePack/colorblind/ishihara_23.png",
         correct: "42",
         choices: ["42", "24", "12", "No number"],
         scored: true,
@@ -246,7 +233,7 @@
     const done = _onComplete;
     _onComplete = null;
     if (typeof done === "function") {
-      done(participantData?.colorBlindSurvey || null);
+      done(getParticipantData().colorBlindSurvey || null);
     }
   }
 
@@ -382,7 +369,7 @@
       figureWrap.innerHTML = "";
       figureWrap.appendChild(makeErrorBlock(
         "Could not load image.",
-        `Resolved file path: ${item.img}\nOriginal candidates: ${(item.imgCandidates || []).join(", ")}`
+        `Resolved file path: ${item.img}\nWindow location: ${window.location.href}`
       ));
     });
 
@@ -434,10 +421,11 @@
   }
 
   function handleChoice(item, rawChoice) {
+    const pd = getParticipantData();
     const now = performance.now();
     const rt = now - (_pageStartT || now);
-    const id = participantData?.id || "unknown";
-    const timeElapsed = now - (participantData?.startTime || now);
+    const id = pd.id || "unknown";
+    const timeElapsed = now - (pd.startTime || now);
 
     const response = normalizeChoiceValue(rawChoice);
     const correct = normalizeChoiceValue(item.correct);
@@ -445,7 +433,7 @@
 
     const row = {
       id,
-      trial_index: ((participantData.trials ||= []).length + 1),
+      trial_index: ((pd.trials ||= []).length + 1),
       trial_type: "color_blind_survey_plate",
       plate_index: _index + 1,
       plate_id: item.id || `plate_${_index + 1}`,
@@ -461,7 +449,7 @@
       time_elapsed: timeElapsed
     };
 
-    participantData.trials.push(row);
+    pd.trials.push(row);
     _responses.push(row);
 
     _index += 1;
@@ -473,9 +461,10 @@
   }
 
   function finalizeSurvey() {
+    const pd = getParticipantData();
     const now = performance.now();
-    const id = participantData?.id || "unknown";
-    const timeElapsed = now - (participantData?.startTime || now);
+    const id = pd.id || "unknown";
+    const timeElapsed = now - (pd.startTime || now);
 
     const scoredRows = _responses.filter((r) => Number(r.scored) === 1);
     const practiceRows = _responses.filter((r) => Number(r.scored) !== 1);
@@ -483,7 +472,7 @@
     const totalScored = scoredRows.length;
     const accuracy = totalScored > 0 ? (totalCorrect / totalScored) : null;
 
-    participantData.colorBlindSurvey = {
+    pd.colorBlindSurvey = {
       id,
       survey_name: "color_blind_screening",
       total_items: _responses.length,
@@ -498,9 +487,9 @@
     };
 
     if (_options.saveSummaryTrial) {
-      (participantData.trials ||= []).push({
+      (pd.trials ||= []).push({
         id,
-        trial_index: (participantData.trials.length + 1),
+        trial_index: (pd.trials.length + 1),
         trial_type: "color_blind_survey_summary",
         survey_name: "color_blind_screening",
         total_items: _responses.length,
@@ -642,40 +631,19 @@
 
     for (const plate of plates) {
       try {
-        const resolved = await loadFirstAvailableImage(plate.imgCandidates || []);
-        plate.img = resolved;
+        await preloadImage(plate.img);
       } catch (err) {
         failures.push({
           id: plate.id,
-          candidates: (plate.imgCandidates || []).slice()
+          path: plate.img
         });
       }
     }
 
     if (failures.length) {
-      const lines = failures.map(f => {
-        return `${f.id}: tried ${f.candidates.join(" , ")}`;
-      });
+      const lines = failures.map(f => `${f.id}: tried ${f.path}`);
       throw new Error(lines.join("\n"));
     }
-
-    return plates;
-  }
-
-  async function loadFirstAvailableImage(candidates) {
-    const list = Array.isArray(candidates) ? candidates.filter(Boolean) : [];
-    let lastErr = null;
-
-    for (const src of list) {
-      try {
-        await preloadImage(src);
-        return src;
-      } catch (err) {
-        lastErr = err;
-      }
-    }
-
-    throw lastErr || new Error("No valid image candidate found.");
   }
 
   function preloadImage(src) {
@@ -695,12 +663,11 @@
   }
 
   function normalizePlates(plates, options) {
-    const basePath = String(options?.imageBasePath || "").trim();
+    const detectedBase = resolveBasePath(options?.imageBasePath);
 
     return (Array.isArray(plates) ? plates : [])
       .map((p, idx) => {
         const out = { ...(p || {}) };
-
         out.id = String(out.id || `plate_${idx + 1}`);
         out.label = String(out.label || `Plate ${idx + 1}`);
         out.scored = !!out.scored;
@@ -710,23 +677,45 @@
           ? out.choices.slice()
           : [String(out.correct || ""), "No number"];
 
-        let candidates = [];
-
-        if (Array.isArray(out.imgCandidates) && out.imgCandidates.length) {
-          candidates = out.imgCandidates.slice();
-        } else if (out.img) {
-          candidates = [out.img];
-        }
-
-        out.imgCandidates = candidates
-          .map(src => joinPath(basePath, String(src || "").trim()))
-          .map(src => toAbsoluteAssetPath(src))
-          .filter(Boolean);
-
-        out.img = ""; // resolved later after preload
+        const rawImg = String(out.img || "").trim();
+        out.img = buildAssetPath(detectedBase, rawImg);
         return out;
       })
-      .filter((p) => Array.isArray(p.imgCandidates) && p.imgCandidates.length > 0);
+      .filter((p) => !!p.img);
+  }
+
+  function resolveBasePath(explicitBase) {
+    const base = String(explicitBase || "").trim();
+    if (base) return normalizeBasePath(base);
+
+    const host = String(window.location.hostname || "").toLowerCase();
+    const pathParts = String(window.location.pathname || "")
+      .split("/")
+      .filter(Boolean);
+
+    if (host.endsWith(".github.io")) {
+      return pathParts.length ? "/" + pathParts[0] : "";
+    }
+
+    return "";
+  }
+
+  function normalizeBasePath(base) {
+    const s = String(base || "").trim();
+    if (!s) return "";
+    return "/" + s.replace(/^\/+|\/+$/g, "");
+  }
+
+  function buildAssetPath(base, relativePath) {
+    const rel = String(relativePath || "").trim();
+    if (!rel) return "";
+
+    if (/^(https?:)?\/\//i.test(rel)) return rel;
+
+    const cleanRel = rel.replace(/^\/+/, "");
+    const cleanBase = normalizeBasePath(base);
+
+    return cleanBase ? `${cleanBase}/${cleanRel}` : `/${cleanRel}`;
   }
 
   function normalizeChoiceValue(v) {
@@ -742,22 +731,6 @@
     return s === "none" ? "No number" : s;
   }
 
-  function joinPath(base, leaf) {
-    const a = String(base || "").trim();
-    const b = String(leaf || "").trim();
-    if (!a) return b;
-    if (!b) return a;
-    return a.replace(/\/+$/, "") + "/" + b.replace(/^\/+/, "");
-  }
-
-  function toAbsoluteAssetPath(src) {
-    const s = String(src || "").trim();
-    if (!s) return "";
-    if (/^(https?:)?\/\//i.test(s)) return s;
-    if (s.startsWith("/")) return s;
-    return "/" + s.replace(/^\/+/, "");
-  }
-
   function shuffleInPlace(arr) {
     for (let i = arr.length - 1; i > 0; i--) {
       const j = Math.floor(Math.random() * (i + 1));
@@ -766,5 +739,15 @@
       arr[j] = tmp;
     }
     return arr;
+  }
+
+  function getParticipantData() {
+    if (!window.participantData || typeof window.participantData !== "object") {
+      window.participantData = {};
+    }
+    if (!Array.isArray(window.participantData.trials)) {
+      window.participantData.trials = [];
+    }
+    return window.participantData;
   }
 })();
