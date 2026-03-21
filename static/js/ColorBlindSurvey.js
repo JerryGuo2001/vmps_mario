@@ -1,26 +1,13 @@
 // ========================== ColorBlindSurvey.js ==========================
 // Stand-alone full-screen color vision screening overlay styled to match PostSurvey.js.
-//
-// Public API:
-//   window.startColorBlindSurvey(onComplete?, options?)
-//   window.finishColorBlindSurvey()
-//
-// What it saves:
-//   1) participantData.colorBlindSurvey -> flat summary object
-//   2) participantData.trials           -> one row per plate + one summary row
-//
-// This version:
-//   - auto-detects GitHub Pages project base path (e.g. /vmps_mario)
-//   - preloads all images before survey starts
-//   - uses robust image path resolution for GitHub Pages or local hosting
+// Robust version that auto-detects GitHub Pages repo base, preloads images,
+// skips missing files, and logs resolved image paths.
 // =====================================================================
 
 (function () {
-  // -------------------- Public API --------------------
   window.startColorBlindSurvey = startColorBlindSurvey;
   window.finishColorBlindSurvey = finishColorBlindSurvey;
 
-  // -------------------- Config --------------------
   const THEME = {
     pageBg: "#F3E9C6",
     cardBg: "#FFFFFF",
@@ -40,7 +27,7 @@
     instructionText:
       "Respond based on your first impression. Please do not zoom or use external assistance.",
     nextAfterPracticeText: "Practice complete. The scored screening items begin next.",
-    imageBasePath: "", // leave empty to auto-detect
+    imageBasePath: "",
     overlayId: "colorBlindSurveyOverlay",
     autoFocusChoices: false,
     allowEscapeToClose: false,
@@ -89,7 +76,6 @@
     ]
   };
 
-  // -------------------- Internal state --------------------
   let _started = false;
   let _finished = false;
   let _onComplete = null;
@@ -106,7 +92,6 @@
     bodyBg: null
   };
 
-  // -------------------- Entry --------------------
   async function startColorBlindSurvey(onComplete, options) {
     if (_started) return;
     _started = true;
@@ -199,30 +184,32 @@
     pageRoot.id = "cbsPageRoot";
     card.appendChild(pageRoot);
 
-    if (_options.allowEscapeToClose) {
-      overlay.addEventListener("keydown", onOverlayKeyDown);
-      overlay.tabIndex = -1;
-      overlay.focus();
-    }
-
     renderLoadingState("Loading color vision plates...");
 
-    try {
-      await preloadAllPlates(_plates);
-      renderCurrentPlate();
-      overlay.scrollTop = 0;
-    } catch (err) {
-      console.error("[ColorBlindSurvey] preload failed:", err);
-      renderFatalLoadError(err);
+    const preloadResult = await preloadAllPlates(_plates);
+
+    console.log("[ColorBlindSurvey] preload result:", preloadResult);
+    _plates = preloadResult.loadedPlates;
+
+    if (!_plates.length) {
+      renderFatalLoadError(new Error(
+        "No screening images could be loaded.\n\n" +
+        preloadResult.failed.map(f => `${f.id}: ${f.path}`).join("\n")
+      ));
+      return;
     }
+
+    if (preloadResult.failed.length) {
+      console.warn("[ColorBlindSurvey] Some plates failed to load:", preloadResult.failed);
+    }
+
+    renderCurrentPlate();
+    overlay.scrollTop = 0;
   }
 
   function finishColorBlindSurvey() {
     const overlay = document.getElementById(_options?.overlayId || DEFAULT_OPTIONS.overlayId);
     if (overlay) {
-      if (_options?.allowEscapeToClose) {
-        overlay.removeEventListener("keydown", onOverlayKeyDown);
-      }
       overlay.style.display = "none";
     }
     restoreBackgroundScroll();
@@ -237,7 +224,6 @@
     }
   }
 
-  // -------------------- Rendering --------------------
   function renderLoadingState(text) {
     const pageRoot = document.getElementById("cbsPageRoot");
     const progressText = document.getElementById("cbsProgressText");
@@ -267,14 +253,10 @@
 
     if (!pageRoot) return;
     if (progressText) progressText.textContent = "Load failed";
-    if (sub) sub.textContent = "One or more plate images could not be found.";
+    if (sub) sub.textContent = "The screening images could not be loaded.";
 
     pageRoot.innerHTML = "";
-
-    let details = "One or more required images could not be loaded.";
-    if (err && err.message) details += "\n\n" + err.message;
-
-    pageRoot.appendChild(makeErrorBlock("Could not load screening images.", details));
+    pageRoot.appendChild(makeErrorBlock("Could not load screening images.", err?.message || "Unknown error"));
   }
 
   function renderCurrentPlate() {
@@ -507,7 +489,6 @@
     finishColorBlindSurvey();
   }
 
-  // -------------------- Overlay helpers --------------------
   function getOrCreateOverlay() {
     let overlay = document.getElementById(_options?.overlayId || DEFAULT_OPTIONS.overlayId);
     if (overlay) return overlay;
@@ -543,15 +524,6 @@
     document.body.style.background = _prev.bodyBg || "";
   }
 
-  function onOverlayKeyDown(e) {
-    if (!_options?.allowEscapeToClose) return;
-    if (e.key === "Escape") {
-      e.preventDefault();
-      finishColorBlindSurvey();
-    }
-  }
-
-  // -------------------- UI helpers --------------------
   function makeInstructionBlock(text) {
     const box = document.createElement("div");
     box.style.padding = "12px 14px";
@@ -625,25 +597,22 @@
     });
   }
 
-  // -------------------- Preload helpers --------------------
   async function preloadAllPlates(plates) {
-    const failures = [];
+    const loadedPlates = [];
+    const failed = [];
 
     for (const plate of plates) {
       try {
         await preloadImage(plate.img);
+        console.log(`[ColorBlindSurvey] LOADED: ${plate.id} -> ${plate.img}`);
+        loadedPlates.push(plate);
       } catch (err) {
-        failures.push({
-          id: plate.id,
-          path: plate.img
-        });
+        console.warn(`[ColorBlindSurvey] FAILED: ${plate.id} -> ${plate.img}`);
+        failed.push({ id: plate.id, path: plate.img });
       }
     }
 
-    if (failures.length) {
-      const lines = failures.map(f => `${f.id}: tried ${f.path}`);
-      throw new Error(lines.join("\n"));
-    }
+    return { loadedPlates, failed };
   }
 
   function preloadImage(src) {
@@ -655,7 +624,6 @@
     });
   }
 
-  // -------------------- Utils --------------------
   function mergeOptions(base, extra) {
     const merged = { ...base, ...(extra || {}) };
     if (Array.isArray(extra?.plates)) merged.plates = extra.plates.slice();
@@ -676,9 +644,7 @@
         out.choices = Array.isArray(out.choices) && out.choices.length
           ? out.choices.slice()
           : [String(out.correct || ""), "No number"];
-
-        const rawImg = String(out.img || "").trim();
-        out.img = buildAssetPath(detectedBase, rawImg);
+        out.img = buildAssetPath(detectedBase, String(out.img || "").trim());
         return out;
       })
       .filter((p) => !!p.img);
@@ -689,9 +655,7 @@
     if (base) return normalizeBasePath(base);
 
     const host = String(window.location.hostname || "").toLowerCase();
-    const pathParts = String(window.location.pathname || "")
-      .split("/")
-      .filter(Boolean);
+    const pathParts = String(window.location.pathname || "").split("/").filter(Boolean);
 
     if (host.endsWith(".github.io")) {
       return pathParts.length ? "/" + pathParts[0] : "";
@@ -709,12 +673,10 @@
   function buildAssetPath(base, relativePath) {
     const rel = String(relativePath || "").trim();
     if (!rel) return "";
-
     if (/^(https?:)?\/\//i.test(rel)) return rel;
 
     const cleanRel = rel.replace(/^\/+/, "");
     const cleanBase = normalizeBasePath(base);
-
     return cleanBase ? `${cleanBase}/${cleanRel}` : `/${cleanRel}`;
   }
 
