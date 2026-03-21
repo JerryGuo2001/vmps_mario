@@ -11,12 +11,8 @@
 //
 // Notes:
 //   - This is a brief screening task, not a diagnosis.
-//   - Default plates assume you already downloaded these files locally:
-//       TexturePack/colorblind/ishihara_1.svg
-//       TexturePack/colorblind/ishihara_9.svg
-//       TexturePack/colorblind/ishihara_11.png
-//       TexturePack/colorblind/ishihara_23.png
-//   - Edit DEFAULT_OPTIONS.plates if you want different images / answers / choices.
+//   - This version PRELOADS all plate images before starting.
+//   - It also tries both .png and .svg for plates where needed.
 // =====================================================================
 
 (function () {
@@ -52,11 +48,16 @@
     randomizePlates: false,
     showPracticeLabel: true,
     plateHeight: 340,
+
+    // Use absolute paths and allow fallback extensions.
     plates: [
       {
         id: "ishihara_1",
         label: "Practice",
-        img: "TexturePack/colorblind/ishihara_1.png",
+        imgCandidates: [
+          "/TexturePack/colorblind/ishihara_1.png",
+          "/TexturePack/colorblind/ishihara_1.svg"
+        ],
         correct: "12",
         choices: ["12", "8", "3", "No number"],
         scored: false,
@@ -65,7 +66,10 @@
       {
         id: "ishihara_9",
         label: "Plate 1",
-        img: "TexturePack/colorblind/ishihara_9.png",
+        imgCandidates: [
+          "/TexturePack/colorblind/ishihara_9.png",
+          "/TexturePack/colorblind/ishihara_9.svg"
+        ],
         correct: "74",
         choices: ["74", "21", "14", "No number"],
         scored: true,
@@ -74,7 +78,10 @@
       {
         id: "ishihara_11",
         label: "Plate 2",
-        img: "TexturePack/colorblind/ishihara_11.png",
+        imgCandidates: [
+          "/TexturePack/colorblind/ishihara_11.png",
+          "/TexturePack/colorblind/ishihara_11.svg"
+        ],
         correct: "6",
         choices: ["6", "8", "5", "No number"],
         scored: true,
@@ -83,7 +90,10 @@
       {
         id: "ishihara_23",
         label: "Plate 3",
-        img: "TexturePack/colorblind/ishihara_23.png",
+        imgCandidates: [
+          "/TexturePack/colorblind/ishihara_23.png",
+          "/TexturePack/colorblind/ishihara_23.svg"
+        ],
         correct: "42",
         choices: ["42", "24", "12", "No number"],
         scored: true,
@@ -110,7 +120,7 @@
   };
 
   // -------------------- Entry --------------------
-  function startColorBlindSurvey(onComplete, options) {
+  async function startColorBlindSurvey(onComplete, options) {
     if (_started) return;
     _started = true;
     _finished = false;
@@ -208,8 +218,16 @@
       overlay.focus();
     }
 
-    renderCurrentPlate();
-    overlay.scrollTop = 0;
+    renderLoadingState("Loading color vision plates...");
+
+    try {
+      await preloadAllPlates(_plates);
+      renderCurrentPlate();
+      overlay.scrollTop = 0;
+    } catch (err) {
+      console.error("[ColorBlindSurvey] preload failed:", err);
+      renderFatalLoadError(err);
+    }
   }
 
   function finishColorBlindSurvey() {
@@ -233,6 +251,45 @@
   }
 
   // -------------------- Rendering --------------------
+  function renderLoadingState(text) {
+    const pageRoot = document.getElementById("cbsPageRoot");
+    const progressText = document.getElementById("cbsProgressText");
+    const sub = document.getElementById("cbsSubTitle");
+
+    if (!pageRoot) return;
+    if (progressText) progressText.textContent = "Preparing...";
+    if (sub) sub.textContent = "Please wait while the screening images load.";
+
+    pageRoot.innerHTML = "";
+
+    const box = document.createElement("div");
+    box.style.padding = "18px";
+    box.style.border = "1px solid #EFE7C9";
+    box.style.borderRadius = "14px";
+    box.style.background = "#FFFCF1";
+    box.style.fontSize = "15px";
+    box.style.fontWeight = "700";
+    box.textContent = text || "Loading...";
+    pageRoot.appendChild(box);
+  }
+
+  function renderFatalLoadError(err) {
+    const pageRoot = document.getElementById("cbsPageRoot");
+    const progressText = document.getElementById("cbsProgressText");
+    const sub = document.getElementById("cbsSubTitle");
+
+    if (!pageRoot) return;
+    if (progressText) progressText.textContent = "Load failed";
+    if (sub) sub.textContent = "One or more plate images could not be found.";
+
+    pageRoot.innerHTML = "";
+
+    let details = "One or more required images could not be loaded.";
+    if (err && err.message) details += "\n\n" + err.message;
+
+    pageRoot.appendChild(makeErrorBlock("Could not load screening images.", details));
+  }
+
   function renderCurrentPlate() {
     const overlay = document.getElementById(_options.overlayId);
     const pageRoot = document.getElementById("cbsPageRoot");
@@ -325,7 +382,7 @@
       figureWrap.innerHTML = "";
       figureWrap.appendChild(makeErrorBlock(
         "Could not load image.",
-        `Missing file: ${item.img}\nCheck the image path in ColorBlindSurvey.js.`
+        `Resolved file path: ${item.img}\nOriginal candidates: ${(item.imgCandidates || []).join(", ")}`
       ));
     });
 
@@ -357,6 +414,7 @@
       styleChoiceButton(btn);
       btn.addEventListener("click", () => handleChoice(item, choice));
       choices.appendChild(btn);
+
       if (_options.autoFocusChoices && idx === 0) {
         setTimeout(() => {
           try { btn.focus(); } catch (_) {}
@@ -578,6 +636,57 @@
     });
   }
 
+  // -------------------- Preload helpers --------------------
+  async function preloadAllPlates(plates) {
+    const failures = [];
+
+    for (const plate of plates) {
+      try {
+        const resolved = await loadFirstAvailableImage(plate.imgCandidates || []);
+        plate.img = resolved;
+      } catch (err) {
+        failures.push({
+          id: plate.id,
+          candidates: (plate.imgCandidates || []).slice()
+        });
+      }
+    }
+
+    if (failures.length) {
+      const lines = failures.map(f => {
+        return `${f.id}: tried ${f.candidates.join(" , ")}`;
+      });
+      throw new Error(lines.join("\n"));
+    }
+
+    return plates;
+  }
+
+  async function loadFirstAvailableImage(candidates) {
+    const list = Array.isArray(candidates) ? candidates.filter(Boolean) : [];
+    let lastErr = null;
+
+    for (const src of list) {
+      try {
+        await preloadImage(src);
+        return src;
+      } catch (err) {
+        lastErr = err;
+      }
+    }
+
+    throw lastErr || new Error("No valid image candidate found.");
+  }
+
+  function preloadImage(src) {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => resolve(src);
+      img.onerror = () => reject(new Error(`Failed to load: ${src}`));
+      img.src = src;
+    });
+  }
+
   // -------------------- Utils --------------------
   function mergeOptions(base, extra) {
     const merged = { ...base, ...(extra || {}) };
@@ -591,6 +700,7 @@
     return (Array.isArray(plates) ? plates : [])
       .map((p, idx) => {
         const out = { ...(p || {}) };
+
         out.id = String(out.id || `plate_${idx + 1}`);
         out.label = String(out.label || `Plate ${idx + 1}`);
         out.scored = !!out.scored;
@@ -600,11 +710,23 @@
           ? out.choices.slice()
           : [String(out.correct || ""), "No number"];
 
-        const rawImg = String(out.img || "").trim();
-        out.img = joinPath(basePath, rawImg);
+        let candidates = [];
+
+        if (Array.isArray(out.imgCandidates) && out.imgCandidates.length) {
+          candidates = out.imgCandidates.slice();
+        } else if (out.img) {
+          candidates = [out.img];
+        }
+
+        out.imgCandidates = candidates
+          .map(src => joinPath(basePath, String(src || "").trim()))
+          .map(src => toAbsoluteAssetPath(src))
+          .filter(Boolean);
+
+        out.img = ""; // resolved later after preload
         return out;
       })
-      .filter((p) => !!p.img);
+      .filter((p) => Array.isArray(p.imgCandidates) && p.imgCandidates.length > 0);
   }
 
   function normalizeChoiceValue(v) {
@@ -626,6 +748,14 @@
     if (!a) return b;
     if (!b) return a;
     return a.replace(/\/+$/, "") + "/" + b.replace(/^\/+/, "");
+  }
+
+  function toAbsoluteAssetPath(src) {
+    const s = String(src || "").trim();
+    if (!s) return "";
+    if (/^(https?:)?\/\//i.test(s)) return s;
+    if (s.startsWith("/")) return s;
+    return "/" + s.replace(/^\/+/, "");
   }
 
   function shuffleInPlace(arr) {
