@@ -249,7 +249,8 @@ async function startWithID() {
 
     armIdleSessionTimeout();
 
-
+    startColorBlindSurvey()
+    
     showPhaseInstructions('ooo', () => {
       initTaskOOO();
     });
