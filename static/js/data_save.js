@@ -9,11 +9,8 @@ function RUNSHEET_KEY(id, suffix = "") {
   return base;
 }
 
-function RUNSHEET_GET_URL(key, existsOnly = false) {
-  const url = new URL(`${VERCEL_BASE_URL}/api/runsheet`);
-  url.searchParams.set("key", key);
-  if (existsOnly) url.searchParams.set("exists", "1");
-  return url.toString();
+function RUNSHEET_UPLOAD_URL(key) {
+  return `${VERCEL_BASE_URL}/api/upload-runsheet?key=${encodeURIComponent(key)}`;
 }
 
 function RUNSHEET_GET_URL(key, existsOnly = false) {
