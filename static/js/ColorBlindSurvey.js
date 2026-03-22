@@ -58,7 +58,7 @@
       {
         id: "ishihara_1",
         label: "Practice",
-        img: "TexturePack/colorblind/ishihara_1.png",
+        img: "TexturePack/colorblind/500px-Ishihara_1.svg.png",
         correct: "12",
         choices: ["12", "8", "3", "No number"],
         scored: false,
@@ -67,7 +67,7 @@
       {
         id: "ishihara_9",
         label: "Plate 1",
-        img: "TexturePack/colorblind/ishihara_9.png",
+        img: "TexturePack/colorblind/500px-Ishihara_9.svg.png",
         correct: "74",
         choices: ["74", "21", "14", "No number"],
         scored: true,
@@ -76,7 +76,7 @@
       {
         id: "ishihara_11",
         label: "Plate 2",
-        img: "TexturePack/colorblind/ishihara_11.png",
+        img: "TexturePack/colorblind/500px-Ishihara_11.PNG",
         correct: "6",
         choices: ["6", "8", "5", "No number"],
         scored: true,
@@ -85,7 +85,7 @@
       {
         id: "ishihara_23",
         label: "Plate 3",
-        img: "TexturePack/colorblind/ishihara_23.png",
+        img: "TexturePack/colorblind/500px-Ishihara_19.PNG",
         correct: "42",
         choices: ["42", "24", "12", "No number"],
         scored: true,
