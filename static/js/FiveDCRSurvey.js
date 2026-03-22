@@ -224,16 +224,378 @@
     const overlay = document.getElementById('fiveDCRSurveyOverlay');
     if (overlay) overlay.style.display = 'none';
     restoreBackgroundScroll();
-    _started = false;
 
-    if (typeof _onComplete === 'function') {
-      const fn = _onComplete;
-      _onComplete = null;
-      fn();
+    _started = false;
+    const done = _onComplete;
+    _onComplete = null;
+    if (typeof done === 'function') {
+      const pd = getParticipantData();
+      done(pd[_opts.participantDataKey] || null);
     }
   }
 
-  // -------------------- Overlay --------------------
+  // -------------------- Rendering --------------------
+  function renderPage(card, overlay) {
+    const root = card.querySelector('#fiveDCRPageRoot');
+    const progress = card.querySelector('#fiveDCRProgressText');
+    const sub = card.querySelector('#fiveDCRSubTitle');
+    if (!root || !progress) return;
+
+    const totalPages = Math.ceil(FIVE_DCR_ITEMS.length / _opts.itemsPerPage);
+    const start = _pageIndex * _opts.itemsPerPage;
+    const end = Math.min(FIVE_DCR_ITEMS.length, start + _opts.itemsPerPage);
+    const items = FIVE_DCR_ITEMS.slice(start, end);
+
+    progress.textContent = `Page ${_pageIndex + 1} of ${totalPages}`;
+    sub.textContent = _opts.subtitle || 'Five-Dimensional Curiosity Scale Revised (5DCR)';
+
+    root.innerHTML = '';
+
+    const instructions = document.createElement('div');
+    instructions.style.fontSize = '14px';
+    instructions.style.color = THEME.muted;
+    instructions.style.marginBottom = '14px';
+    instructions.textContent = `Please indicate how well each statement describes you using the ${_opts.scaleMin}–${_opts.scaleMax} scale.`;
+    root.appendChild(instructions);
+
+    const form = document.createElement('div');
+    form.style.display = 'grid';
+    form.style.gap = '14px';
+    root.appendChild(form);
+
+    items.forEach(item => {
+      form.appendChild(buildItemCard(item));
+    });
+
+    const footer = document.createElement('div');
+    footer.style.display = 'flex';
+    footer.style.justifyContent = 'space-between';
+    footer.style.alignItems = 'center';
+    footer.style.gap = '12px';
+    footer.style.marginTop = '22px';
+    root.appendChild(footer);
+
+    const left = document.createElement('div');
+    left.style.fontSize = '13px';
+    left.style.color = THEME.muted;
+    left.textContent = `${start + 1}–${end} of ${FIVE_DCR_ITEMS.length} items`;
+    footer.appendChild(left);
+
+    const nav = document.createElement('div');
+    nav.style.display = 'flex';
+    nav.style.gap = '10px';
+    footer.appendChild(nav);
+
+    const backBtn = document.createElement('button');
+    backBtn.type = 'button';
+    backBtn.textContent = 'Back';
+    styleButton(backBtn, true);
+    backBtn.disabled = _pageIndex === 0;
+    backBtn.style.opacity = backBtn.disabled ? '0.55' : '1';
+    backBtn.style.cursor = backBtn.disabled ? 'not-allowed' : 'pointer';
+    backBtn.addEventListener('click', () => {
+      if (_pageIndex <= 0) return;
+      capturePageTime();
+      _pageIndex -= 1;
+      renderPage(card, overlay);
+      overlay.scrollTop = 0;
+    });
+    nav.appendChild(backBtn);
+
+    const nextBtn = document.createElement('button');
+    nextBtn.type = 'button';
+    nextBtn.textContent = (_pageIndex === totalPages - 1) ? 'Finish' : 'Next';
+    styleButton(nextBtn, false);
+    nextBtn.addEventListener('click', () => {
+      const missing = items.filter(it => !hasValidResponse(it.n));
+      if (missing.length) {
+        showInlineError(root, `Please answer all items on this page before continuing.`);
+        focusFirstMissing(missing[0].n);
+        return;
+      }
+      clearInlineError(root);
+
+      capturePageTime();
+
+      if (_pageIndex < totalPages - 1) {
+        _pageIndex += 1;
+        renderPage(card, overlay);
+        overlay.scrollTop = 0;
+      } else {
+        finalizeSurvey();
+      }
+    });
+    nav.appendChild(nextBtn);
+
+    _pageStartT = performance.now();
+  }
+
+  function buildItemCard(item) {
+    const wrap = document.createElement('div');
+    wrap.style.border = '1px solid #EFE7C9';
+    wrap.style.background = '#FFFCF1';
+    wrap.style.borderRadius = '14px';
+    wrap.style.padding = '14px 14px 12px 14px';
+
+    const q = document.createElement('div');
+    q.style.fontSize = '15px';
+    q.style.fontWeight = '700';
+    q.style.marginBottom = '10px';
+    q.textContent = `${item.n}. ${item.text}`;
+    wrap.appendChild(q);
+
+    const labelsRow = document.createElement('div');
+    labelsRow.style.display = 'flex';
+    labelsRow.style.justifyContent = 'space-between';
+    labelsRow.style.gap = '12px';
+    labelsRow.style.fontSize = '12px';
+    labelsRow.style.color = THEME.muted;
+    labelsRow.style.marginBottom = '8px';
+
+    const minLab = document.createElement('div');
+    minLab.textContent = _opts.minLabel || String(_opts.scaleMin);
+    labelsRow.appendChild(minLab);
+
+    const maxLab = document.createElement('div');
+    maxLab.textContent = _opts.maxLabel || String(_opts.scaleMax);
+    labelsRow.appendChild(maxLab);
+
+    wrap.appendChild(labelsRow);
+
+    const scale = document.createElement('div');
+    scale.style.display = 'grid';
+    scale.style.gridTemplateColumns = `repeat(${_opts.scaleMax - _opts.scaleMin + 1}, minmax(0, 1fr))`;
+    scale.style.gap = '8px';
+    wrap.appendChild(scale);
+
+    for (let v = _opts.scaleMin; v <= _opts.scaleMax; v++) {
+      const id = `fiveDCR_q${item.n}_${v}`;
+      const label = document.createElement('label');
+      label.setAttribute('for', id);
+      label.style.display = 'flex';
+      label.style.flexDirection = 'column';
+      label.style.alignItems = 'center';
+      label.style.justifyContent = 'center';
+      label.style.gap = '6px';
+      label.style.border = '1px solid #E9DFBB';
+      label.style.borderRadius = '10px';
+      label.style.padding = '10px 6px';
+      label.style.background = '#FFFFFF';
+      label.style.cursor = 'pointer';
+      label.style.userSelect = 'none';
+
+      const input = document.createElement('input');
+      input.type = 'radio';
+      input.name = `fiveDCR_q${item.n}`;
+      input.id = id;
+      input.value = String(v);
+      input.style.transform = 'scale(1.1)';
+      input.style.cursor = 'pointer';
+
+      if (String(_responses[item.n] ?? '') === String(v)) {
+        input.checked = true;
+        label.style.borderColor = '#BDAE74';
+        label.style.background = '#FFF7D8';
+      }
+
+      input.addEventListener('change', () => {
+        _responses[item.n] = Number(v);
+        refreshItemSelectionStyles(item.n);
+      });
+
+      input.addEventListener('focus', () => {
+        label.style.boxShadow = THEME.focusShadow;
+      });
+      input.addEventListener('blur', () => {
+        label.style.boxShadow = 'none';
+      });
+
+      const t = document.createElement('div');
+      t.style.fontSize = '14px';
+      t.style.fontWeight = '700';
+      t.textContent = String(v);
+
+      label.appendChild(input);
+      label.appendChild(t);
+      scale.appendChild(label);
+    }
+
+    return wrap;
+  }
+
+  function refreshItemSelectionStyles(itemN) {
+    const inputs = document.querySelectorAll(`input[name="fiveDCR_q${itemN}"]`);
+    inputs.forEach(inp => {
+      const lab = inp.closest('label');
+      if (!lab) return;
+      if (inp.checked) {
+        lab.style.borderColor = '#BDAE74';
+        lab.style.background = '#FFF7D8';
+      } else {
+        lab.style.borderColor = '#E9DFBB';
+        lab.style.background = '#FFFFFF';
+      }
+    });
+  }
+
+  function focusFirstMissing(itemN) {
+    const first = document.querySelector(`input[name="fiveDCR_q${itemN}"]`);
+    if (first) first.focus();
+  }
+
+  // -------------------- Finalize / Save --------------------
+  function finalizeSurvey() {
+    const summary = buildSummaryObject();
+    const pd = getParticipantData();
+
+    pd[_opts.participantDataKey] = summary;
+
+    if (_opts.mergeIntoPostSurveyIfPresent) {
+      if (!pd.postSurvey || typeof pd.postSurvey !== 'object') {
+        pd.postSurvey = {};
+      }
+      pd.postSurvey[_opts.participantDataKey] = summary;
+    }
+
+    if (!Array.isArray(pd.trials)) pd.trials = [];
+
+    pd.trials.push(buildTrialRow(summary));
+
+    finishFiveDCRSurvey();
+  }
+
+  function buildSummaryObject() {
+    const out = {
+      survey_name: 'five_dcr',
+      started_at_ms: Math.round(_surveyStartT || 0),
+      total_time_ms: Math.round((_surveyStartT != null) ? (performance.now() - _surveyStartT) : 0),
+      page_times_ms_json: JSON.stringify(_pageTimes)
+    };
+
+    FIVE_DCR_ITEMS.forEach(item => {
+      const raw = Number(_responses[item.n]);
+      out[`fiveDCR_q${item.n}`] = Number.isFinite(raw) ? raw : null;
+    });
+
+    STRESS_TOLERANCE_ITEMS.forEach(n => {
+      const raw = Number(_responses[n]);
+      out[`fiveDCR_q${n}_reversed`] = Number.isFinite(raw) ? reverseLikert(raw, _opts.scaleMin, _opts.scaleMax) : null;
+    });
+
+    DIMENSIONS.forEach(dim => {
+      const vals = dim.items
+        .map(n => Number(_responses[n]))
+        .filter(v => Number.isFinite(v))
+        .map(v => dim.reverse ? reverseLikert(v, _opts.scaleMin, _opts.scaleMax) : v);
+
+      out[`${dim.key}_avg`] = vals.length ? round3(mean(vals)) : null;
+    });
+
+    return out;
+  }
+
+  function buildTrialRow(summary) {
+    const row = {
+      trial_type: 'five_dcr_survey',
+      survey_name: 'five_dcr',
+      rt: summary.total_time_ms ?? null
+    };
+
+    Object.keys(summary).forEach(k => {
+      row[k] = summary[k];
+    });
+
+    return row;
+  }
+
+  // -------------------- Data Helpers --------------------
+  function getParticipantData() {
+    let pd = null;
+
+    try {
+      if (typeof participantData !== 'undefined' && participantData && typeof participantData === 'object') {
+        pd = participantData;
+      }
+    } catch (e) {}
+
+    if (!pd && typeof window !== 'undefined' && window.participantData && typeof window.participantData === 'object') {
+      pd = window.participantData;
+    }
+
+    if (!pd) {
+      pd = {};
+    }
+    if (!Array.isArray(pd.trials)) {
+      pd.trials = [];
+    }
+
+    if (typeof window !== 'undefined') {
+      window.participantData = pd;
+    }
+
+    return pd;
+  }
+
+  function hasValidResponse(itemN) {
+    const v = Number(_responses[itemN]);
+    return Number.isFinite(v) && v >= _opts.scaleMin && v <= _opts.scaleMax;
+  }
+
+  function reverseLikert(v, minV, maxV) {
+    return (minV + maxV) - Number(v);
+  }
+
+  function mean(arr) {
+    if (!arr.length) return null;
+    return arr.reduce((a, b) => a + b, 0) / arr.length;
+  }
+
+  function round3(x) {
+    return Math.round(Number(x) * 1000) / 1000;
+  }
+
+  // -------------------- UI Helpers --------------------
+  function showInlineError(root, text) {
+    let box = root.querySelector('#fiveDCRErrorBox');
+    if (!box) {
+      box = document.createElement('div');
+      box.id = 'fiveDCRErrorBox';
+      box.style.marginTop = '14px';
+      box.style.padding = '10px 12px';
+      box.style.border = '1px solid #E7B3B3';
+      box.style.background = '#FFF1F1';
+      box.style.color = '#8A1F1F';
+      box.style.borderRadius = '10px';
+      root.appendChild(box);
+    }
+    box.textContent = text;
+  }
+
+  function clearInlineError(root) {
+    const box = root.querySelector('#fiveDCRErrorBox');
+    if (box) box.remove();
+  }
+
+  function styleButton(btn, secondary) {
+    btn.style.appearance = 'none';
+    btn.style.border = secondary ? '1px solid #D8C998' : '1px solid #AF9A53';
+    btn.style.background = secondary ? '#FFFFFF' : '#F4E7B2';
+    btn.style.color = '#1F2328';
+    btn.style.borderRadius = '12px';
+    btn.style.padding = '10px 16px';
+    btn.style.fontSize = '14px';
+    btn.style.fontWeight = '700';
+    btn.style.cursor = 'pointer';
+    btn.style.boxShadow = secondary ? 'none' : '0 1px 0 rgba(0,0,0,0.05)';
+  }
+
+  function capturePageTime() {
+    if (_pageStartT == null) return;
+    const ms = Math.max(0, Math.round(performance.now() - _pageStartT));
+    _pageTimes[_pageIndex] = ms;
+    _pageStartT = null;
+  }
+
   function getOrCreateOverlay() {
     let overlay = document.getElementById('fiveDCRSurveyOverlay');
     if (!overlay) {
@@ -241,450 +603,36 @@
       overlay.id = 'fiveDCRSurveyOverlay';
       overlay.style.position = 'fixed';
       overlay.style.inset = '0';
-      overlay.style.zIndex = '999999';
+      overlay.style.zIndex = '2147483000';
+      overlay.style.overflow = 'auto';
       overlay.style.background = THEME.pageBg;
-      overlay.style.overflowY = 'auto';
-      overlay.style.overflowX = 'hidden';
-      overlay.style.webkitOverflowScrolling = 'touch';
       document.body.appendChild(overlay);
     }
+    overlay.style.background = THEME.pageBg;
+    overlay.style.display = 'block';
     return overlay;
   }
 
   function applyOverlayAndLockBackgroundScroll() {
-    if (_prev.htmlOverflow === null) _prev.htmlOverflow = document.documentElement.style.overflow;
-    if (_prev.bodyOverflow === null) _prev.bodyOverflow = document.body.style.overflow;
-    if (_prev.bodyMinHeight === null) _prev.bodyMinHeight = document.body.style.minHeight;
-    if (_prev.bodyBg === null) _prev.bodyBg = document.body.style.background;
+    const html = document.documentElement;
+    const body = document.body;
+    _prev.htmlOverflow = html.style.overflow;
+    _prev.bodyOverflow = body.style.overflow;
+    _prev.bodyMinHeight = body.style.minHeight;
+    _prev.bodyBg = body.style.background;
 
-    document.documentElement.style.overflow = 'hidden';
-    document.body.style.overflow = 'hidden';
-    document.body.style.background = THEME.pageBg;
-    document.body.style.minHeight = '100vh';
+    html.style.overflow = 'hidden';
+    body.style.overflow = 'hidden';
+    body.style.minHeight = '100vh';
+    body.style.background = THEME.pageBg;
   }
 
   function restoreBackgroundScroll() {
-    if (_prev.htmlOverflow !== null) document.documentElement.style.overflow = _prev.htmlOverflow;
-    if (_prev.bodyOverflow !== null) document.body.style.overflow = _prev.bodyOverflow;
-    if (_prev.bodyMinHeight !== null) document.body.style.minHeight = _prev.bodyMinHeight;
-    if (_prev.bodyBg !== null) document.body.style.background = _prev.bodyBg;
-  }
-
-  // -------------------- Rendering --------------------
-  function getTotalPages() {
-    return 1 + Math.ceil(FIVE_DCR_ITEMS.length / _opts.itemsPerPage);
-  }
-
-  function renderPage(card, overlay) {
-    const root = document.getElementById('fiveDCRPageRoot');
-    const sub = document.getElementById('fiveDCRSubTitle');
-    const prog = document.getElementById('fiveDCRProgressText');
-    if (!root) return;
-
-    root.innerHTML = '';
-    overlay.scrollTop = 0;
-    _pageStartT = performance.now();
-
-    const totalPages = getTotalPages();
-    prog.textContent = `Page ${_pageIndex + 1} of ${totalPages}`;
-
-    if (_pageIndex === 0) {
-      sub.textContent = _opts.subtitle || 'Five-Dimensional Curiosity Scale Revised (5DCR)';
-      root.appendChild(renderIntroPage(card, overlay));
-      return;
-    }
-
-    const itemPageIdx = _pageIndex - 1;
-    const start = itemPageIdx * _opts.itemsPerPage;
-    const end = Math.min(start + _opts.itemsPerPage, FIVE_DCR_ITEMS.length);
-    sub.textContent = `Items ${start + 1}-${end} of ${FIVE_DCR_ITEMS.length}`;
-    root.appendChild(renderItemsPage(start, end, card, overlay));
-  }
-
-  function renderIntroPage(card, overlay) {
-    const wrap = document.createElement('div');
-
-    wrap.appendChild(makeInstructionBlock(
-      'Below are statements people often use to describe themselves. Please indicate how much each statement describes you. There are no right or wrong answers.'
-    ));
-
-    const section = makeSectionCard('Response scale');
-    const labels = {
-      1: 'Does not describe me at all',
-      2: 'Barely describes me',
-      3: 'Somewhat describes me',
-      4: 'Neutral',
-      5: 'Generally describes me',
-      6: 'Mostly describes me',
-      7: 'Completely describes me'
-    };
-
-    for (let v = Number(_opts.scaleMin); v <= Number(_opts.scaleMax); v++) {
-      section.appendChild(makeParagraph(`${v} = ${labels[v] || ''}`));
-    }
-
-    section.appendChild(makeParagraph(
-      'Scoring is done automatically after the survey. Stress Tolerance items are reverse-scored for scoring only; original responses are still saved.'
-    ));
-    wrap.appendChild(section);
-
-    const btnRow = makeNavRow();
-    const nextBtn = makePrimaryButton('Start Survey');
-    nextBtn.addEventListener('click', () => {
-      _pageTimes.push({
-        page_index: _pageIndex + 1,
-        rt_ms: performance.now() - (_pageStartT || performance.now())
-      });
-      _pageIndex = 1;
-      renderPage(card, overlay);
-    });
-    btnRow.appendChild(nextBtn);
-    wrap.appendChild(btnRow);
-
-    return wrap;
-  }
-
-  function renderItemsPage(startIdx, endIdx, card, overlay) {
-    const wrap = document.createElement('div');
-
-    const form = document.createElement('form');
-    form.autocomplete = 'off';
-    wrap.appendChild(form);
-
-    for (let i = startIdx; i < endIdx; i++) {
-      const item = FIVE_DCR_ITEMS[i];
-
-      form.appendChild(
-        makeLikertQuestion({
-          name: `fivedcr_item_${item.n}`,
-          label: `${item.n}) ${item.text}`,
-          minLabel: _opts.minLabel,
-          maxLabel: _opts.maxLabel,
-          scaleMin: Number(_opts.scaleMin),
-          scaleMax: Number(_opts.scaleMax),
-          required: true,
-          initial: _responses[item.n]
-        })
-      );
-    }
-
-    const btnRow = makeNavRow();
-
-    if (_pageIndex > 1) {
-      const backBtn = makeSecondaryButton('Back');
-      backBtn.type = 'button';
-      backBtn.addEventListener('click', () => {
-        savePageResponses(form, startIdx, endIdx);
-        _pageTimes.push({
-          page_index: _pageIndex + 1,
-          rt_ms: performance.now() - (_pageStartT || performance.now())
-        });
-        _pageIndex -= 1;
-        renderPage(card, overlay);
-      });
-      btnRow.appendChild(backBtn);
-    }
-
-    const isLast = endIdx >= FIVE_DCR_ITEMS.length;
-    const nextBtn = makePrimaryButton(isLast ? 'Submit Survey' : 'Next');
-    nextBtn.type = 'submit';
-    btnRow.appendChild(nextBtn);
-    form.appendChild(btnRow);
-
-    form.addEventListener('submit', (e) => {
-      e.preventDefault();
-      const ok = savePageResponses(form, startIdx, endIdx, true);
-      if (!ok) return;
-
-      _pageTimes.push({
-        page_index: _pageIndex + 1,
-        rt_ms: performance.now() - (_pageStartT || performance.now())
-      });
-
-      if (isLast) {
-        finalizeSurvey();
-      } else {
-        _pageIndex += 1;
-        renderPage(card, overlay);
-      }
-    });
-
-    return wrap;
-  }
-
-  function savePageResponses(form, startIdx, endIdx, showAlertOnMissing) {
-    for (let i = startIdx; i < endIdx; i++) {
-      const item = FIVE_DCR_ITEMS[i];
-      const checked = form.querySelector(`input[name="fivedcr_item_${item.n}"]:checked`);
-      if (!checked) {
-        if (showAlertOnMissing) alert('Please answer every item on this page before continuing.');
-        return false;
-      }
-      _responses[item.n] = Number(checked.value);
-    }
-    return true;
-  }
-
-  // -------------------- Scoring + saving --------------------
-  function finalizeSurvey() {
-    const pData = getParticipantData();
-    const now = performance.now();
-    const id = pData.id || 'unknown';
-    const timeElapsed = now - (pData.startTime || now);
-    const scaleMin = Number(_opts.scaleMin);
-    const scaleMax = Number(_opts.scaleMax);
-
-    const summary = {
-      id,
-      fivedcr_scale_min: scaleMin,
-      fivedcr_scale_max: scaleMax,
-      fivedcr_total_items: FIVE_DCR_ITEMS.length,
-      fivedcr_stress_tolerance_reverse_items: STRESS_TOLERANCE_ITEMS.join('|'),
-      fivedcr_dimensions: DIMENSIONS.map(d => d.key).join('|'),
-      fivedcr_item_order: FIVE_DCR_ITEMS.map(item => item.n).join('|'),
-      fivedcr_page_rt_ms_json: JSON.stringify(_pageTimes || []),
-      fivedcr_survey_rt_total: now - (_surveyStartT || now),
-      time_elapsed: timeElapsed
-    };
-
-    let rawAllTotal = 0;
-    let scoredAllTotal = 0;
-
-    for (const item of FIVE_DCR_ITEMS) {
-      const raw = Number(_responses[item.n]);
-      const scored = scoreOne(raw, item.reverse, scaleMin, scaleMax);
-
-      rawAllTotal += raw;
-      scoredAllTotal += scored;
-
-      summary[`fivedcr_item_${item.n}_raw`] = raw;
-      summary[`fivedcr_item_${item.n}_scored`] = scored;
-      summary[`fivedcr_item_${item.n}_reverse`] = item.reverse ? 1 : 0;
-      summary[`fivedcr_item_${item.n}_dimension`] = item.dimension;
-    }
-
-    summary.fivedcr_raw_total_all_items = rawAllTotal;
-    summary.fivedcr_raw_mean_all_items = rawAllTotal / FIVE_DCR_ITEMS.length;
-    summary.fivedcr_scored_total_all_items = scoredAllTotal;
-    summary.fivedcr_scored_mean_all_items = scoredAllTotal / FIVE_DCR_ITEMS.length;
-
-    for (const dim of DIMENSIONS) {
-      const dimItems = FIVE_DCR_ITEMS.filter(item => item.dimension === dim.key);
-      const rawVals = dimItems.map(item => Number(_responses[item.n]));
-      const scoredVals = dimItems.map(item =>
-        scoreOne(Number(_responses[item.n]), item.reverse, scaleMin, scaleMax)
-      );
-
-      summary[`fivedcr_${dim.key}_raw_mean`] = mean(rawVals);
-      summary[`fivedcr_${dim.key}_mean`] = mean(scoredVals);
-      summary[`fivedcr_${dim.key}_items`] = dim.items.join('|');
-      summary[`fivedcr_${dim.key}_reverse_scored`] = dim.reverse ? 1 : 0;
-    }
-
-    const socialItems = DIMENSIONS
-      .filter(dim => dim.key === 'general_social_curiosity' || dim.key === 'covert_social_curiosity')
-      .flatMap(dim => dim.items);
-
-    const socialScoredVals = socialItems.map(n => {
-      const item = FIVE_DCR_ITEMS.find(x => x.n === n);
-      return scoreOne(Number(_responses[n]), item.reverse, scaleMin, scaleMax);
-    });
-
-    summary.fivedcr_social_curiosity_mean = mean(socialScoredVals);
-
-    pData[_opts.participantDataKey] = summary;
-
-    if (_opts.mergeIntoPostSurveyIfPresent && pData.postSurvey && typeof pData.postSurvey === 'object') {
-      Object.assign(pData.postSurvey, summary);
-    }
-
-    (pData.trials ||= []).push({
-      id,
-      trial_index: pData.trials.length + 1,
-      trial_type: 'five_dcr_survey',
-      rt: now - (_pageStartT || now),
-      ...summary
-    });
-
-    finishFiveDCRSurvey();
-  }
-
-  function getParticipantData() {
-    if (typeof window.participantData !== 'object' || window.participantData === null) {
-      window.participantData = {};
-    }
-    if (!Array.isArray(window.participantData.trials)) {
-      window.participantData.trials = [];
-    }
-    return window.participantData;
-  }
-
-  function scoreOne(raw, reverse, minV, maxV) {
-    const x = Number(raw);
-    if (!Number.isFinite(x)) return NaN;
-    return reverse ? (minV + maxV - x) : x;
-  }
-
-  function mean(values) {
-    const clean = (values || []).map(Number).filter(Number.isFinite);
-    if (!clean.length) return NaN;
-    return clean.reduce((a, b) => a + b, 0) / clean.length;
-  }
-
-  // -------------------- UI helpers --------------------
-  function makeInstructionBlock(text) {
-    const box = document.createElement('div');
-    box.style.padding = '12px 14px';
-    box.style.borderRadius = '14px';
-    box.style.border = '1px solid #EFE7C9';
-    box.style.background = '#FFFCF1';
-    box.style.color = THEME.text;
-    box.style.fontSize = '14px';
-    box.style.lineHeight = '1.45';
-    box.style.fontWeight = '650';
-    box.style.marginBottom = '10px';
-    box.textContent = text || '';
-    return box;
-  }
-
-  function makeParagraph(text) {
-    const p = document.createElement('div');
-    p.style.fontSize = '14px';
-    p.style.color = THEME.text;
-    p.style.marginBottom = '8px';
-    p.textContent = text || '';
-    return p;
-  }
-
-  function makeSectionCard(titleText) {
-    const section = document.createElement('div');
-    section.style.border = '1px solid #EFE7C9';
-    section.style.borderRadius = '14px';
-    section.style.padding = '14px 14px';
-    section.style.margin = '14px 0';
-    section.style.background = '#FFFCF1';
-
-    if (titleText) {
-      const title = document.createElement('div');
-      title.textContent = titleText;
-      title.style.fontWeight = '700';
-      title.style.marginBottom = '10px';
-      title.style.fontSize = '14px';
-      section.appendChild(title);
-    }
-
-    return section;
-  }
-
-  function makeLikertQuestion({ name, label, minLabel, maxLabel, scaleMin, scaleMax, required, initial }) {
-    const section = makeSectionCard(label);
-
-    const row = document.createElement('div');
-    row.style.display = 'grid';
-    row.style.gridTemplateColumns = '160px 1fr 160px';
-    row.style.alignItems = 'center';
-    row.style.gap = '10px';
-    section.appendChild(row);
-
-    const left = document.createElement('div');
-    left.textContent = minLabel || '';
-    left.style.fontSize = '12px';
-    left.style.color = THEME.muted;
-
-    const right = document.createElement('div');
-    right.textContent = maxLabel || '';
-    right.style.fontSize = '12px';
-    right.style.color = THEME.muted;
-    right.style.textAlign = 'right';
-
-    const radios = document.createElement('div');
-    radios.style.display = 'flex';
-    radios.style.gap = '10px';
-    radios.style.justifyContent = 'center';
-    radios.style.flexWrap = 'wrap';
-
-    for (let v = scaleMin; v <= scaleMax; v++) {
-      const pill = document.createElement('label');
-      pill.style.display = 'flex';
-      pill.style.alignItems = 'center';
-      pill.style.gap = '8px';
-      pill.style.padding = '8px 10px';
-      pill.style.border = '1px solid #E7DEBF';
-      pill.style.borderRadius = '999px';
-      pill.style.background = '#FFFFFF';
-      pill.style.cursor = 'pointer';
-      pill.style.userSelect = 'none';
-
-      const input = document.createElement('input');
-      input.type = 'radio';
-      input.name = name;
-      input.value = String(v);
-      if (required) input.required = true;
-      if (String(initial ?? '') === String(v)) input.checked = true;
-
-      input.addEventListener('focus', () => {
-        pill.style.outline = 'none';
-        pill.style.boxShadow = THEME.focusShadow;
-      });
-
-      input.addEventListener('blur', () => {
-        pill.style.boxShadow = 'none';
-      });
-
-      const t = document.createElement('span');
-      t.textContent = String(v);
-      t.style.fontSize = '14px';
-      t.style.fontWeight = '600';
-
-      pill.appendChild(input);
-      pill.appendChild(t);
-      radios.appendChild(pill);
-    }
-
-    row.appendChild(left);
-    row.appendChild(radios);
-    row.appendChild(right);
-
-    return section;
-  }
-
-  function makeNavRow() {
-    const row = document.createElement('div');
-    row.style.display = 'flex';
-    row.style.justifyContent = 'flex-end';
-    row.style.gap = '10px';
-    row.style.marginTop = '18px';
-    return row;
-  }
-
-  function makePrimaryButton(text) {
-    const btn = document.createElement('button');
-    btn.type = 'button';
-    btn.textContent = text || 'Next';
-    btn.style.border = 'none';
-    btn.style.borderRadius = '12px';
-    btn.style.padding = '12px 18px';
-    btn.style.fontSize = '16px';
-    btn.style.fontWeight = '700';
-    btn.style.cursor = 'pointer';
-    btn.style.background = '#1F6FEB';
-    btn.style.color = '#FFFFFF';
-    btn.style.boxShadow = '0 6px 16px rgba(31, 111, 235, 0.25)';
-    return btn;
-  }
-
-  function makeSecondaryButton(text) {
-    const btn = document.createElement('button');
-    btn.type = 'button';
-    btn.textContent = text || 'Back';
-    btn.style.border = '1px solid #D8CDA3';
-    btn.style.borderRadius = '12px';
-    btn.style.padding = '12px 18px';
-    btn.style.fontSize = '16px';
-    btn.style.fontWeight = '700';
-    btn.style.cursor = 'pointer';
-    btn.style.background = '#FFFFFF';
-    btn.style.color = THEME.text;
-    return btn;
+    const html = document.documentElement;
+    const body = document.body;
+    html.style.overflow = _prev.htmlOverflow ?? '';
+    body.style.overflow = _prev.bodyOverflow ?? '';
+    body.style.minHeight = _prev.bodyMinHeight ?? '';
+    body.style.background = _prev.bodyBg ?? '';
   }
 })();
