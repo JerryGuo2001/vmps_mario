@@ -248,8 +248,6 @@ async function startWithID() {
     if (w) w.style.display = 'none';
 
     armIdleSessionTimeout();
-
-    startColorBlindSurvey()
     
     showPhaseInstructions('ooo', () => {
       initTaskOOO();

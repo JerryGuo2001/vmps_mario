@@ -85,7 +85,7 @@
       {
         id: "ishihara_23",
         label: "Plate 3",
-        img: "TexturePack/colorblind/500px-Ishihara_19.PNG",
+        img: "TexturePack/colorblind/500px-Ishihara_23.PNG",
         correct: "42",
         choices: ["42", "24", "12", "No number"],
         scored: true,
