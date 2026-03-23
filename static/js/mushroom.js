@@ -265,7 +265,8 @@ function nearestRowFor(color, wantStem, wantCap, idx) {
 
 function rowId(r) { return `${r.color}|${r.stem}|${r.cap}|${basenameFromPath(r.filename)}`; }
 
-/* ==================== OOO: BETWEEN-COLOR TRIPLETS (72→24) ==================== */
+/* ==================== OOO: COVERAGE-FIRST BALANCED BUILDER ==================== */
+
 function shuffleInPlace(arr) {
   for (let i = arr.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
@@ -274,194 +275,492 @@ function shuffleInPlace(arr) {
   return arr;
 }
 
-// Order-invariant key for a triplet (so A-B-C == C-A-B)
-function oooTripletKey(tri) {
-  return [rowId(tri.a), rowId(tri.b), rowId(tri.c)].sort().join(' || ');
+function oooTypeIdFromRow(r) {
+  return `${r.color}|${r.stem}|${r.cap}`;
 }
 
-/**
- * Build MORE than floor(n/3) OOO trials from the same base pool by running
- * your existing builder multiple times on reshuffled copies of the same pool,
- * while preventing exact triplet repeats across passes.
- *
- * - Preserves your existing "same logic" because each pass uses buildOOOTrialsFromPool()
- * - Allows mushroom reuse across passes
- * - Enforces unique exact triplets across the final set
- */
-function buildOOOTrialsNoRepeatAcrossPasses(basePool, targetTrials = MAX_TRIALS) {
-  if (!Array.isArray(basePool) || basePool.length < 3) {
-    console.warn('[OOO] basePool too small for OOO.');
-    return [];
-  }
+// Order-invariant key by TYPE (not exemplar / filename)
+function oooTypeTripletKeyFromTypeIds(typeIds) {
+  return [...typeIds].map(String).sort().join(' || ');
+}
 
-  const perPass = Math.floor(basePool.length / 3); // 72 -> 24
-  if (perPass <= 0) return [];
-
+function oooCombinations(arr, k) {
   const out = [];
-  const seenTriplets = new Set();
+  const n = arr.length;
+  if (k <= 0 || k > n) return out;
 
-  // Safety guard to avoid infinite loops in weird edge cases
-  const MAX_PASSES = 500;
-  let passCount = 0;
+  const idx = Array.from({ length: k }, (_, i) => i);
+  while (true) {
+    out.push(idx.map(i => arr[i]));
+    let p = k - 1;
+    while (p >= 0 && idx[p] === n - k + p) p--;
+    if (p < 0) break;
+    idx[p] += 1;
+    for (let j = p + 1; j < k; j++) idx[j] = idx[j - 1] + 1;
+  }
+  return out;
+}
 
-  while (out.length < targetTrials && passCount < MAX_PASSES) {
-    passCount++;
+function buildOOOTypeBuckets(rows) {
+  const byType = new Map();
 
-    // Fresh shuffled copy each pass
-    const poolCopy = basePool.slice();
-    shuffleInPlace(poolCopy);
+  for (const row of rows || []) {
+    const typeId = oooTypeIdFromRow(row);
+    const color = (row.color || '').toLowerCase();
 
-    // Reuse your original logic (between-color preference + leftovers)
-    const batch = buildOOOTrialsFromPool(poolCopy);
-
-    let addedThisPass = 0;
-    for (const tri of batch) {
-      const key = oooTripletKey(tri);
-      if (seenTriplets.has(key)) continue;
-
-      seenTriplets.add(key);
-      out.push(tri);
-      addedThisPass++;
-
-      if (out.length >= targetTrials) break;
+    if (!byType.has(typeId)) {
+      byType.set(typeId, {
+        typeId,
+        color,
+        stem: row.stem,
+        cap: row.cap,
+        exemplars: [],
+      });
     }
 
-    // If somehow no new trials are being added repeatedly, stop
-    if (addedThisPass === 0 && passCount > 10) {
-      console.warn('[OOO] No new unique triplets found in recent pass; stopping early.');
-      break;
+    byType.get(typeId).exemplars.push(row);
+  }
+
+  for (const bucket of byType.values()) {
+    shuffleInPlace(bucket.exemplars);
+  }
+
+  return byType;
+}
+
+function buildSelected72TypeCoverageRows(allRows, desiredTypeCount = 72) {
+  const allTypeBuckets = buildOOOTypeBuckets(allRows);
+
+  const byColor = new Map();
+  for (const bucket of allTypeBuckets.values()) {
+    if (!byColor.has(bucket.color)) byColor.set(bucket.color, []);
+    byColor.get(bucket.color).push(bucket);
+  }
+
+  for (const arr of byColor.values()) shuffleInPlace(arr);
+
+  const colors = EIGHT_COLORS.slice();
+  const selectedBuckets = [];
+  const selectedTypeIds = new Set();
+
+  // ==================== 72-type coverage is enforced first ====================
+  // First try to select the 72 covered TYPES in a balanced color-aware way.
+  const basePerColor = Math.floor(desiredTypeCount / colors.length); // 72 / 8 = 9
+  for (const color of colors) {
+    const arr = byColor.get(color) || [];
+    const take = Math.min(basePerColor, arr.length);
+    for (let i = 0; i < take; i++) {
+      const bucket = arr.shift();
+      selectedBuckets.push(bucket);
+      selectedTypeIds.add(bucket.typeId);
+      if (selectedBuckets.length >= desiredTypeCount) break;
+    }
+    if (selectedBuckets.length >= desiredTypeCount) break;
+  }
+
+  // Fill any remainder from whatever colors still have unused types.
+  if (selectedBuckets.length < desiredTypeCount) {
+    const leftovers = [];
+    for (const color of colors) {
+      leftovers.push(...(byColor.get(color) || []));
+    }
+    shuffleInPlace(leftovers);
+
+    for (const bucket of leftovers) {
+      if (selectedBuckets.length >= desiredTypeCount) break;
+      if (selectedTypeIds.has(bucket.typeId)) continue;
+      selectedBuckets.push(bucket);
+      selectedTypeIds.add(bucket.typeId);
     }
   }
 
-  if (out.length < targetTrials) {
+  if (selectedBuckets.length < desiredTypeCount) {
     console.warn(
-      `[OOO] Could only build ${out.length} unique triplets (target=${targetTrials}) from base pool size ${basePool.length}.`
+      `[OOO] Only found ${selectedBuckets.length} unique types (wanted ${desiredTypeCount}). ` +
+      'Using all available selected types.'
     );
   }
 
-  // Final shuffle so pass structure is not visible
-  shuffleInPlace(out);
+  const selectedRows = [];
+  for (const row of allRows) {
+    if (selectedTypeIds.has(oooTypeIdFromRow(row))) {
+      selectedRows.push(row);
+    }
+  }
+
+  const colorCounts = {};
+  for (const bucket of selectedBuckets) {
+    colorCounts[bucket.color] = (colorCounts[bucket.color] || 0) + 1;
+  }
+  console.log('[OOO] Selected coverage type counts by color:', colorCounts);
+
+  return {
+    selectedRows,
+    selectedTypeCount: selectedBuckets.length,
+    selectedTypeIds,
+  };
+}
+
+function findCoveragePlanByColorCounts(colorNames, colorCounts, withinTarget, acrossTarget) {
+  const memo = new Map();
+
+  function memoKey(counts, w, a) {
+    return `${counts.join(',')}|${w}|${a}`;
+  }
+
+  function dfs(counts, wLeft, aLeft) {
+    const k = memoKey(counts, wLeft, aLeft);
+    if (memo.has(k)) return memo.get(k);
+
+    const remainingTypes = counts.reduce((s, x) => s + x, 0);
+    if (remainingTypes !== (wLeft + aLeft) * 3) {
+      memo.set(k, null);
+      return null;
+    }
+
+    if (wLeft === 0 && aLeft === 0) {
+      memo.set(k, []);
+      return [];
+    }
+
+    if (wLeft > 0) {
+      const candidates = colorNames
+        .map((c, i) => ({ color: c, idx: i, n: counts[i] }))
+        .filter(x => x.n >= 3)
+        .sort((a, b) => b.n - a.n);
+
+      for (const cand of candidates) {
+        const next = counts.slice();
+        next[cand.idx] -= 3;
+        const rest = dfs(next, wLeft - 1, aLeft);
+        if (rest) {
+          const ans = [{ kind: 'within', colors: [cand.color] }, ...rest];
+          memo.set(k, ans);
+          return ans;
+        }
+      }
+    }
+
+    if (aLeft > 0) {
+      const available = colorNames
+        .map((c, i) => ({ color: c, idx: i, n: counts[i] }))
+        .filter(x => x.n >= 1)
+        .sort((a, b) => b.n - a.n);
+
+      const triples = oooCombinations(available, 3);
+      for (const triple of triples) {
+        const next = counts.slice();
+        for (const item of triple) next[item.idx] -= 1;
+        const rest = dfs(next, wLeft, aLeft - 1);
+        if (rest) {
+          const ans = [{ kind: 'across', colors: triple.map(x => x.color) }, ...rest];
+          memo.set(k, ans);
+          return ans;
+        }
+      }
+    }
+
+    memo.set(k, null);
+    return null;
+  }
+
+  return dfs(colorCounts.slice(), withinTarget, acrossTarget);
+}
+
+function chooseBestCoverageTargets(colorToTypeIds, coverageTripletCount, desiredWithinTotal, desiredAcrossTotal) {
+  const colorNames = [...colorToTypeIds.keys()];
+  const counts = colorNames.map(c => colorToTypeIds.get(c).length);
+
+  // Keep coverage-first as the priority, but try to stay near the final 50/50 split.
+  const rawWithin = Math.round((coverageTripletCount * desiredWithinTotal) / (desiredWithinTotal + desiredAcrossTotal));
+  const minW = 0;
+  const maxW = coverageTripletCount;
+
+  for (let delta = 0; delta <= coverageTripletCount; delta++) {
+    const candidates = [];
+    if (rawWithin - delta >= minW) candidates.push(rawWithin - delta);
+    if (delta > 0 && rawWithin + delta <= maxW) candidates.push(rawWithin + delta);
+
+    for (const withinCount of candidates) {
+      const acrossCount = coverageTripletCount - withinCount;
+      const plan = findCoveragePlanByColorCounts(colorNames, counts, withinCount, acrossCount);
+      if (plan) {
+        return { withinCoverage: withinCount, acrossCoverage: acrossCount, plan };
+      }
+    }
+  }
+
+  throw new Error('[OOO] Could not build a valid 72-type coverage-first OOO plan.');
+}
+
+function buildCoverageFirstTriplets(typePoolById, coverageTripletCount, desiredWithinTotal, desiredAcrossTotal) {
+  const colorToTypeIds = new Map();
+  for (const [typeId, pool] of typePoolById.entries()) {
+    if (!colorToTypeIds.has(pool.color)) colorToTypeIds.set(pool.color, []);
+    colorToTypeIds.get(pool.color).push(typeId);
+  }
+  for (const ids of colorToTypeIds.values()) shuffleInPlace(ids);
+
+  const targetInfo = chooseBestCoverageTargets(
+    colorToTypeIds,
+    coverageTripletCount,
+    desiredWithinTotal,
+    desiredAcrossTotal
+  );
+
+  const working = new Map();
+  for (const [color, ids] of colorToTypeIds.entries()) {
+    working.set(color, ids.slice());
+  }
+
+  const triplets = [];
+  const usedTripletKeys = new Set();
+
+  // ==================== 72-type coverage is enforced first ====================
+  for (const step of targetInfo.plan) {
+    let typeIds;
+    if (step.kind === 'within') {
+      const color = step.colors[0];
+      typeIds = working.get(color).splice(0, 3);
+    } else {
+      typeIds = step.colors.map(color => working.get(color).shift());
+    }
+
+    const tripletKey = oooTypeTripletKeyFromTypeIds(typeIds);
+    if (usedTripletKeys.has(tripletKey)) {
+      throw new Error(`[OOO] Duplicate coverage triplet key: ${tripletKey}`);
+    }
+
+    usedTripletKeys.add(tripletKey);
+    triplets.push({
+      kind: step.kind,
+      typeIds,
+      tripletKey,
+      coverage_pass: true,
+    });
+  }
+
+  return {
+    triplets,
+    usedTripletKeys,
+    coverageWithin: targetInfo.withinCoverage,
+    coverageAcross: targetInfo.acrossCoverage,
+  };
+}
+
+function enumerateWithinCandidates(colorToTypeIds, usedTripletKeys) {
+  const out = [];
+  for (const [color, ids] of colorToTypeIds.entries()) {
+    if (ids.length < 3) continue;
+    const combos = oooCombinations(ids, 3);
+    for (const typeIds of combos) {
+      const tripletKey = oooTypeTripletKeyFromTypeIds(typeIds);
+      if (usedTripletKeys.has(tripletKey)) continue;
+      out.push({
+        kind: 'within',
+        typeIds: [...typeIds],
+        tripletKey,
+        coverage_pass: false,
+        sourceColor: color,
+      });
+    }
+  }
+  return out;
+}
+
+function enumerateAcrossCandidates(colorToTypeIds, usedTripletKeys) {
+  const out = [];
+  const colors = [...colorToTypeIds.keys()].filter(c => colorToTypeIds.get(c).length > 0);
+  const colorTriples = oooCombinations(colors, 3);
+
+  for (const [c1, c2, c3] of colorTriples) {
+    const ids1 = colorToTypeIds.get(c1);
+    const ids2 = colorToTypeIds.get(c2);
+    const ids3 = colorToTypeIds.get(c3);
+
+    for (const t1 of ids1) {
+      for (const t2 of ids2) {
+        for (const t3 of ids3) {
+          const typeIds = [t1, t2, t3];
+          const tripletKey = oooTypeTripletKeyFromTypeIds(typeIds);
+          if (usedTripletKeys.has(tripletKey)) continue;
+          out.push({
+            kind: 'across',
+            typeIds,
+            tripletKey,
+            coverage_pass: false,
+            sourceColors: [c1, c2, c3],
+          });
+        }
+      }
+    }
+  }
 
   return out;
 }
 
+function addPostCoverageTriplets(typePoolById, currentTriplets, usedTripletKeys, totalTrials) {
+  // ==================== across-color vs within-color balancing is enforced ====================
+  const desiredWithinTotal = Math.floor(totalTrials / 2);
+  const desiredAcrossTotal = totalTrials - desiredWithinTotal;
 
-function buildOOOTrialsFromPool(mushroomPool) {
-  // Uses every mushroom at most once.
-  // First makes as many "all different color" triplets as possible,
-  // then uses leftovers for fallback triplets. Finally shuffles trials.
+  let currentWithin = currentTriplets.filter(t => t.kind === 'within').length;
+  let currentAcross = currentTriplets.filter(t => t.kind === 'across').length;
 
-  if (!Array.isArray(mushroomPool)) {
-    throw new Error('[OOO] mushroomPool must be an array.');
+  const colorToTypeIds = new Map();
+  for (const [typeId, pool] of typePoolById.entries()) {
+    if (!colorToTypeIds.has(pool.color)) colorToTypeIds.set(pool.color, []);
+    colorToTypeIds.get(pool.color).push(typeId);
   }
-  const n = mushroomPool.length;
-  if (n < 3) {
-    console.warn('[OOO] Not enough mushrooms to build any trials.');
+
+  const finalTriplets = currentTriplets.slice();
+
+  const needWithin = Math.max(0, desiredWithinTotal - currentWithin);
+  const needAcross = Math.max(0, desiredAcrossTotal - currentAcross);
+
+  const withinCandidates = enumerateWithinCandidates(colorToTypeIds, usedTripletKeys);
+  const acrossCandidates = enumerateAcrossCandidates(colorToTypeIds, usedTripletKeys);
+
+  shuffleInPlace(withinCandidates);
+  shuffleInPlace(acrossCandidates);
+
+  let addedWithin = 0;
+  for (const cand of withinCandidates) {
+    if (addedWithin >= needWithin) break;
+    if (usedTripletKeys.has(cand.tripletKey)) continue;
+    usedTripletKeys.add(cand.tripletKey);
+    finalTriplets.push(cand);
+    addedWithin += 1;
+    currentWithin += 1;
+  }
+
+  let addedAcross = 0;
+  for (const cand of acrossCandidates) {
+    if (addedAcross >= needAcross) break;
+    if (usedTripletKeys.has(cand.tripletKey)) continue;
+    usedTripletKeys.add(cand.tripletKey);
+    finalTriplets.push(cand);
+    addedAcross += 1;
+    currentAcross += 1;
+  }
+
+  if (finalTriplets.length < totalTrials) {
+    const leftovers = [
+      ...withinCandidates.filter(c => !usedTripletKeys.has(c.tripletKey)),
+      ...acrossCandidates.filter(c => !usedTripletKeys.has(c.tripletKey)),
+    ];
+    shuffleInPlace(leftovers);
+
+    for (const cand of leftovers) {
+      if (finalTriplets.length >= totalTrials) break;
+      if (usedTripletKeys.has(cand.tripletKey)) continue;
+      usedTripletKeys.add(cand.tripletKey);
+      finalTriplets.push(cand);
+      if (cand.kind === 'within') currentWithin += 1;
+      else currentAcross += 1;
+    }
+  }
+
+  return finalTriplets.slice(0, totalTrials);
+}
+
+function makeExemplarPicker(typePoolById) {
+  const state = new Map();
+
+  for (const [typeId, pool] of typePoolById.entries()) {
+    const exemplars = pool.exemplars.slice();
+    shuffleInPlace(exemplars);
+    state.set(typeId, { exemplars, cursor: 0 });
+  }
+
+  return function pickExemplar(typeId) {
+    const s = state.get(typeId);
+    if (!s || !s.exemplars.length) {
+      throw new Error(`[OOO] No exemplar available for type ${typeId}`);
+    }
+
+    // ==================== exemplar variation within repeated types is handled ====================
+    // Reuse is at the TYPE level only after coverage is done. When a type reappears,
+    // rotate exemplars so a different actual mushroom is used when possible.
+    const exemplar = s.exemplars[s.cursor % s.exemplars.length];
+    s.cursor += 1;
+    return exemplar;
+  };
+}
+
+function materializeOOOTriplets(finalTripletSpecs, typePoolById) {
+  const pickExemplar = makeExemplarPicker(typePoolById);
+
+  return finalTripletSpecs.map((spec, idx) => {
+    const chosenRows = spec.typeIds.map(typeId => pickExemplar(typeId));
+    return {
+      ooo_index: idx,
+      a: chosenRows[0],
+      b: chosenRows[1],
+      c: chosenRows[2],
+      allDifferent: spec.kind === 'across',
+      balance_class: spec.kind,
+      coverage_pass: !!spec.coverage_pass,
+      triplet_key: spec.tripletKey,
+      type_ids: [...spec.typeIds],
+    };
+  });
+}
+
+function buildBalancedOOOTrialsFromCoverageRows(coverageRows, totalTrials = MAX_TRIALS) {
+  const typePoolById = buildOOOTypeBuckets(coverageRows);
+  const coveredTypeCount = typePoolById.size;
+
+  if (coveredTypeCount < 3) {
+    console.warn('[OOO] Not enough covered types to build OOO trials.');
     return [];
   }
 
-  const totalTrials = Math.floor(n / 3); // for 72 → 24
-
-  // Shallow copy; tag index for debugging
-  const all = mushroomPool.map((m, idx) => ({ ...m, _idx: idx }));
-
-  // Group by color
-  const byColor = new Map();
-  for (const m of all) {
-    const key = (m.color || '').toLowerCase() || 'UNKNOWN';
-    if (!byColor.has(key)) byColor.set(key, []);
-    byColor.get(key).push(m);
-  }
-
-  // Shuffle within each color group
-  for (const group of byColor.values()) {
-    for (let i = group.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [group[i], group[j]] = [group[j], group[i]];
-    }
-  }
-
-  function colorsWithRemaining() {
-    const colors = [];
-    for (const [color, group] of byColor.entries()) {
-      if (group.length > 0) colors.push(color);
-    }
-    return colors;
-  }
-
-  function takeOneFromColor(color) {
-    const group = byColor.get(color);
-    if (!group || group.length === 0) return null;
-    return group.pop();
-  }
-
-  const trials = [];
-
-  // ---------- Phase 1: as many "all different color" trials as possible ----------
-  while (trials.length < totalTrials) {
-    const availColors = colorsWithRemaining();
-    if (availColors.length < 3) break;
-
-    // Shuffle available colors and pick 3 distinct ones
-    for (let i = availColors.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [availColors[i], availColors[j]] = [availColors[j], availColors[i]];
-    }
-    const chosenColors = availColors.slice(0, 3);
-
-    const triplet = [];
-    for (const c of chosenColors) {
-      const m = takeOneFromColor(c);
-      if (!m) {
-        throw new Error(`[OOO] Logic error: expected mushroom in color ${c}.`);
-      }
-      triplet.push(m);
-    }
-
-    trials.push({
-      a: triplet[0],
-      b: triplet[1],
-      c: triplet[2],
-      allDifferent: true,
-    });
-  }
-
-  // ---------- Phase 2: leftovers → fallback trials (colors can repeat) ----------
-  let leftovers = [];
-  for (const group of byColor.values()) {
-    leftovers = leftovers.concat(group);
-  }
-
-  // Shuffle leftovers
-  for (let i = leftovers.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [leftovers[i], leftovers[j]] = [leftovers[j], leftovers[i]];
-  }
-
-  while (leftovers.length >= 3 && trials.length < totalTrials) {
-    const triplet = leftovers.splice(0, 3);
-    const colorSet = new Set(triplet.map(m => (m.color || '').toLowerCase() || 'UNKNOWN'));
-    trials.push({
-      a: triplet[0],
-      b: triplet[1],
-      c: triplet[2],
-      allDifferent: (colorSet.size === 3),
-    });
-  }
-
-  if (trials.length !== totalTrials) {
+  const usableCoveredTypeCount = coveredTypeCount - (coveredTypeCount % 3);
+  if (usableCoveredTypeCount !== coveredTypeCount) {
     console.warn(
-      `[OOO] Built ${trials.length} trials from ${n} mushrooms; expected ${totalTrials}.`
+      `[OOO] Covered type count ${coveredTypeCount} is not divisible by 3; trimming logical use to ${usableCoveredTypeCount}.`
     );
   }
 
-  // ---------- Final shuffle: mix different-color and same-color trials ----------
-  for (let i = trials.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [trials[i], trials[j]] = [trials[j], trials[i]];
-  }
+  const usableTypeIds = new Set(
+    [...typePoolById.keys()].slice(0, usableCoveredTypeCount)
+  );
 
-  return trials;
+  const trimmedTypePoolById = new Map(
+    [...typePoolById.entries()].filter(([typeId]) => usableTypeIds.has(typeId))
+  );
+
+  const coverageTripletCount = usableCoveredTypeCount / 3;
+  const desiredWithinTotal = Math.floor(totalTrials / 2);
+  const desiredAcrossTotal = totalTrials - desiredWithinTotal;
+
+  const coverageBuild = buildCoverageFirstTriplets(
+    trimmedTypePoolById,
+    coverageTripletCount,
+    desiredWithinTotal,
+    desiredAcrossTotal
+  );
+
+  const finalTripletSpecs = addPostCoverageTriplets(
+    trimmedTypePoolById,
+    coverageBuild.triplets,
+    coverageBuild.usedTripletKeys,
+    totalTrials
+  );
+
+  const materialized = materializeOOOTriplets(finalTripletSpecs, trimmedTypePoolById);
+
+  // ==================== final shuffle is applied ====================
+  shuffleInPlace(materialized);
+
+  const nWithin = materialized.filter(t => t.balance_class === 'within').length;
+  const nAcross = materialized.filter(t => t.balance_class === 'across').length;
+  console.log(
+    `[OOO] Final balanced set: ${materialized.length} trials | across=${nAcross} | within=${nWithin}`
+  );
+
+  return materialized;
 }
 
 /* ==================== LAZY OOO RENDER HELPERS ==================== */
@@ -489,14 +788,18 @@ async function _materializeOOOTripletLazy(tri) {
     a: { ..._rowToRenderableMeta(tri.a), image: imgA },
     b: { ..._rowToRenderableMeta(tri.b), image: imgB },
     c: { ..._rowToRenderableMeta(tri.c), image: imgC },
-    allDifferent: !!tri.allDifferent
+    allDifferent: !!tri.allDifferent,
+    balance_class: tri.balance_class,
+    coverage_pass: !!tri.coverage_pass,
+    type_ids: tri.type_ids ? tri.type_ids.slice() : [],
+    triplet_key: tri.triplet_key || '',
   };
 }
 
 /* ==================== PUBLIC STATE & API ==================== */
 
 let mushroomCatalogRows = [];
-let OOOTriplets = [];              // {a,b,c,allDifferent} — catalog rows, no images yet
+let OOOTriplets = [];              // {a,b,c,allDifferent,balance_class,coverage_pass,type_ids,triplet_key}
 let _OOOTrialsCache = new Map();   // index -> Promise<rendered triplet>
 
 async function buildSetAForOOO() {
@@ -512,42 +815,21 @@ async function buildSetAForOOO() {
     return 0;
   }
 
-  // ---- Choose 72 mushrooms as base OOO pool ----
-  const N_DESIRED = 72;
-  const shuffled = mushroomCatalogRows.slice();
-  // Shuffle catalog before sampling
-  for (let i = shuffled.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
-  }
+  const coverageInfo = buildSelected72TypeCoverageRows(mushroomCatalogRows, 72);
 
-  let poolCount = Math.min(N_DESIRED, shuffled.length);
-  if (poolCount < N_DESIRED) {
-    console.warn(
-      `[OOO] Only found ${poolCount} mushrooms in catalog (wanted 72). ` +
-      'Using all of them.'
-    );
-  }
-
-  let basePool = shuffled.slice(0, poolCount);
-
-  // Ensure length is a multiple of 3 (drop a couple if necessary)
-  if (basePool.length % 3 !== 0) {
-    const trimmedCount = basePool.length - (basePool.length % 3);
-    console.warn(
-      `[OOO] Pool size ${basePool.length} not divisible by 3; trimming to ${trimmedCount}.`
-    );
-    basePool = basePool.slice(0, trimmedCount);
+  if (!coverageInfo.selectedRows || coverageInfo.selectedRows.length < 3) {
+    console.warn('[OOO] Could not build 72-type coverage rows.');
+    OOOTriplets = [];
+    return 0;
   }
 
   // Reset lazy cache when rebuilding triplets
   _OOOTrialsCache = new Map();
 
-  // Build up to MAX_TRIALS unique triplets from the SAME 72-mushroom base pool
-  OOOTriplets = buildOOOTrialsNoRepeatAcrossPasses(basePool, MAX_TRIALS);
+  OOOTriplets = buildBalancedOOOTrialsFromCoverageRows(coverageInfo.selectedRows, MAX_TRIALS);
 
   console.log(
-    `[OOO] Prepared ${OOOTriplets.length} unique OOO trials from ${basePool.length} mushrooms (target=${MAX_TRIALS}).`
+    `[OOO] Prepared ${OOOTriplets.length} OOO trials from ${coverageInfo.selectedTypeCount} covered types (target=${MAX_TRIALS}).`
   );
   return OOOTriplets.length;
 }
@@ -575,7 +857,7 @@ function prefetchOOO(i, lookahead = 2) {
 
 // Accessors
 function getOOOCount() { return OOOTriplets.length; }
-function getOOOMeta(i) { return (i>=0 && i<OOOTriplets.length) ? OOOTriplets[i] : null; }
+function getOOOMeta(i) { return (i >= 0 && i < OOOTriplets.length) ? OOOTriplets[i] : null; }
 
 /* ==================== WITHIN-COLOR MEMORY EXTRA BUILDER (SEEN/UNSEEN + CLOSE/MID/FAR) ==================== */
 
