@@ -16,7 +16,7 @@ window.onload = () => {
   preloadAllInstructions().catch(() => {/* ignore */});
 };
 
-const IDLE_TIMEOUT_MS = 15 * 60 * 1000;
+const IDLE_TIMEOUT_MS = 5 * 60 * 1000;
 const IDLE_ACTIVITY_EVENTS = [
   'mousemove',
   'mousedown',
