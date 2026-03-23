@@ -24,6 +24,14 @@ function SURVEY_FILE_KEY(id) {
   return `survey_${id}.csv`;
 }
 
+function START_FILE_KEY(id) {
+  return `started_${id}.csv`;
+}
+
+function CLOSED_FILE_KEY(id) {
+  return `closed_${id}.csv`;
+}
+
 function TRIALS_FILE_KEY(id) {
   return `data_${id}.csv`;
 }
@@ -64,11 +72,27 @@ async function participantHasCompletedSurvey(id) {
   }
 }
 
+async function participantHasBlockedSession(id) {
+  if (!id || SAVE_MODE !== "vercel") return false;
+
+  try {
+    if (await fileExistsOnServer(SURVEY_FILE_KEY(id))) return true;
+    if (await fileExistsOnServer(CLOSED_FILE_KEY(id))) return true;
+    if (await fileExistsOnServer(START_FILE_KEY(id))) return true;
+    return false;
+  } catch (err) {
+    console.warn("[data_save] Unable to verify blocked session state:", err);
+    return false;
+  }
+}
+
 async function checkAndMaybeResume(id) {
   if (!id || SAVE_MODE !== "vercel") return "none";
 
   try {
-    if (await participantHasCompletedSurvey(id)) return "completed";
+    if (await fileExistsOnServer(SURVEY_FILE_KEY(id))) return "completed";
+    if (await fileExistsOnServer(CLOSED_FILE_KEY(id))) return "closed";
+    if (await fileExistsOnServer(START_FILE_KEY(id))) return "started";
 
     if (await fileExistsOnServer(TRIALS_FILE_KEY(id))) return "started";
     if (await fileExistsOnServer(RUNSHEET_KEY(id, "participant_data"))) return "started";
@@ -80,34 +104,44 @@ async function checkAndMaybeResume(id) {
   }
 }
 
+function buildSessionMarkerCSV(row) {
+  const headers = Object.keys(row || {});
+  if (!headers.length) return null;
+
+  return [
+    headers.join(","),
+    headers.map((h) => JSON.stringify(row[h] ?? "")).join(",")
+  ].join("\r\n");
+}
+
+async function saveStartMarkerCSV(id) {
+  if (!id) return null;
+
+  const csvString = buildSessionMarkerCSV({
+    id,
+    trial_type: "session_started",
+    status: "started",
+    started_at: new Date().toISOString(),
+    block_reentry: 1
+  });
+
+  return await saveCSVString(csvString, START_FILE_KEY(id));
+}
+
 // Save a tiny marker file so the same participant ID cannot restart.
 async function saveForceQuitMarkerCSV(id, reason = "inactive_15min") {
   if (!id) return null;
 
-  const headers = [
-    "id",
-    "trial_type",
-    "end_reason",
-    "status",
-    "ended_at",
-    "block_reentry"
-  ];
-
-  const row = {
+  const csvString = buildSessionMarkerCSV({
     id,
     trial_type: "session_closed",
     end_reason: reason,
     status: "force_quit",
     ended_at: new Date().toISOString(),
     block_reentry: 1
-  };
+  });
 
-  const csvString = [
-    headers.join(","),
-    headers.map((h) => JSON.stringify(row[h] ?? "")).join(",")
-  ].join("\r\n");
-
-  return await saveCSVString(csvString, SURVEY_FILE_KEY(id));
+  return await saveCSVString(csvString, CLOSED_FILE_KEY(id));
 }
 
 

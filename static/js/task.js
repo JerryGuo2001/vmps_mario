@@ -157,12 +157,15 @@ async function participantAlreadyCompleted(id) {
   if (!id) return false;
 
   try {
-    if (typeof participantHasCompletedSurvey === 'function') {
-      return await participantHasCompletedSurvey(id);
+    if (typeof participantHasBlockedSession === 'function') {
+      return await participantHasBlockedSession(id);
     }
     if (typeof checkAndMaybeResume === 'function') {
       const status = await checkAndMaybeResume(id);
-      return status === 'completed';
+      return status === 'completed' || status === 'closed' || status === 'started';
+    }
+    if (typeof participantHasCompletedSurvey === 'function') {
+      return await participantHasCompletedSurvey(id);
     }
   } catch (err) {
     console.warn('[task] Existing-participant check failed; allowing task to continue.', err);
@@ -237,6 +240,17 @@ async function startWithID() {
         'This participant ID already has a completed or closed session. You cannot restart the experiment.'
       );
       return;
+    }
+
+    if (typeof saveStartMarkerCSV === 'function') {
+      try {
+        await saveStartMarkerCSV(idInput);
+        console.log('[task] Start marker saved.');
+      } catch (err) {
+        console.error('[task] Failed to save start marker:', err);
+        alert('Could not reserve this participant ID on the server. Please try again.');
+        return;
+      }
     }
 
     participantData.id = idInput;
