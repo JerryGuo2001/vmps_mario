@@ -249,6 +249,17 @@ async function startWithID() {
 
     armIdleSessionTimeout();
 
+          startBISBASSurvey(() => {
+        startNeedForCognitionSurvey(() => {
+          startFiveDCRSurvey(() => {
+            startColorBlindSurvey(() => {
+              window.startPostSurvey();
+            })
+          })
+        })
+      })
+
+
     showPhaseInstructions('ooo', () => {
       initTaskOOO();
     });
