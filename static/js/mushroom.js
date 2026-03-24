@@ -664,35 +664,181 @@ function addPostCoverageTriplets(typePoolById, currentTriplets, usedTripletKeys,
   return finalTriplets.slice(0, totalTrials);
 }
 
-function makeExemplarPicker(typePoolById) {
-  const state = new Map();
+function oooNum(x) {
+  const v = Number(x);
+  return Number.isFinite(v) ? v : 0;
+}
 
+function computeOOOFeatureRanges(typePoolById) {
+  let stemMin = Infinity, stemMax = -Infinity;
+  let capMin = Infinity, capMax = -Infinity;
+
+  for (const pool of typePoolById.values()) {
+    for (const row of pool.exemplars) {
+      const s = oooNum(row.stem);
+      const c = oooNum(row.cap);
+      if (s < stemMin) stemMin = s;
+      if (s > stemMax) stemMax = s;
+      if (c < capMin) capMin = c;
+      if (c > capMax) capMax = c;
+    }
+  }
+
+  if (!Number.isFinite(stemMin) || !Number.isFinite(stemMax)) {
+    stemMin = 0; stemMax = 1;
+  }
+  if (!Number.isFinite(capMin) || !Number.isFinite(capMax)) {
+    capMin = 0; capMax = 1;
+  }
+
+  return {
+    stemMin, stemMax,
+    capMin, capMax
+  };
+}
+
+function oooNormalize2D(row, ranges) {
+  const stemDen = Math.max(1e-9, ranges.stemMax - ranges.stemMin);
+  const capDen  = Math.max(1e-9, ranges.capMax - ranges.capMin);
+
+  return {
+    x: (oooNum(row.stem) - ranges.stemMin) / stemDen,
+    y: (oooNum(row.cap)  - ranges.capMin)  / capDen,
+  };
+}
+
+function oooPairDistance(a, b, ranges) {
+  const pa = oooNormalize2D(a, ranges);
+  const pb = oooNormalize2D(b, ranges);
+  const dx = pa.x - pb.x;
+  const dy = pa.y - pb.y;
+  return Math.sqrt(dx * dx + dy * dy);
+}
+
+function oooMinPairwiseDistance(rows, ranges) {
+  if (!rows || rows.length < 2) return 0;
+  let minD = Infinity;
+  for (let i = 0; i < rows.length; i++) {
+    for (let j = i + 1; j < rows.length; j++) {
+      const d = oooPairDistance(rows[i], rows[j], ranges);
+      if (d < minD) minD = d;
+    }
+  }
+  return Number.isFinite(minD) ? minD : 0;
+}
+
+function makeExemplarTripletPicker(typePoolById, options = {}) {
+  const MIN_REQUIRED_DIST = Number.isFinite(options.minPairwiseDistance)
+    ? options.minPairwiseDistance
+    : 0.18; // tune this if needed
+
+  const CANDIDATES_PER_TYPE = Number.isFinite(options.candidatesPerType)
+    ? options.candidatesPerType
+    : 6;
+
+  const ranges = computeOOOFeatureRanges(typePoolById);
+
+  const state = new Map();
   for (const [typeId, pool] of typePoolById.entries()) {
     const exemplars = pool.exemplars.slice();
     shuffleInPlace(exemplars);
-    state.set(typeId, { exemplars, cursor: 0 });
+    state.set(typeId, {
+      exemplars,
+      cursor: 0,
+      useCount: new Array(exemplars.length).fill(0),
+    });
   }
 
-  return function pickExemplar(typeId) {
+  function getCandidates(typeId) {
     const s = state.get(typeId);
     if (!s || !s.exemplars.length) {
       throw new Error(`[OOO] No exemplar available for type ${typeId}`);
     }
 
-    // ==================== exemplar variation within repeated types is handled ====================
-    // Reuse is at the TYPE level only after coverage is done. When a type reappears,
-    // rotate exemplars so a different actual mushroom is used when possible.
-    const exemplar = s.exemplars[s.cursor % s.exemplars.length];
-    s.cursor += 1;
-    return exemplar;
+    const n = s.exemplars.length;
+    const take = Math.min(CANDIDATES_PER_TYPE, n);
+    const out = [];
+
+    for (let k = 0; k < take; k++) {
+      const idx = (s.cursor + k) % n;
+      out.push({
+        row: s.exemplars[idx],
+        idx,
+        usage: s.useCount[idx],
+      });
+    }
+
+    return out;
+  }
+
+  function commitChoice(typeId, chosenIdx) {
+    const s = state.get(typeId);
+    s.useCount[chosenIdx] += 1;
+    s.cursor = (chosenIdx + 1) % s.exemplars.length;
+  }
+
+  return function pickTripletExemplars(typeIds) {
+    if (!Array.isArray(typeIds) || typeIds.length !== 3) {
+      throw new Error('[OOO] Expected exactly 3 typeIds for triplet exemplar picking.');
+    }
+
+    const c1 = getCandidates(typeIds[0]);
+    const c2 = getCandidates(typeIds[1]);
+    const c3 = getCandidates(typeIds[2]);
+
+    let best = null;
+
+    for (const a of c1) {
+      for (const b of c2) {
+        for (const c of c3) {
+          const rows = [a.row, b.row, c.row];
+          const minDist = oooMinPairwiseDistance(rows, ranges);
+          const passes = minDist >= MIN_REQUIRED_DIST ? 1 : 0;
+          const usagePenalty = a.usage + b.usage + c.usage;
+
+          const candidate = {
+            rows,
+            chosen: [a, b, c],
+            passes,
+            minDist,
+            usagePenalty,
+          };
+
+          if (
+            !best ||
+            candidate.passes > best.passes ||
+            (candidate.passes === best.passes && candidate.minDist > best.minDist) ||
+            (candidate.passes === best.passes &&
+             candidate.minDist === best.minDist &&
+             candidate.usagePenalty < best.usagePenalty)
+          ) {
+            best = candidate;
+          }
+        }
+      }
+    }
+
+    if (!best) {
+      throw new Error('[OOO] Could not pick exemplars for triplet.');
+    }
+
+    commitChoice(typeIds[0], best.chosen[0].idx);
+    commitChoice(typeIds[1], best.chosen[1].idx);
+    commitChoice(typeIds[2], best.chosen[2].idx);
+
+    return best.rows;
   };
 }
 
 function materializeOOOTriplets(finalTripletSpecs, typePoolById) {
-  const pickExemplar = makeExemplarPicker(typePoolById);
+  const pickTripletExemplars = makeExemplarTripletPicker(typePoolById, {
+    minPairwiseDistance: 0.18,   // <- change this threshold if you want stricter spacing
+    candidatesPerType: 6
+  });
 
   return finalTripletSpecs.map((spec, idx) => {
-    const chosenRows = spec.typeIds.map(typeId => pickExemplar(typeId));
+    const chosenRows = pickTripletExemplars(spec.typeIds);
+
     return {
       ooo_index: idx,
       a: chosenRows[0],
