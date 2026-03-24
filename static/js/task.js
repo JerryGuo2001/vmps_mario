@@ -1125,7 +1125,8 @@ function updateGame(currentTime) {
         ctx.fillStyle = '#000';
         ctx.font = '16px Arial';
         ctx.textAlign = 'center';
-        ctx.fillText(text, canvas.width / 2, 40);
+        ctx.textBaseline = 'middle';
+        ctx.fillText(text, canvas.width / 2, canvas.height / 2);
         ctx.restore();
       }
 
