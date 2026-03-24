@@ -8,6 +8,8 @@ const INSTR_SLIDES = {
   ooo_2: [1]
 };
 
+let emptyRoomHintShown = false;
+let emptyRoomHintUntil = 0;
 
 const CONSENT_PDF_URL = 'TexturePack/consent/2019-5110_Study_Information_Sheet_Foraging.pdf';
 
@@ -1117,16 +1119,22 @@ function updateGame(currentTime) {
       hungry();
       checkHP_canvas4();
 
-      // 🔹 when all mushrooms in the current room are gone, do NOT regenerate here;
-      // instead show a reminder to move right for a fresh map
-      if (!freezeState && (!mushrooms || mushrooms.length === 0)) {
-        const text = 'Move to the right of the screen to go to a new map with fresh mushrooms';
+      // 🔹 when all mushrooms are gone, show reminder once at top middle
+      if (!freezeState && (!mushrooms || mushrooms.length === 0) && !emptyRoomHintShown) {
+        emptyRoomHintShown = true;
+        emptyRoomHintUntil = Date.now() + 3000; // show for 3 sec
+      }
+
+      if (!freezeState && Date.now() < emptyRoomHintUntil) {
         ctx.save();
         ctx.fillStyle = '#000';
         ctx.font = '16px Arial';
         ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText(text, canvas.width / 2, canvas.height / 2);
+        ctx.fillText(
+          'Move to the right of the screen to go to a new map with fresh mushrooms',
+          canvas.width / 2,
+          40
+        );
         ctx.restore();
       }
 
