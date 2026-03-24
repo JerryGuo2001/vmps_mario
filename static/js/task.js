@@ -1133,7 +1133,7 @@ function updateGame(currentTime) {
         ctx.fillText(
           'Move to the right of the screen to go to a new map with fresh mushrooms',
           canvas.width / 2,
-          40
+          canvas.height * 0.18
         );
         ctx.restore();
       }
