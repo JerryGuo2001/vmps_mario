@@ -207,12 +207,8 @@
   }
 
   async function finishAndSaveAllData() {
-    const overlay = document.getElementById("postSurveyOverlay");
-    if (overlay) overlay.style.display = "none";
-    restoreBackgroundScroll();
-
     const thanks = document.getElementById("thankyou");
-    if (thanks) thanks.style.display = "block";
+    if (thanks) thanks.style.display = "none";
 
     const id = participantData?.id || "unknown";
 
@@ -243,10 +239,99 @@
           console.warn("[PostSurvey] No saver available for postSurvey CSV; skipping survey save.");
         }
       }
+
+      // Only show reboost screen if all save steps above succeeded
+      showReboostScreen();
+
     } catch (err) {
       console.error("Save failed:", err);
       alert("Save failed: " + (err?.message || String(err)));
     }
+  }
+
+  function showReboostScreen() {
+    const REBOOST_URL = "https://starklab.bio.uci.edu/publix/cZkGRQ8lOGn";
+
+    applyOverlayAndLockBackgroundScroll();
+    const overlay = getOrCreateOverlay();
+    overlay.innerHTML = "";
+    overlay.style.display = "block";
+    overlay.scrollTop = 0;
+
+    const outer = document.createElement("div");
+    outer.style.minHeight = "100%";
+    outer.style.display = "flex";
+    outer.style.alignItems = "center";
+    outer.style.justifyContent = "center";
+    outer.style.padding = "40px 16px";
+    overlay.appendChild(outer);
+
+    const card = document.createElement("div");
+    card.style.width = "100%";
+    card.style.maxWidth = "760px";
+    card.style.background = THEME.cardBg;
+    card.style.border = `1px solid ${THEME.border}`;
+    card.style.borderRadius = THEME.radius;
+    card.style.boxShadow = THEME.shadow;
+    card.style.padding = "30px 28px";
+    card.style.color = THEME.text;
+    card.style.fontFamily = "system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif";
+    card.style.lineHeight = "1.5";
+    card.style.textAlign = "center";
+    outer.appendChild(card);
+
+    const title = document.createElement("h2");
+    title.textContent = "Data submitted successfully";
+    title.style.margin = "0 0 14px 0";
+    title.style.fontSize = "28px";
+    title.style.letterSpacing = "0.2px";
+    card.appendChild(title);
+
+    const msg1 = document.createElement("div");
+    msg1.textContent = "Thank you. Your responses have been successfully submitted to the server.";
+    msg1.style.fontSize = "16px";
+    msg1.style.marginBottom = "14px";
+    card.appendChild(msg1);
+
+    const msg2 = document.createElement("div");
+    msg2.textContent = "Before continuing, please note that you will complete one final task that will take about 7 minutes.";
+    msg2.style.fontSize = "18px";
+    msg2.style.fontWeight = "700";
+    msg2.style.marginBottom = "22px";
+    card.appendChild(msg2);
+
+    const btn = document.createElement("a");
+    btn.href = REBOOST_URL;
+    btn.textContent = "Continue to Final Task";
+    btn.style.display = "inline-block";
+    btn.style.textDecoration = "none";
+    btn.style.border = "none";
+    btn.style.borderRadius = "12px";
+    btn.style.padding = "14px 22px";
+    btn.style.fontSize = "16px";
+    btn.style.fontWeight = "700";
+    btn.style.cursor = "pointer";
+    btn.style.background = "#1F6FEB";
+    btn.style.color = "#FFFFFF";
+    btn.style.boxShadow = "0 6px 16px rgba(31, 111, 235, 0.25)";
+    btn.style.transition = "transform 0.12s ease, box-shadow 0.12s ease";
+    card.appendChild(btn);
+
+    btn.addEventListener("mouseenter", () => {
+      btn.style.transform = "translateY(-1px)";
+      btn.style.boxShadow = "0 8px 18px rgba(31, 111, 235, 0.28)";
+    });
+    btn.addEventListener("mouseleave", () => {
+      btn.style.transform = "translateY(0px)";
+      btn.style.boxShadow = "0 6px 16px rgba(31, 111, 235, 0.25)";
+    });
+
+    const small = document.createElement("div");
+    small.textContent = "Click the button above when you are ready.";
+    small.style.marginTop = "14px";
+    small.style.fontSize = "13px";
+    small.style.color = THEME.muted;
+    card.appendChild(small);
   }
 
   // -------------------- Catalog readiness --------------------

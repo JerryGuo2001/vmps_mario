@@ -238,6 +238,11 @@ function _getSeenImageSet() {
   for (const tr of trials) {
     if (!tr || typeof tr !== 'object') continue;
 
+    // OOO stores all shown images here
+    if (Array.isArray(tr.stimulus)) {
+      for (const s of tr.stimulus) tryAdd(s);
+    }
+
     const moi = tr.mushroomObjOrId;
     if (moi) {
       if (typeof moi === 'string') {
@@ -691,6 +696,18 @@ async function preloadMushroomPairs() {
   const seenImageSet = _getSeenImageSet();               // image-level
   const exploreSeenImageSet = _getExploreSeenImageSet(); // exploration-only anchors for lure distance
 
+  // Also promote OOO-seen images to seen types for memory base sampling
+  const seenTypeSetFromImages = new Set();
+  for (const m of pool) {
+    const imgKey = _cleanImageName(m.imagefilename);
+    if (!imgKey || !seenImageSet.has(imgKey)) continue;
+
+    const tk = memoryTypeKey(m);
+    if (tk && !tk.includes('null') && !tk.includes('undefined')) {
+      seenTypeSetFromImages.add(tk);
+    }
+  }
+
   // --- Build buckets by type ---
   // byType: typeKey -> { color, seen:[], unseen:[], seen_ex:[], unseen_ex:[] }
   const byType = new Map();
@@ -713,7 +730,7 @@ async function preloadMushroomPairs() {
     m.type_key = typeKey;
 
     // Type-level seen flag (base 72-type logic)
-    const isSeenType = seenTypeSet.has(typeKey);
+    const isSeenType = seenTypeSet.has(typeKey) || seenTypeSetFromImages.has(typeKey);
     m.seen_in_learning = isSeenType ? 1 : 0;
     byType.get(typeKey)[isSeenType ? 'seen' : 'unseen'].push(m);
 

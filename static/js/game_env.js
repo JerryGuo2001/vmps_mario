@@ -1068,7 +1068,7 @@ async function generateMushroom(count = 5) {
     const k = perPlat[pi] || 0;
     if (k <= 0) continue;
 
-    const xs = xsOnPlatform(p, k, 10);
+    const xs = xsOnPlatform(p, k, 70);
     const boxTopY = (p.y - BOX_CLEARANCE) - BOX_H - 75;
 
     for (let j = 0; j < xs.length && rowIdx < chosenRows.length; j++) {
