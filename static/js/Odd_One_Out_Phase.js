@@ -5,7 +5,7 @@ let typeOOO = 0;
 let trialStartTimeOOO = null;
 let _oooKeyListenerAttached = false;
 let percentagecompleted
-let OOO_debug= true
+let OOO_debug= false
 let OOO_TRIALS_TO_RUN
 if (OOO_debug==true){
   OOO_TRIALS_TO_RUN=2
