@@ -1,4 +1,4 @@
-// ===== Odd_One_Out_Phase.js (lazy OOO, 72→24 design) =====
+// ===== Odd_One_Out_Phase.js (lazy OOO, 72-type / 56-trial fresh-regeneration design) =====
 
 let currentTrialOOO, trialsOOO;  // trialsOOO will store indices into OOOTrials
 let typeOOO = 0;
@@ -10,7 +10,7 @@ let OOO_TRIALS_TO_RUN
 if (OOO_debug==true){
   OOO_TRIALS_TO_RUN=2
 }else{
-  OOO_TRIALS_TO_RUN = 50
+  OOO_TRIALS_TO_RUN = 56
 }
 
 // ========================== OOO PRELOAD ===========================
@@ -197,14 +197,19 @@ async function initTaskOOO() {
     return;
   }
 
-  const total = window.getOOOCount();  // should be 24
+  // Rebuild a fresh OOO trial set each time this block starts.
+  if (typeof window.buildSetAForOOO === 'function') {
+    await window.buildSetAForOOO({ forceRebuild: true });
+  }
+
+  const total = window.getOOOCount();  // should be 56
   if (!total || total <= 0) {
     console.warn('[OOO] No OOO triplets prepared (meta).');
     alert('No OOO stimuli available. Check catalog.');
     return;
   }
 
-  // Build a randomized index list into OOO trials
+  // Build a randomized index list into the fresh OOO trials
   const N = Math.min(OOO_TRIALS_TO_RUN, total);
   const allIdx = Array.from({ length: total }, (_, i) => i);
 
@@ -232,8 +237,6 @@ async function initTaskOOO() {
   }
 
   // -------- PRELOAD BEFORE START --------
-  // Preload exactly the trials that will be used this run.
-  // (If you want *all* available OOO trials regardless of debug N, use allIdx instead of trialsOOO.)
   await preloadOOOTrials(trialsOOO);
 
   // Build task UI AFTER preload is done
@@ -254,22 +257,18 @@ async function initTaskOOO() {
   instructionOOO.textContent = 'Press 1 for left, 2 for middle, 3 for right.';
   containerOOO.appendChild(instructionOOO);
 
-  // Ensure progress bar is present for this block
   ensureOOOProgressUI();
 
-  // Attach listener once
   if (!_oooKeyListenerAttached) {
     document.addEventListener('keydown', handleKeyPressOOO);
     _oooKeyListenerAttached = true;
   }
 
-  // Start first trial
   await showTrialOOO();
 }
 
 
 //too fast response check
-// ---------------- TOO-FAST PAUSE ----------------
 const OOO_TOO_FAST_MS = 300;
 let oooPaused = false;
 
@@ -277,7 +276,6 @@ function showOOOTooFastWarning(seconds = 5) {
   return new Promise((resolve) => {
     const container = document.getElementById('oddOneOutTaskDiv') || document.body;
 
-    // Overlay
     let overlay = document.getElementById('oooTooFastOverlay');
     if (!overlay) {
       overlay = document.createElement('div');
@@ -319,7 +317,6 @@ function showOOOTooFastWarning(seconds = 5) {
     const text = document.getElementById('oooTooFastText');
     let remaining = seconds;
 
-    // Initial text
     if (text) text.textContent = `You responded too quickly. The task will resume in ${remaining} seconds.`;
 
     const tick = setInterval(() => {
@@ -342,19 +339,16 @@ async function showTrialOOO() {
   const imgContainerOOO = document.getElementById('imageContainerOOO');
   if (!imgContainerOOO) return;
 
-  // Safety guard
   if (!trialsOOO || currentTrialOOO >= trialsOOO.length) {
     finishTaskOOO();
     return;
   }
 
-  // Update progress for this trial
   updateOOOProgressBar();
 
-  const tripletIdx = trialsOOO[currentTrialOOO];   // index into constructed OOO trials
+  const tripletIdx = trialsOOO[currentTrialOOO];
   imgContainerOOO.innerHTML = '';
 
-  // Lazily get the rendered triplet (a,b,c each has {filename,..., image})
   const trial = await window.getOOOTrial(tripletIdx);
   console.log('[OOO trial]', {
     tripletIdx,
@@ -372,45 +366,36 @@ async function showTrialOOO() {
     return;
   }
 
-  // Randomize left/middle/right order per trial
   const order = [trial.a, trial.b, trial.c].sort(() => Math.random() - 0.5);
 
-  // Render three images
   for (const m of order) {
     const img = document.createElement('img');
-    img.src = m.image.src;   // already loaded and cached (from mushroom.js OOO builder)
+    img.src = m.image.src;
     img.style.width = '150px';
     img.alt = `${m.color}-${m.stem}-${m.cap}`;
-    // optional: store filename for convenience
     img.dataset.filename = m.filename;
     imgContainerOOO.appendChild(img);
   }
 
-  // Save current rendered filenames for logging
   const stimulusImages = order.map(m => m.filename);
   imgContainerOOO.dataset.stimulus = JSON.stringify(stimulusImages);
 
-  // Prefetch a couple ahead to hide latency
   window.prefetchOOO(tripletIdx, 2);
 
-  // Set trial start time at the end
   trialStartTimeOOO = performance.now();
 }
 
 function handleKeyPressOOO(event) {
   if (!['1', '2', '3'].includes(event.key)) return;
   if (oooPaused) return;
-  if (trialStartTimeOOO == null) return; // guard against double-presses between trials
+  if (trialStartTimeOOO == null) return;
 
   const rt = performance.now() - trialStartTimeOOO;
 
-  // ---- TOO FAST CHECK ----
   if (rt < OOO_TOO_FAST_MS) {
-    // Pause immediately; do NOT log, do NOT advance
     oooPaused = true;
-    trialStartTimeOOO = null; // prevent key spam from being treated as responses
+    trialStartTimeOOO = null;
 
-    // Optional: log a "too_fast" event (comment out if you don’t want this)
     (participantData.trials ||= []).push({
       id: participantData.id,
       trial_index: (currentTrialOOO + 1),
@@ -422,7 +407,6 @@ function handleKeyPressOOO(event) {
     });
 
     showOOOTooFastWarning(5).then(() => {
-      // Resume same trial; reset the start time so they must respond again
       oooPaused = false;
       trialStartTimeOOO = performance.now();
     });
@@ -430,7 +414,6 @@ function handleKeyPressOOO(event) {
     return;
   }
 
-  // ---- NORMAL RESPONSE PATH ----
   const timeElapsed = performance.now() - (participantData?.startTime || performance.now());
 
   const imgContainerOOO = document.getElementById('imageContainerOOO');
@@ -438,7 +421,6 @@ function handleKeyPressOOO(event) {
 
   const choiceIndex = parseInt(event.key, 10) - 1;
 
-  // Restore filenames shown this trial
   let stimulusImages = [];
   try {
     stimulusImages = JSON.parse(imgContainerOOO.dataset.stimulus || '[]');
@@ -447,7 +429,6 @@ function handleKeyPressOOO(event) {
   }
   const chosenImage = stimulusImages[choiceIndex];
 
-  // Log trial
   (participantData.trials ||= []).push({
     id: participantData.id,
     trial_index: (currentTrialOOO + 1),
@@ -459,7 +440,6 @@ function handleKeyPressOOO(event) {
     time_elapsed: timeElapsed
   });
 
-  // Advance
   currentTrialOOO++;
   trialStartTimeOOO = null;
 
@@ -478,7 +458,6 @@ function finishTaskOOO() {
   const oooProg = document.getElementById('oooProgressContainer');
   if (oooProg) oooProg.style.display = 'none';
 
-  // Remove listener once block ends
   if (_oooKeyListenerAttached) {
     document.removeEventListener('keydown', handleKeyPressOOO);
     _oooKeyListenerAttached = false;
@@ -489,7 +468,6 @@ function finishTaskOOO() {
     startExplore()
     typeOOO++;
   } else if (typeOOO === 1) {
-    // Transition to post-survey instead of saving immediately
     if (typeof window.startPostSurvey === 'function') {
       startBISBASSurvey(() => {
         startNeedForCognitionSurvey(() => {
@@ -504,7 +482,6 @@ function finishTaskOOO() {
       console.error('[OOO] startPostSurvey() not found. Make sure PostSurvey.js is loaded.');
       alert('Internal error: post-survey not ready. Please contact the researcher.');
 
-      // Fallback: if survey missing, save anyway to avoid data loss
       const id = participantData.id || 'unknown';
       if (typeof downloadCSV === 'function') {
         downloadCSV(participantData.trials || [], `data_${id}.csv`);
@@ -520,7 +497,6 @@ function ensureOOOProgressUI() {
   const container = document.getElementById('oddOneOutTaskDiv');
   if (!container) return;
 
-  // Make sure container can host positioned children
   if (!container.style.position) {
     container.style.position = 'relative';
   }
@@ -536,7 +512,6 @@ function ensureOOOProgressUI() {
     wrapper.style.textAlign = 'center';
     container.appendChild(wrapper);
 
-    // Outer bar
     const outer = document.createElement('div');
     outer.id = 'oooProgressOuter';
     outer.style.width = '100%';
@@ -547,7 +522,6 @@ function ensureOOOProgressUI() {
     outer.style.overflow = 'hidden';
     wrapper.appendChild(outer);
 
-    // Inner (fill) bar
     const inner = document.createElement('div');
     inner.id = 'oooProgressInner';
     inner.style.height = '100%';
@@ -555,7 +529,6 @@ function ensureOOOProgressUI() {
     inner.style.backgroundColor = '#4caf50';
     outer.appendChild(inner);
 
-    // Label: "Trial X of N"
     const label = document.createElement('div');
     label.id = 'oooProgressLabel';
     label.style.marginTop = '4px';
@@ -576,7 +549,6 @@ function updateOOOProgressBar() {
 
   const total = trialsOOO.length;
 
-  // Completed trials are currentTrialOOO; 0% at start, 100% after last
   const pct = Math.max(
     0,
     Math.min(100, (currentTrialOOO / total) * 100)

@@ -9,7 +9,7 @@
 
 /* ==================== CONFIG ==================== */
 
-const MAX_TRIALS = 50;   // prepare 48 unique OOO triplets from the same 72-mushroom base pool
+const MAX_TRIALS = 56;   // prepare 56 unique OOO triplets from the same 72-type pool (28 within + 28 across)
 const IMG_LOAD_TIMEOUT_MS = 5000;
 
 const MUSHROOM_IMG_BASE = 'TexturePack/mushroom_pack';
@@ -276,6 +276,29 @@ function shuffleInPlace(arr) {
 }
 
 function oooTypeIdFromRow(r) {
+  if (!r) return '';
+
+  // Use the shared experiment-wide type definition when available so
+  // OOO matches memory / exploration exactly.
+  if (typeof window !== 'undefined' && typeof window.expTypeKeyFromRow === 'function') {
+    const key = window.expTypeKeyFromRow({
+      ...r,
+      color: r.color,
+      stem_width: r.stem_width ?? r.stem_w ?? r.stem ?? r.stem_zone ?? null,
+      stem_w: r.stem_w ?? r.stem_width ?? r.stem ?? r.stem_zone ?? null,
+      stem: r.stem ?? r.stem_width ?? r.stem_w ?? r.stem_zone ?? null,
+      stem_zone: r.stem_zone ?? r.stem ?? r.stem_width ?? r.stem_w ?? null,
+      cap_roundness: r.cap_roundness ?? r.cap_round ?? r.cap ?? r.cap_zone ?? null,
+      cap_round: r.cap_round ?? r.cap_roundness ?? r.cap ?? r.cap_zone ?? null,
+      cap: r.cap ?? r.cap_roundness ?? r.cap_round ?? r.cap_zone ?? null,
+      cap_zone: r.cap_zone ?? r.cap ?? r.cap_roundness ?? r.cap_round ?? null,
+    });
+
+    const s = String(key || '').trim();
+    if (s && !/undefined|null/i.test(s)) return s;
+  }
+
+  // Fallback if the shared helper is unavailable
   return `${r.color}|${r.stem}|${r.cap}`;
 }
 
@@ -326,6 +349,28 @@ function buildOOOTypeBuckets(rows) {
   }
 
   return byType;
+}
+
+function debugOOO72Coverage(coverageInfo) {
+  try {
+    const ids = [...(coverageInfo?.selectedTypeIds || [])];
+    const dupCount = ids.length - new Set(ids).size;
+
+    const byColor = {};
+    for (const id of ids) {
+      const color = String(id).split('|')[0] || 'unknown';
+      byColor[color] = (byColor[color] || 0) + 1;
+    }
+
+    console.log('[OOO debug] selected type count =', ids.length);
+    console.log('[OOO debug] duplicate selected type ids =', dupCount);
+    console.log('[OOO debug] selected type counts by color =', byColor);
+
+    return { ids, dupCount, byColor };
+  } catch (e) {
+    console.warn('[OOO debug] coverage debug failed:', e);
+    return null;
+  }
 }
 
 function buildSelected72TypeCoverageRows(allRows, desiredTypeCount = 72) {
@@ -1064,7 +1109,9 @@ let mushroomCatalogRows = [];
 let OOOTriplets = [];              // {a,b,c,allDifferent,balance_class,coverage_pass,type_ids,triplet_key}
 let _OOOTrialsCache = new Map();   // index -> Promise<rendered triplet>
 
-async function buildSetAForOOO() {
+async function buildSetAForOOO(options = {}) {
+  const forceRebuild = !!options.forceRebuild;
+
   // Load catalog if needed
   if (!mushroomCatalogRows || mushroomCatalogRows.length === 0) {
     console.warn('[OOO] Catalog not loaded yet; loading now…');
@@ -1074,7 +1121,13 @@ async function buildSetAForOOO() {
   if (!Array.isArray(mushroomCatalogRows) || mushroomCatalogRows.length < 3) {
     console.warn('[OOO] Catalog has too few rows for OOO.');
     OOOTriplets = [];
+    if (typeof window !== 'undefined') window.OOOTriplets = OOOTriplets;
     return 0;
+  }
+
+  if (!forceRebuild && Array.isArray(OOOTriplets) && OOOTriplets.length === MAX_TRIALS) {
+    if (typeof window !== 'undefined') window.OOOTriplets = OOOTriplets;
+    return OOOTriplets.length;
   }
 
   const coverageInfo = buildSelected72TypeCoverageRows(mushroomCatalogRows, 72);
@@ -1082,6 +1135,7 @@ async function buildSetAForOOO() {
   if (!coverageInfo.selectedRows || coverageInfo.selectedRows.length < 3) {
     console.warn('[OOO] Could not build 72-type coverage rows.');
     OOOTriplets = [];
+    if (typeof window !== 'undefined') window.OOOTriplets = OOOTriplets;
     return 0;
   }
 
@@ -1090,9 +1144,16 @@ async function buildSetAForOOO() {
 
   OOOTriplets = buildBalancedOOOTrialsFromCoverageRows(coverageInfo.selectedRows, MAX_TRIALS);
 
+  debugOOO72Coverage(coverageInfo);
+
+  const nWithin = OOOTriplets.filter(t => t.balance_class === 'within').length;
+  const nAcross = OOOTriplets.filter(t => t.balance_class === 'across').length;
+
   console.log(
-    `[OOO] Prepared ${OOOTriplets.length} OOO trials from ${coverageInfo.selectedTypeCount} covered types (target=${MAX_TRIALS}).`
+    `[OOO] Prepared ${OOOTriplets.length} OOO trials from ${coverageInfo.selectedTypeCount} covered types (target=${MAX_TRIALS}, within=${nWithin}, across=${nAcross}).`
   );
+
+  if (typeof window !== 'undefined') window.OOOTriplets = OOOTriplets;
   return OOOTriplets.length;
 }
 
@@ -1663,6 +1724,8 @@ function getPlatforms(overridePlatforms) {
   window.prefetchOOO           = prefetchOOO;
   window.getOOOCount           = getOOOCount;
   window.getOOOMeta            = getOOOMeta;
+  window.buildSetAForOOO       = buildSetAForOOO;
+  window.debugOOO72Coverage    = debugOOO72Coverage;
 
   // 2AFC helpers
   window.getRandomPair         = getRandomPair;
