@@ -9,9 +9,138 @@ const INSTR_SLIDES = {
 };
 
 
+const CONSENT_PDF_URL = 'TexturePack/consent/2019-5110_Study_Information_Sheet_Foraging.pdf';
+
+function injectConsentGateIntoWelcome() {
+  const welcome = document.getElementById('welcome');
+  if (!welcome || document.getElementById('consentGateWrap')) return;
+
+  if (!document.getElementById('consentGateStyle')) {
+    const style = document.createElement('style');
+    style.id = 'consentGateStyle';
+    style.textContent = `
+      #consentGateWrap {
+        max-width: 900px;
+        margin: 18px auto 20px auto;
+        padding: 18px;
+        background: #ffffff;
+        border: 1px solid #d9d9d9;
+        border-radius: 12px;
+        box-shadow: 0 6px 20px rgba(0,0,0,0.08);
+        color: #1f2328;
+        font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+      }
+      #consentGateWrap h3 {
+        margin: 0 0 10px 0;
+        font-size: 22px;
+      }
+      #consentGateWrap p {
+        margin: 0 0 12px 0;
+        line-height: 1.5;
+        font-size: 15px;
+      }
+      #consentPdfFrame {
+        width: 100%;
+        height: 420px;
+        border: 1px solid #cfcfcf;
+        border-radius: 8px;
+        background: #f7f7f7;
+        margin-bottom: 12px;
+      }
+      #consentAgreeRow {
+        display: flex;
+        align-items: flex-start;
+        gap: 10px;
+        margin-top: 10px;
+        font-size: 15px;
+        line-height: 1.5;
+      }
+      #consentOpenLink {
+        display: inline-block;
+        margin-bottom: 10px;
+        color: #1a73e8;
+        text-decoration: none;
+        font-weight: 600;
+      }
+      #consentOpenLink:hover {
+        text-decoration: underline;
+      }
+      #consentHint {
+        margin-top: 10px;
+        font-size: 13px;
+        color: #666;
+      }
+    `;
+    document.head.appendChild(style);
+  }
+
+  const gate = document.createElement('div');
+  gate.id = 'consentGateWrap';
+  gate.innerHTML = `
+    <h3>Consent Form</h3>
+    <p>
+      Please read the study information sheet below before continuing.
+      You must confirm your consent before entering your participant ID.
+    </p>
+
+    <a id="consentOpenLink" href="${CONSENT_PDF_URL}" target="_blank" rel="noopener noreferrer">
+      Open consent form in a new tab
+    </a>
+
+    <iframe
+      id="consentPdfFrame"
+      src="${CONSENT_PDF_URL}#view=FitH"
+      title="Consent form PDF"
+    ></iframe>
+
+    <label id="consentAgreeRow">
+      <input type="checkbox" id="consentAgreeCheckbox" />
+      <span>I have read the consent form and I consent to participate in this study.</span>
+    </label>
+
+    <div id="consentHint">The ID field will unlock after you check the consent box.</div>
+  `;
+
+  const idInput = document.getElementById('participantIdInput');
+
+  if (idInput && idInput.parentNode) {
+    idInput.parentNode.insertBefore(gate, idInput);
+  } else {
+    welcome.prepend(gate);
+  }
+
+  const checkbox = document.getElementById('consentAgreeCheckbox');
+
+  const startControls = Array.from(
+    welcome.querySelectorAll('button, input[type="button"], input[type="submit"]')
+  ).filter((el) => {
+    const onclick = (el.getAttribute('onclick') || '').toLowerCase();
+    const id = (el.id || '').toLowerCase();
+    return onclick.includes('startwithid') || id.includes('start');
+  });
+
+  function syncConsentState() {
+    const allowed = !!checkbox.checked;
+
+    if (idInput) {
+      idInput.disabled = !allowed;
+      idInput.placeholder = allowed ? 'Enter your participant ID' : 'Consent required before entering ID';
+    }
+
+    startControls.forEach((btn) => {
+      btn.disabled = !allowed;
+    });
+  }
+
+  checkbox.addEventListener('change', syncConsentState);
+  syncConsentState();
+}
+
 window.onload = () => {
   const w = document.getElementById('welcome');
   if (w) w.style.display = 'block';
+
+  injectConsentGateIntoWelcome();
 
   preloadAllInstructions().catch(() => {/* ignore */});
 };
@@ -227,6 +356,12 @@ async function startWithID() {
   if (startWithID._busy) return;
   startWithID._busy = true;
 
+  const consentCheckbox = document.getElementById('consentAgreeCheckbox');
+  if (!consentCheckbox || !consentCheckbox.checked) {
+    alert('Please read the consent form and check the consent box before continuing.');
+    return;
+  }
+
   try {
     const idInput = document.getElementById('participantIdInput').value.trim();
     if (!idInput) {
@@ -257,6 +392,23 @@ async function startWithID() {
     participantData.startTime = performance.now();
     window.sessionForceEnded = false;
     _idleSessionEnding = false;
+
+    participantData.consent = {
+      consent_given: 1,
+      consent_file: '2019-5110_Study_Information_Sheet_Foraging.pdf',
+      consent_path: CONSENT_PDF_URL,
+      consent_timestamp: new Date().toISOString()
+    };
+
+    (participantData.trials ||= []).push({
+      id: participantData.id,
+      trial_index: participantData.trials.length + 1,
+      trial_type: 'consent',
+      consent_given: 1,
+      consent_file: '2019-5110_Study_Information_Sheet_Foraging.pdf',
+      consent_path: CONSENT_PDF_URL,
+      time_elapsed: 0
+    });
 
     const w = document.getElementById('welcome');
     if (w) w.style.display = 'none';
