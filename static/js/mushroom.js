@@ -493,6 +493,89 @@ function chooseBestCoverageTargets(colorToTypeIds, coverageTripletCount, desired
   throw new Error('[OOO] Could not build a valid 72-type coverage-first OOO plan.');
 }
 
+function computeOOOTypeRanges(typePoolById) {
+  let stemMin = Infinity, stemMax = -Infinity;
+  let capMin = Infinity, capMax = -Infinity;
+
+  for (const pool of typePoolById.values()) {
+    const s = oooNum(pool.stem);
+    const c = oooNum(pool.cap);
+    if (s < stemMin) stemMin = s;
+    if (s > stemMax) stemMax = s;
+    if (c < capMin) capMin = c;
+    if (c > capMax) capMax = c;
+  }
+
+  if (!Number.isFinite(stemMin) || !Number.isFinite(stemMax)) {
+    stemMin = 0; stemMax = 1;
+  }
+  if (!Number.isFinite(capMin) || !Number.isFinite(capMax)) {
+    capMin = 0; capMax = 1;
+  }
+
+  return { stemMin, stemMax, capMin, capMax };
+}
+
+function oooNormalizeTypeCenter(pool, ranges) {
+  const stemDen = Math.max(1e-9, ranges.stemMax - ranges.stemMin);
+  const capDen  = Math.max(1e-9, ranges.capMax - ranges.capMin);
+
+  return {
+    x: (oooNum(pool.stem) - ranges.stemMin) / stemDen,
+    y: (oooNum(pool.cap)  - ranges.capMin)  / capDen,
+  };
+}
+
+function oooTypeCenterDistance(typeIdA, typeIdB, typePoolById, ranges) {
+  const a = typePoolById.get(typeIdA);
+  const b = typePoolById.get(typeIdB);
+  if (!a || !b) return 0;
+
+  const pa = oooNormalizeTypeCenter(a, ranges);
+  const pb = oooNormalizeTypeCenter(b, ranges);
+  const dx = pa.x - pb.x;
+  const dy = pa.y - pb.y;
+  return Math.sqrt(dx * dx + dy * dy);
+}
+
+function oooTripletMinTypeDistance(typeIds, typePoolById, ranges) {
+  if (!typeIds || typeIds.length < 2) return 0;
+
+  let minD = Infinity;
+  for (let i = 0; i < typeIds.length; i++) {
+    for (let j = i + 1; j < typeIds.length; j++) {
+      const d = oooTypeCenterDistance(typeIds[i], typeIds[j], typePoolById, ranges);
+      if (d < minD) minD = d;
+    }
+  }
+  return Number.isFinite(minD) ? minD : 0;
+}
+
+function pickBestWithinTripletFromIds(ids, typePoolById, options = {}) {
+  const MIN_TYPE_DIST = Number.isFinite(options.minTypeDistance)
+    ? options.minTypeDistance
+    : 0.22;
+
+  const ranges = computeOOOTypeRanges(typePoolById);
+  const combos = oooCombinations(ids, 3);
+
+  let bestPass = null;
+  let bestAny = null;
+
+  for (const combo of combos) {
+    const typeIds = [...combo];
+    const minDist = oooTripletMinTypeDistance(typeIds, typePoolById, ranges);
+    const cand = { typeIds, minDist };
+
+    if (!bestAny || cand.minDist > bestAny.minDist) bestAny = cand;
+    if (cand.minDist >= MIN_TYPE_DIST) {
+      if (!bestPass || cand.minDist > bestPass.minDist) bestPass = cand;
+    }
+  }
+
+  return bestPass || bestAny;
+}
+
 function buildCoverageFirstTriplets(typePoolById, coverageTripletCount, desiredWithinTotal, desiredAcrossTotal) {
   const colorToTypeIds = new Map();
   for (const [typeId, pool] of typePoolById.entries()) {
@@ -519,9 +602,23 @@ function buildCoverageFirstTriplets(typePoolById, coverageTripletCount, desiredW
   // ==================== 72-type coverage is enforced first ====================
   for (const step of targetInfo.plan) {
     let typeIds;
+
     if (step.kind === 'within') {
       const color = step.colors[0];
-      typeIds = working.get(color).splice(0, 3);
+      const ids = working.get(color).slice();
+
+      const picked = pickBestWithinTripletFromIds(ids, typePoolById, {
+        minTypeDistance: 0.22
+      });
+
+      if (!picked || !picked.typeIds || picked.typeIds.length !== 3) {
+        throw new Error(`[OOO] Could not pick spaced within-color coverage triplet for ${color}`);
+      }
+
+      typeIds = picked.typeIds;
+
+      const pickedSet = new Set(typeIds);
+      working.set(color, ids.filter(id => !pickedSet.has(id)));
     } else {
       typeIds = step.colors.map(color => working.get(color).shift());
     }
@@ -548,23 +645,34 @@ function buildCoverageFirstTriplets(typePoolById, coverageTripletCount, desiredW
   };
 }
 
-function enumerateWithinCandidates(colorToTypeIds, usedTripletKeys) {
+function enumerateWithinCandidates(colorToTypeIds, usedTripletKeys, typePoolById) {
   const out = [];
+  const ranges = computeOOOTypeRanges(typePoolById);
+  const MIN_TYPE_DIST = 0.22;
+
   for (const [color, ids] of colorToTypeIds.entries()) {
     if (ids.length < 3) continue;
+
     const combos = oooCombinations(ids, 3);
     for (const typeIds of combos) {
       const tripletKey = oooTypeTripletKeyFromTypeIds(typeIds);
       if (usedTripletKeys.has(tripletKey)) continue;
+
+      const minDist = oooTripletMinTypeDistance(typeIds, typePoolById, ranges);
+      if (minDist < MIN_TYPE_DIST) continue;
+
       out.push({
         kind: 'within',
         typeIds: [...typeIds],
         tripletKey,
         coverage_pass: false,
         sourceColor: color,
+        minTypeDist: minDist,
       });
     }
   }
+
+  out.sort((a, b) => b.minTypeDist - a.minTypeDist);
   return out;
 }
 
@@ -618,7 +726,7 @@ function addPostCoverageTriplets(typePoolById, currentTriplets, usedTripletKeys,
   const needWithin = Math.max(0, desiredWithinTotal - currentWithin);
   const needAcross = Math.max(0, desiredAcrossTotal - currentAcross);
 
-  const withinCandidates = enumerateWithinCandidates(colorToTypeIds, usedTripletKeys);
+  const withinCandidates = enumerateWithinCandidates(colorToTypeIds, usedTripletKeys, typePoolById);
   const acrossCandidates = enumerateAcrossCandidates(colorToTypeIds, usedTripletKeys);
 
   shuffleInPlace(withinCandidates);
@@ -730,11 +838,11 @@ function oooMinPairwiseDistance(rows, ranges) {
 function makeExemplarTripletPicker(typePoolById, options = {}) {
   const MIN_REQUIRED_DIST = Number.isFinite(options.minPairwiseDistance)
     ? options.minPairwiseDistance
-    : 0.18; // tune this if needed
+    : 0.22;
 
   const CANDIDATES_PER_TYPE = Number.isFinite(options.candidatesPerType)
     ? options.candidatesPerType
-    : 6;
+    : 8;
 
   const ranges = computeOOOFeatureRanges(typePoolById);
 
@@ -777,6 +885,10 @@ function makeExemplarTripletPicker(typePoolById, options = {}) {
     s.cursor = (chosenIdx + 1) % s.exemplars.length;
   }
 
+  function fileKey(row) {
+    return basenameFromPath(row.filename || '');
+  }
+
   return function pickTripletExemplars(typeIds) {
     if (!Array.isArray(typeIds) || typeIds.length !== 3) {
       throw new Error('[OOO] Expected exactly 3 typeIds for triplet exemplar picking.');
@@ -791,6 +903,10 @@ function makeExemplarTripletPicker(typePoolById, options = {}) {
     for (const a of c1) {
       for (const b of c2) {
         for (const c of c3) {
+          const fk = [fileKey(a.row), fileKey(b.row), fileKey(c.row)];
+          const uniqueFiles = new Set(fk).size === 3;
+          if (!uniqueFiles) continue;
+
           const rows = [a.row, b.row, c.row];
           const minDist = oooMinPairwiseDistance(rows, ranges);
           const passes = minDist >= MIN_REQUIRED_DIST ? 1 : 0;

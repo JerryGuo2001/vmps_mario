@@ -356,6 +356,17 @@ async function showTrialOOO() {
 
   // Lazily get the rendered triplet (a,b,c each has {filename,..., image})
   const trial = await window.getOOOTrial(tripletIdx);
+  console.log('[OOO trial]', {
+    tripletIdx,
+    balance_class: trial.balance_class,
+    type_ids: trial.type_ids,
+    filenames: [trial.a.filename, trial.b.filename, trial.c.filename],
+    stems_caps: [
+      [trial.a.stem, trial.a.cap],
+      [trial.b.stem, trial.b.cap],
+      [trial.c.stem, trial.c.cap],
+    ]
+  });
   if (!trial) {
     console.warn('[OOO] Failed to load trial at index', tripletIdx);
     return;
