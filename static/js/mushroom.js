@@ -832,7 +832,7 @@ function makeExemplarTripletPicker(typePoolById, options = {}) {
 
 function materializeOOOTriplets(finalTripletSpecs, typePoolById) {
   const pickTripletExemplars = makeExemplarTripletPicker(typePoolById, {
-    minPairwiseDistance: 0.22,   // <- change this threshold if you want stricter spacing
+    minPairwiseDistance: 0.4,   // <- change this threshold if you want stricter spacing
     candidatesPerType: 6
   });
 
