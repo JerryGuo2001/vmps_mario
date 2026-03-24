@@ -965,13 +965,16 @@ function updateGame(currentTime) {
       hungry();
       checkHP_canvas4();
 
-      // 🔹 when all mushrooms on this trial are gone, regenerate 5
-      if (!freezeState && !regeneratingMushrooms && (!mushrooms || mushrooms.length === 0)) {
-        regeneratingMushrooms = true;
-        generateMushroom(5)
-          .then(ms => { mushrooms = ms || []; })
-          .catch(err => console.warn('[regen mushrooms]', err))
-          .finally(() => { regeneratingMushrooms = false; });
+      // 🔹 when all mushrooms in the current room are gone, do NOT regenerate here;
+      // instead show a reminder to move right for a fresh map
+      if (!freezeState && (!mushrooms || mushrooms.length === 0)) {
+        const text = 'Move to the right of the screen to go to a new map with fresh mushrooms';
+        ctx.save();
+        ctx.fillStyle = '#000';
+        ctx.font = '16px Arial';
+        ctx.textAlign = 'center';
+        ctx.fillText(text, canvas.width / 2, 40);
+        ctx.restore();
       }
 
       init_position = true;
