@@ -373,79 +373,6 @@ function debugOOO72Coverage(coverageInfo) {
   }
 }
 
-function buildSelected72TypeCoverageRows(allRows, desiredTypeCount = 72) {
-  const allTypeBuckets = buildOOOTypeBuckets(allRows);
-
-  const byColor = new Map();
-  for (const bucket of allTypeBuckets.values()) {
-    if (!byColor.has(bucket.color)) byColor.set(bucket.color, []);
-    byColor.get(bucket.color).push(bucket);
-  }
-
-  for (const arr of byColor.values()) shuffleInPlace(arr);
-
-  const colors = EIGHT_COLORS.slice();
-  const selectedBuckets = [];
-  const selectedTypeIds = new Set();
-
-  // ==================== 72-type coverage is enforced first ====================
-  // First try to select the 72 covered TYPES in a balanced color-aware way.
-  const basePerColor = Math.floor(desiredTypeCount / colors.length); // 72 / 8 = 9
-  for (const color of colors) {
-    const arr = byColor.get(color) || [];
-    const take = Math.min(basePerColor, arr.length);
-    for (let i = 0; i < take; i++) {
-      const bucket = arr.shift();
-      selectedBuckets.push(bucket);
-      selectedTypeIds.add(bucket.typeId);
-      if (selectedBuckets.length >= desiredTypeCount) break;
-    }
-    if (selectedBuckets.length >= desiredTypeCount) break;
-  }
-
-  // Fill any remainder from whatever colors still have unused types.
-  if (selectedBuckets.length < desiredTypeCount) {
-    const leftovers = [];
-    for (const color of colors) {
-      leftovers.push(...(byColor.get(color) || []));
-    }
-    shuffleInPlace(leftovers);
-
-    for (const bucket of leftovers) {
-      if (selectedBuckets.length >= desiredTypeCount) break;
-      if (selectedTypeIds.has(bucket.typeId)) continue;
-      selectedBuckets.push(bucket);
-      selectedTypeIds.add(bucket.typeId);
-    }
-  }
-
-  if (selectedBuckets.length < desiredTypeCount) {
-    console.warn(
-      `[OOO] Only found ${selectedBuckets.length} unique types (wanted ${desiredTypeCount}). ` +
-      'Using all available selected types.'
-    );
-  }
-
-  const selectedRows = [];
-  for (const row of allRows) {
-    if (selectedTypeIds.has(oooTypeIdFromRow(row))) {
-      selectedRows.push(row);
-    }
-  }
-
-  const colorCounts = {};
-  for (const bucket of selectedBuckets) {
-    colorCounts[bucket.color] = (colorCounts[bucket.color] || 0) + 1;
-  }
-  console.log('[OOO] Selected coverage type counts by color:', colorCounts);
-
-  return {
-    selectedRows,
-    selectedTypeCount: selectedBuckets.length,
-    selectedTypeIds,
-  };
-}
-
 function findCoveragePlanByColorCounts(colorNames, colorCounts, withinTarget, acrossTarget) {
   const memo = new Map();
 
@@ -880,58 +807,28 @@ function oooMinPairwiseDistance(rows, ranges) {
   return Number.isFinite(minD) ? minD : 0;
 }
 
-function makeExemplarTripletPicker(typePoolById, options = {}) {
-  const MIN_REQUIRED_DIST = Number.isFinite(options.minPairwiseDistance)
-    ? options.minPairwiseDistance
-    : 0.22;
-
-  const CANDIDATES_PER_TYPE = Number.isFinite(options.candidatesPerType)
-    ? options.candidatesPerType
-    : 8;
-
-  const ranges = computeOOOFeatureRanges(typePoolById);
-
+function makeExemplarTripletPicker(typePoolById) {
   const state = new Map();
+
   for (const [typeId, pool] of typePoolById.entries()) {
     const exemplars = pool.exemplars.slice();
     shuffleInPlace(exemplars);
+
     state.set(typeId, {
       exemplars,
       cursor: 0,
-      useCount: new Array(exemplars.length).fill(0),
     });
   }
 
-  function getCandidates(typeId) {
+  function pickOne(typeId) {
     const s = state.get(typeId);
     if (!s || !s.exemplars.length) {
       throw new Error(`[OOO] No exemplar available for type ${typeId}`);
     }
 
-    const n = s.exemplars.length;
-    const take = Math.min(CANDIDATES_PER_TYPE, n);
-    const out = [];
-
-    for (let k = 0; k < take; k++) {
-      const idx = (s.cursor + k) % n;
-      out.push({
-        row: s.exemplars[idx],
-        idx,
-        usage: s.useCount[idx],
-      });
-    }
-
-    return out;
-  }
-
-  function commitChoice(typeId, chosenIdx) {
-    const s = state.get(typeId);
-    s.useCount[chosenIdx] += 1;
-    s.cursor = (chosenIdx + 1) % s.exemplars.length;
-  }
-
-  function fileKey(row) {
-    return basenameFromPath(row.filename || '');
+    const row = s.exemplars[s.cursor % s.exemplars.length];
+    s.cursor = (s.cursor + 1) % s.exemplars.length;
+    return row;
   }
 
   return function pickTripletExemplars(typeIds) {
@@ -939,56 +836,83 @@ function makeExemplarTripletPicker(typePoolById, options = {}) {
       throw new Error('[OOO] Expected exactly 3 typeIds for triplet exemplar picking.');
     }
 
-    const c1 = getCandidates(typeIds[0]);
-    const c2 = getCandidates(typeIds[1]);
-    const c3 = getCandidates(typeIds[2]);
-
-    let best = null;
-
-    for (const a of c1) {
-      for (const b of c2) {
-        for (const c of c3) {
-          const fk = [fileKey(a.row), fileKey(b.row), fileKey(c.row)];
-          const uniqueFiles = new Set(fk).size === 3;
-          if (!uniqueFiles) continue;
-
-          const rows = [a.row, b.row, c.row];
-          const minDist = oooMinPairwiseDistance(rows, ranges);
-          const passes = minDist >= MIN_REQUIRED_DIST ? 1 : 0;
-          const usagePenalty = a.usage + b.usage + c.usage;
-
-          const candidate = {
-            rows,
-            chosen: [a, b, c],
-            passes,
-            minDist,
-            usagePenalty,
-          };
-
-          if (
-            !best ||
-            candidate.passes > best.passes ||
-            (candidate.passes === best.passes && candidate.minDist > best.minDist) ||
-            (candidate.passes === best.passes &&
-             candidate.minDist === best.minDist &&
-             candidate.usagePenalty < best.usagePenalty)
-          ) {
-            best = candidate;
-          }
-        }
-      }
-    }
-
-    if (!best) {
-      throw new Error('[OOO] Could not pick exemplars for triplet.');
-    }
-
-    commitChoice(typeIds[0], best.chosen[0].idx);
-    commitChoice(typeIds[1], best.chosen[1].idx);
-    commitChoice(typeIds[2], best.chosen[2].idx);
-
-    return best.rows;
+    return [
+      pickOne(typeIds[0]),
+      pickOne(typeIds[1]),
+      pickOne(typeIds[2]),
+    ];
   };
+}
+
+function buildBalancedOOOTrialsFromCoverageRows(allRows, totalTrials = MAX_TRIALS) {
+  const typePoolById = buildOOOTypeBuckets(allRows);   // still uses your type-definition rule
+  const typeIds = [...typePoolById.keys()];
+  const totalTypeCount = typeIds.length;
+
+  console.log(`[OOO] Total available types: ${totalTypeCount}`);
+
+  if (typeIds.length < 1) {
+    console.warn('[OOO] Not enough types to build OOO trials.');
+    return [];
+  }
+
+  const finalTripletSpecs = [];
+
+  for (let i = 0; i < totalTrials; i++) {
+    const chosenTypeIds = [
+      typeIds[Math.floor(Math.random() * typeIds.length)],
+      typeIds[Math.floor(Math.random() * typeIds.length)],
+      typeIds[Math.floor(Math.random() * typeIds.length)],
+    ];
+
+    finalTripletSpecs.push({
+      typeIds: chosenTypeIds,
+      kind: 'random',
+      coverage_pass: false,
+      tripletKey: `random_${i}_${Math.random().toString(36).slice(2, 10)}`,
+    });
+  }
+
+  const materialized = materializeOOOTriplets(finalTripletSpecs, typePoolById);
+  shuffleInPlace(materialized);
+
+  console.log(`[OOO] Final random set: ${materialized.length} trials from ${totalTypeCount} total types.`);
+  return materialized;
+}
+
+async function buildSetAForOOO(options = {}) {
+  const forceRebuild = !!options.forceRebuild;
+
+  if (!mushroomCatalogRows || mushroomCatalogRows.length === 0) {
+    console.warn('[OOO] Catalog not loaded yet; loading now…');
+    mushroomCatalogRows = await loadMushroomCatalogCSV();
+  }
+
+  if (!Array.isArray(mushroomCatalogRows) || mushroomCatalogRows.length < 3) {
+    console.warn('[OOO] Catalog has too few rows for OOO.');
+    OOOTriplets = [];
+    if (typeof window !== 'undefined') window.OOOTriplets = OOOTriplets;
+    return 0;
+  }
+
+  if (!forceRebuild && Array.isArray(OOOTriplets) && OOOTriplets.length === MAX_TRIALS) {
+    if (typeof window !== 'undefined') window.OOOTriplets = OOOTriplets;
+    return OOOTriplets.length;
+  }
+
+  _OOOTrialsCache = new Map();
+
+  // IMPORTANT:
+  // use the full catalog rows, grouped by TYPE
+  // do NOT preselect a forced 72-type coverage subset
+  OOOTriplets = buildBalancedOOOTrialsFromCoverageRows(mushroomCatalogRows, MAX_TRIALS);
+
+  console.log(
+    `[OOO] Prepared ${OOOTriplets.length} random OOO trials from type buckets with no coverage / distance / across-color enforcement.`
+  );
+
+  if (typeof window !== 'undefined') window.OOOTriplets = OOOTriplets;
+  return OOOTriplets.length;
 }
 
 function materializeOOOTriplets(finalTripletSpecs, typePoolById) {
@@ -1012,43 +936,6 @@ function materializeOOOTriplets(finalTripletSpecs, typePoolById) {
       type_ids: [...spec.typeIds],
     };
   });
-}
-
-function buildBalancedOOOTrialsFromCoverageRows(coverageRows, totalTrials = MAX_TRIALS) {
-  const typePoolById = buildOOOTypeBuckets(coverageRows);
-  const typeIds = [...typePoolById.keys()];
-
-  if (typeIds.length < 1) {
-    console.warn('[OOO] Not enough covered types to build OOO trials.');
-    return [];
-  }
-
-  const finalTripletSpecs = [];
-
-  for (let i = 0; i < totalTrials; i++) {
-    // sample WITH replacement from the 72 covered types
-    const chosenTypeIds = [
-      typeIds[Math.floor(Math.random() * typeIds.length)],
-      typeIds[Math.floor(Math.random() * typeIds.length)],
-      typeIds[Math.floor(Math.random() * typeIds.length)],
-    ];
-
-    const colors = chosenTypeIds.map(typeId => (typePoolById.get(typeId)?.color || '').toLowerCase());
-    const allDifferent = new Set(colors).size === 3;
-
-    finalTripletSpecs.push({
-      typeIds: chosenTypeIds,
-      kind: allDifferent ? 'across' : 'random',
-      coverage_pass: false,
-      tripletKey: `random_${i}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-    });
-  }
-
-  const materialized = materializeOOOTriplets(finalTripletSpecs, typePoolById);
-  shuffleInPlace(materialized);
-
-  console.log(`[OOO] Final random set: ${materialized.length} trials.`);
-  return materialized;
 }
 
 /* ==================== LAZY OOO RENDER HELPERS ==================== */
