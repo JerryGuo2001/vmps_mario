@@ -1016,57 +1016,34 @@ function materializeOOOTriplets(finalTripletSpecs, typePoolById) {
 
 function buildBalancedOOOTrialsFromCoverageRows(coverageRows, totalTrials = MAX_TRIALS) {
   const typePoolById = buildOOOTypeBuckets(coverageRows);
-  const coveredTypeCount = typePoolById.size;
+  const typeIds = [...typePoolById.keys()];
 
-  if (coveredTypeCount < 3) {
+  if (typeIds.length < 3) {
     console.warn('[OOO] Not enough covered types to build OOO trials.');
     return [];
   }
 
-  const usableCoveredTypeCount = coveredTypeCount - (coveredTypeCount % 3);
-  if (usableCoveredTypeCount !== coveredTypeCount) {
-    console.warn(
-      `[OOO] Covered type count ${coveredTypeCount} is not divisible by 3; trimming logical use to ${usableCoveredTypeCount}.`
-    );
+  const finalTripletSpecs = [];
+
+  for (let i = 0; i < totalTrials; i++) {
+    const shuffledTypeIds = shuffleInPlace(typeIds.slice());
+    const chosenTypeIds = shuffledTypeIds.slice(0, 3);
+
+    const colors = chosenTypeIds.map(typeId => (typePoolById.get(typeId)?.color || '').toLowerCase());
+    const allDifferent = new Set(colors).size === 3;
+
+    finalTripletSpecs.push({
+      typeIds: chosenTypeIds,
+      kind: allDifferent ? 'across' : 'random',
+      coverage_pass: false,
+      tripletKey: `random_${i}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+    });
   }
 
-  const usableTypeIds = new Set(
-    [...typePoolById.keys()].slice(0, usableCoveredTypeCount)
-  );
-
-  const trimmedTypePoolById = new Map(
-    [...typePoolById.entries()].filter(([typeId]) => usableTypeIds.has(typeId))
-  );
-
-  const coverageTripletCount = usableCoveredTypeCount / 3;
-  const desiredWithinTotal = Math.floor(totalTrials / 2);
-  const desiredAcrossTotal = totalTrials - desiredWithinTotal;
-
-  const coverageBuild = buildCoverageFirstTriplets(
-    trimmedTypePoolById,
-    coverageTripletCount,
-    desiredWithinTotal,
-    desiredAcrossTotal
-  );
-
-  const finalTripletSpecs = addPostCoverageTriplets(
-    trimmedTypePoolById,
-    coverageBuild.triplets,
-    coverageBuild.usedTripletKeys,
-    totalTrials
-  );
-
-  const materialized = materializeOOOTriplets(finalTripletSpecs, trimmedTypePoolById);
-
-  // ==================== final shuffle is applied ====================
+  const materialized = materializeOOOTriplets(finalTripletSpecs, typePoolById);
   shuffleInPlace(materialized);
 
-  const nWithin = materialized.filter(t => t.balance_class === 'within').length;
-  const nAcross = materialized.filter(t => t.balance_class === 'across').length;
-  console.log(
-    `[OOO] Final balanced set: ${materialized.length} trials | across=${nAcross} | within=${nWithin}`
-  );
-
+  console.log(`[OOO] Final random set: ${materialized.length} trials.`);
   return materialized;
 }
 
@@ -1146,11 +1123,8 @@ async function buildSetAForOOO(options = {}) {
 
   debugOOO72Coverage(coverageInfo);
 
-  const nWithin = OOOTriplets.filter(t => t.balance_class === 'within').length;
-  const nAcross = OOOTriplets.filter(t => t.balance_class === 'across').length;
-
   console.log(
-    `[OOO] Prepared ${OOOTriplets.length} OOO trials from ${coverageInfo.selectedTypeCount} covered types (target=${MAX_TRIALS}, within=${nWithin}, across=${nAcross}).`
+    `[OOO] Prepared ${OOOTriplets.length} random OOO trials from ${coverageInfo.selectedTypeCount} covered types (target=${MAX_TRIALS}).`
   );
 
   if (typeof window !== 'undefined') window.OOOTriplets = OOOTriplets;
