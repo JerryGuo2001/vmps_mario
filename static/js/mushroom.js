@@ -1018,7 +1018,7 @@ function buildBalancedOOOTrialsFromCoverageRows(coverageRows, totalTrials = MAX_
   const typePoolById = buildOOOTypeBuckets(coverageRows);
   const typeIds = [...typePoolById.keys()];
 
-  if (typeIds.length < 3) {
+  if (typeIds.length < 1) {
     console.warn('[OOO] Not enough covered types to build OOO trials.');
     return [];
   }
@@ -1026,8 +1026,12 @@ function buildBalancedOOOTrialsFromCoverageRows(coverageRows, totalTrials = MAX_
   const finalTripletSpecs = [];
 
   for (let i = 0; i < totalTrials; i++) {
-    const shuffledTypeIds = shuffleInPlace(typeIds.slice());
-    const chosenTypeIds = shuffledTypeIds.slice(0, 3);
+    // sample WITH replacement from the 72 covered types
+    const chosenTypeIds = [
+      typeIds[Math.floor(Math.random() * typeIds.length)],
+      typeIds[Math.floor(Math.random() * typeIds.length)],
+      typeIds[Math.floor(Math.random() * typeIds.length)],
+    ];
 
     const colors = chosenTypeIds.map(typeId => (typePoolById.get(typeId)?.color || '').toLowerCase());
     const allDifferent = new Set(colors).size === 3;
