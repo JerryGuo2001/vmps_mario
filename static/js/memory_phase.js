@@ -14,7 +14,7 @@ let memory_promptMushroom = null; // the mushroom shown in the similarity/old-ne
 
 // --- Config: base trials & similarity test toggle ---
 const BASE_MEMORY_TRIALS = 36; // base 36 trials
-const ENABLE_SIMILARITY_TEST = true;
+const ENABLE_SIMILARITY_TEST = false;
 
 // ===================== EXTRA TRIALS CONFIG (APPEND-ONLY) =====================
 // 3 extra trials per color x 8 colors = 24 extra trials
