@@ -3,7 +3,7 @@
 const INSTR_SLIDES = {
   practice_explore: [1,2,3,4],
   explore: [1, 2, 3],   
-  memory:  [1, 2],
+  memory:  [1],
   ooo:     [1],
   ooo_2: [1]
 };
