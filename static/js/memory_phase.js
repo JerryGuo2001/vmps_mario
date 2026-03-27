@@ -12,6 +12,32 @@ let Memory_debug = false;
 
 let memory_promptMushroom = null; // the mushroom shown in the similarity/old-new prompt
 
+
+function getMemoryMushroomPreloadStatusBySrc() {
+  return window.MUSHROOM_PRELOAD?.statusBySrc || Object.create(null);
+}
+
+function getMemoryMushroomAssetStatus(src) {
+  const resolved = String(src || '').trim();
+  if (!resolved) return null;
+  return getMemoryMushroomPreloadStatusBySrc()[resolved] || null;
+}
+
+function isKnownBadMemoryMushroomSrc(src) {
+  const status = getMemoryMushroomAssetStatus(src);
+  return !!(status && status.ok === false);
+}
+
+function isUsableMemoryMushroomSrc(src) {
+  const status = getMemoryMushroomAssetStatus(src);
+  if (!status) return true;
+  return status.ok === true;
+}
+
+function isRenderableMemoryImage(imgEl) {
+  return !!(imgEl && imgEl.complete && imgEl.naturalWidth > 0);
+}
+
 // --- Config: base trials & similarity test toggle ---
 const BASE_MEMORY_TRIALS = 36; // base 36 trials
 const ENABLE_SIMILARITY_TEST = false;
@@ -292,6 +318,53 @@ let aMushrooms = [];   // left mushrooms per trial
 let bMushrooms = [];   // right mushrooms per trial
 let memoryTrials = []; // [{left,right, ...meta}]
 
+function logBuggedMemoryTrial(reason, leftMushroom, rightMushroom, extra = {}) {
+  if (typeof participantData === 'undefined' || !participantData?.trials) return;
+
+  const meta = memoryTrials?.[memory_currentQuestion] || {};
+  participantData.trials.push({
+    id: participantData.id,
+    trial_type: 'bugged_trial',
+    phase: 'memory',
+    bug_reason: reason || 'memory_missing_mushroom_asset',
+    trial_index: memory_currentQuestion,
+    memory_trial_number: memory_currentQuestion + 1,
+    is_extra: meta.is_extra ? 1 : 0,
+    color: meta.color || null,
+    left_image: leftMushroom?.imagefilename || null,
+    right_image: rightMushroom?.imagefilename || null,
+    left_type_key: leftMushroom?.type_key || null,
+    right_type_key: rightMushroom?.type_key || null,
+    time_elapsed: participantData?.startTime ? (performance.now() - participantData.startTime) : null,
+    ...extra,
+  });
+}
+
+function skipBuggedMemoryTrial(reason, leftMushroom, rightMushroom, extra = {}) {
+  const meta = memoryTrials?.[memory_currentQuestion] || null;
+
+  if (!meta?._bugLogged) {
+    if (meta) meta._bugLogged = true;
+    logBuggedMemoryTrial(reason, leftMushroom, rightMushroom, extra);
+  }
+
+  memory_trialStartTime = null;
+  memory_promptStartTime = null;
+  memory_awaitingAnswer = false;
+  memory_chosenMushroom = null;
+  memory_promptMushroom = null;
+  hideChoiceIndicator();
+
+  memory_currentQuestion += 1;
+  updateMemoryProgressBar();
+
+  if (memory_currentQuestion < (memory_totalQuestions || 0)) {
+    Promise.resolve().then(showMushrooms);
+  } else {
+    completeMemory();
+  }
+}
+
 // --- Utility: shuffle ---
 function _shuffle(arr) {
   for (let i = arr.length - 1; i > 0; i--) {
@@ -367,6 +440,8 @@ function _getCatalogPool() {
     if (_isSkyCatalogRow(r)) continue;
     const n = _normalizeMush(r);
     if (!n || !n.imagefilename) continue;
+    const src = memoryImageSrc(n.imagefilename);
+    if (!isUsableMemoryMushroomSrc(src)) continue;
     out.push(n);
   }
   return out;
@@ -1272,6 +1347,13 @@ function _preloadOneImage(src, timeoutMs = 15000) {
   if (!src) return Promise.resolve(false);
   if (memoryImagePreloadCache.has(src)) return memoryImagePreloadCache.get(src);
 
+  const knownStatus = getMemoryMushroomAssetStatus(src);
+  if (knownStatus) {
+    const knownPromise = Promise.resolve(knownStatus.ok === true);
+    memoryImagePreloadCache.set(src, knownPromise);
+    return knownPromise;
+  }
+
   const p = new Promise((resolve) => {
     const img = new Image();
     let done = false;
@@ -1388,6 +1470,15 @@ async function showMushrooms() {
 
   const leftSrc = memoryImageSrc(a.imagefilename);
   const rightSrc = memoryImageSrc(b.imagefilename);
+  const failedAssets = [leftSrc, rightSrc].filter(isKnownBadMemoryMushroomSrc);
+
+  if (failedAssets.length > 0) {
+    console.warn('[memory] Skipping bugged trial due to failed preloaded asset.', memory_currentQuestion, failedAssets);
+    skipBuggedMemoryTrial('memory_missing_preloaded_mushroom', a, b, {
+      failed_assets: failedAssets,
+    });
+    return;
+  }
 
   if (leftImg) leftImg.src = leftSrc;
   if (rightImg) rightImg.src = rightSrc;
@@ -1396,6 +1487,18 @@ async function showMushrooms() {
     if (leftImg?.decode) await leftImg.decode();
     if (rightImg?.decode) await rightImg.decode();
   } catch (_) {}
+
+  const nonRenderable = [];
+  if (!isRenderableMemoryImage(leftImg)) nonRenderable.push(leftSrc);
+  if (!isRenderableMemoryImage(rightImg)) nonRenderable.push(rightSrc);
+
+  if (nonRenderable.length > 0) {
+    console.warn('[memory] Skipping bugged trial due to non-renderable image.', memory_currentQuestion, nonRenderable);
+    skipBuggedMemoryTrial('memory_non_renderable_mushroom', a, b, {
+      failed_assets: nonRenderable,
+    });
+    return;
+  }
 
   memory_selectedSide = 'middle';
   memory_trialStartTime = performance.now();

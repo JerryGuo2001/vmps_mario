@@ -21,6 +21,66 @@ const OOO_PRELOAD_BEFORE_START = true;
 // Concurrency for faster preload without flooding browser/network
 const OOO_PRELOAD_CONCURRENCY = 6;
 
+
+function getOOOPreloadStatusBySrc() {
+  return window.MUSHROOM_PRELOAD?.statusBySrc || Object.create(null);
+}
+
+function getOOOAssetStatus(src) {
+  const resolved = String(src || '').trim();
+  if (!resolved) return null;
+  return getOOOPreloadStatusBySrc()[resolved] || null;
+}
+
+function isKnownBadOOOAsset(src) {
+  const status = getOOOAssetStatus(src);
+  return !!(status && status.ok === false);
+}
+
+function isRenderableOOOImage(imgEl) {
+  return !!(imgEl && imgEl.complete && imgEl.naturalWidth > 0);
+}
+
+function logOOOBuggedTrial(reason, tripletIdx, extra = {}) {
+  if (typeof participantData === 'undefined' || !participantData?.trials) return;
+
+  const meta = (typeof window.getOOOMeta === 'function') ? window.getOOOMeta(tripletIdx) : null;
+  const filenames = [meta?.a?.filename, meta?.b?.filename, meta?.c?.filename].filter(Boolean);
+
+  participantData.trials.push({
+    id: participantData.id,
+    trial_type: 'bugged_trial',
+    phase: 'odd_one_out',
+    bug_reason: reason || 'ooo_missing_mushroom_asset',
+    trial_index: currentTrialOOO,
+    ooo_trial_number: currentTrialOOO + 1,
+    ooo_triplet_index: tripletIdx,
+    stimulus: filenames,
+    type_ids: Array.isArray(meta?.type_ids) ? meta.type_ids.slice() : null,
+    balance_class: meta?.balance_class || null,
+    time_elapsed: participantData?.startTime ? (performance.now() - participantData.startTime) : null,
+    ...extra
+  });
+}
+
+function advancePastBuggedOOOTrial(reason, tripletIdx, extra = {}) {
+  const meta = (typeof window.getOOOMeta === 'function') ? window.getOOOMeta(tripletIdx) : null;
+
+  if (!meta?._bugLogged) {
+    if (meta) meta._bugLogged = true;
+    logOOOBuggedTrial(reason, tripletIdx, extra);
+  }
+
+  trialStartTimeOOO = null;
+  currentTrialOOO += 1;
+
+  if (currentTrialOOO < (trialsOOO?.length || 0)) {
+    Promise.resolve().then(showTrialOOO);
+  } else {
+    finishTaskOOO();
+  }
+}
+
 function ensureOOOPreloadUI(container, totalToLoad) {
   let wrap = document.getElementById('oooPreloadContainer');
   if (!wrap) {
@@ -138,6 +198,13 @@ async function preloadOOOTrials(trialIndices) {
 
   async function loadOne(tripletIdx) {
     try {
+      const meta = (typeof window.getOOOMeta === 'function') ? window.getOOOMeta(tripletIdx) : null;
+      const filenames = [meta?.a?.filename, meta?.b?.filename, meta?.c?.filename].filter(Boolean);
+
+      if (filenames.some(isKnownBadOOOAsset)) {
+        return;
+      }
+
       const trial = await window.getOOOTrial(tripletIdx);
       if (trial) {
         const arr = [trial.a, trial.b, trial.c];
@@ -347,9 +414,48 @@ async function showTrialOOO() {
   updateOOOProgressBar();
 
   const tripletIdx = trialsOOO[currentTrialOOO];
+  const meta = (typeof window.getOOOMeta === 'function') ? window.getOOOMeta(tripletIdx) : null;
+  const expectedFiles = [meta?.a?.filename, meta?.b?.filename, meta?.c?.filename].filter(Boolean);
   imgContainerOOO.innerHTML = '';
 
-  const trial = await window.getOOOTrial(tripletIdx);
+  if (expectedFiles.some(isKnownBadOOOAsset)) {
+    console.warn('[OOO] Skipping bugged trial due to failed preloaded asset.', tripletIdx, expectedFiles);
+    advancePastBuggedOOOTrial('ooo_missing_preloaded_mushroom', tripletIdx, {
+      stimulus: expectedFiles,
+      failed_assets: expectedFiles.filter(isKnownBadOOOAsset),
+    });
+    return;
+  }
+
+  let trial = null;
+  try {
+    trial = await window.getOOOTrial(tripletIdx);
+  } catch (err) {
+    console.warn('[OOO] Failed to materialize trial at index', tripletIdx, err);
+    advancePastBuggedOOOTrial('ooo_failed_to_materialize_trial', tripletIdx, {
+      stimulus: expectedFiles,
+      error_message: err?.message || String(err || 'unknown_error'),
+    });
+    return;
+  }
+
+  if (!trial) {
+    console.warn('[OOO] Failed to load trial at index', tripletIdx);
+    advancePastBuggedOOOTrial('ooo_null_trial', tripletIdx, { stimulus: expectedFiles });
+    return;
+  }
+
+  const trialImages = [trial?.a?.image, trial?.b?.image, trial?.c?.image];
+  const missingRenderables = expectedFiles.filter((_, idx) => !isRenderableOOOImage(trialImages[idx]));
+  if (missingRenderables.length > 0) {
+    console.warn('[OOO] Skipping bugged trial due to non-renderable image.', tripletIdx, missingRenderables);
+    advancePastBuggedOOOTrial('ooo_non_renderable_mushroom', tripletIdx, {
+      stimulus: expectedFiles,
+      failed_assets: missingRenderables,
+    });
+    return;
+  }
+
   console.log('[OOO trial]', {
     tripletIdx,
     balance_class: trial.balance_class,
@@ -361,10 +467,6 @@ async function showTrialOOO() {
       [trial.c.stem, trial.c.cap],
     ]
   });
-  if (!trial) {
-    console.warn('[OOO] Failed to load trial at index', tripletIdx);
-    return;
-  }
 
   const order = [trial.a, trial.b, trial.c].sort(() => Math.random() - 0.5);
 
