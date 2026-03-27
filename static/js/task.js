@@ -13,6 +13,326 @@ let emptyRoomHintUntil = 0;
 
 const CONSENT_PDF_URL = 'TexturePack/consent/2019-5110_Study_Information_Sheet_Foraging.pdf';
 
+
+const MUSHROOM_CATALOG_CSV_URL = 'TexturePack/mushroom_pack/mushroom_catalog.csv';
+const MUSHROOM_IMAGE_BASE_DIR = 'TexturePack/mushroom_pack/images_balanced/';
+window.mushroomCatalogRows = Array.isArray(window.mushroomCatalogRows) ? window.mushroomCatalogRows : [];
+window.MUSHROOM_PRELOAD = window.MUSHROOM_PRELOAD || {
+  rowsLoaded: false,
+  imagesLoaded: false,
+  statusBySrc: Object.create(null),
+  loadedCount: 0,
+  failedCount: 0,
+  totalCount: 0,
+  lastError: null
+};
+
+function csvSplitLine(line) {
+  const out = [];
+  let cur = '';
+  let inQuotes = false;
+
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (ch === '"') {
+      if (inQuotes && line[i + 1] === '"') {
+        cur += '"';
+        i += 1;
+      } else {
+        inQuotes = !inQuotes;
+      }
+    } else if (ch === ',' && !inQuotes) {
+      out.push(cur);
+      cur = '';
+    } else {
+      cur += ch;
+    }
+  }
+  out.push(cur);
+  return out;
+}
+
+function parseCSVText(csvText) {
+  const text = String(csvText || '').replace(/^\uFEFF/, '');
+  const lines = text.split(/\r?\n/).filter(line => line.trim().length > 0);
+  if (!lines.length) return [];
+
+  const headers = csvSplitLine(lines[0]).map(h => String(h || '').trim());
+  const rows = [];
+
+  for (let i = 1; i < lines.length; i++) {
+    const cells = csvSplitLine(lines[i]);
+    const row = {};
+    headers.forEach((header, idx) => {
+      row[header] = (cells[idx] ?? '').trim();
+    });
+    rows.push(row);
+  }
+  return rows;
+}
+
+function firstDefinedValue(obj, keys) {
+  if (!obj) return undefined;
+  for (const key of keys) {
+    if (Object.prototype.hasOwnProperty.call(obj, key) && obj[key] != null && String(obj[key]).trim() !== '') {
+      return obj[key];
+    }
+  }
+  return undefined;
+}
+
+function toMaybeNumber(value) {
+  if (value == null) return value;
+  const raw = String(value).trim();
+  if (!raw) return '';
+  if (/^reset$/i.test(raw)) return 'reset';
+  const num = Number(raw);
+  return Number.isFinite(num) ? num : raw;
+}
+
+function resolveCatalogImagePath(rawPath) {
+  const raw = String(rawPath || '').trim();
+  if (!raw) return '';
+  if (/^(https?:)?\/\//i.test(raw) || raw.startsWith('data:') || raw.startsWith('/') || raw.startsWith('TexturePack/')) {
+    return raw;
+  }
+  if (/^[^\\/]+\.(png|jpg|jpeg|webp)$/i.test(raw)) {
+    return `${MUSHROOM_IMAGE_BASE_DIR}${raw}`;
+  }
+  return raw;
+}
+
+function normalizeCatalogRow(row) {
+  const filenameRaw = firstDefinedValue(row, ['filename', 'imagefilename', 'image', 'img', 'file', 'path']);
+  const colorRaw = firstDefinedValue(row, ['color', 'color_name']);
+  const out = {
+    ...row,
+    filename: resolveCatalogImagePath(filenameRaw),
+    imagefilename: resolveCatalogImagePath(filenameRaw),
+    color: String(colorRaw ?? '').trim().toLowerCase(),
+    color_name: String(colorRaw ?? '').trim().toLowerCase(),
+    value: toMaybeNumber(firstDefinedValue(row, ['value', 'reward', 'points'])),
+    stem_width: toMaybeNumber(firstDefinedValue(row, ['stem_width', 'stem'])),
+    stem: toMaybeNumber(firstDefinedValue(row, ['stem_width', 'stem'])),
+    cap_roundness: toMaybeNumber(firstDefinedValue(row, ['cap_roundness', 'cap'])),
+    cap: toMaybeNumber(firstDefinedValue(row, ['cap_roundness', 'cap'])),
+    room: String(firstDefinedValue(row, ['room', 'env', 'environment']) ?? '').trim().toLowerCase()
+  };
+  return out;
+}
+
+async function loadMushroomCatalogRows() {
+  if (Array.isArray(window.mushroomCatalogRows) && window.mushroomCatalogRows.length > 0) {
+    window.MUSHROOM_PRELOAD.rowsLoaded = true;
+    return window.mushroomCatalogRows;
+  }
+
+  const res = await fetch(`${MUSHROOM_CATALOG_CSV_URL}?v=${Date.now()}`, { cache: 'no-store' });
+  if (!res.ok) {
+    throw new Error(`Catalog fetch failed: ${res.status}`);
+  }
+
+  const csvText = await res.text();
+  const parsed = parseCSVText(csvText)
+    .map(normalizeCatalogRow)
+    .filter(row => row && row.filename);
+
+  window.mushroomCatalogRows = parsed;
+  window.MUSHROOM_PRELOAD.rowsLoaded = true;
+  return parsed;
+}
+
+function ensureMushroomPreloadOverlay() {
+  if (!document.getElementById('mushroom-preload-style')) {
+    const style = document.createElement('style');
+    style.id = 'mushroom-preload-style';
+    style.textContent = `
+      #mushroomPreloadOverlay {
+        position: fixed;
+        inset: 0;
+        z-index: 100001;
+        display: none;
+        align-items: center;
+        justify-content: center;
+        background: rgba(0, 0, 0, 0.72);
+        padding: 24px;
+      }
+      #mushroomPreloadCard {
+        width: min(560px, 92vw);
+        background: #ffffff;
+        color: #111827;
+        border-radius: 16px;
+        box-shadow: 0 18px 60px rgba(0,0,0,0.28);
+        padding: 24px;
+        font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+      }
+      #mushroomPreloadTitle {
+        font-size: 22px;
+        font-weight: 700;
+        margin-bottom: 8px;
+      }
+      #mushroomPreloadText {
+        font-size: 15px;
+        line-height: 1.5;
+        margin-bottom: 14px;
+      }
+      #mushroomPreloadBarWrap {
+        height: 16px;
+        background: #e5e7eb;
+        border-radius: 999px;
+        overflow: hidden;
+      }
+      #mushroomPreloadBar {
+        height: 100%;
+        width: 0%;
+        background: #2563eb;
+        transition: width 0.12s ease;
+      }
+      #mushroomPreloadPercent {
+        margin-top: 10px;
+        font-size: 14px;
+        font-weight: 600;
+      }
+      #mushroomPreloadMeta {
+        margin-top: 6px;
+        font-size: 13px;
+        color: #4b5563;
+      }
+    `;
+    document.head.appendChild(style);
+  }
+
+  let overlay = document.getElementById('mushroomPreloadOverlay');
+  if (!overlay) {
+    overlay = document.createElement('div');
+    overlay.id = 'mushroomPreloadOverlay';
+    overlay.innerHTML = `
+      <div id="mushroomPreloadCard">
+        <div id="mushroomPreloadTitle">Loading mushroom images</div>
+        <div id="mushroomPreloadText">Preparing mushroom assets from the catalog before the task starts.</div>
+        <div id="mushroomPreloadBarWrap"><div id="mushroomPreloadBar"></div></div>
+        <div id="mushroomPreloadPercent">0%</div>
+        <div id="mushroomPreloadMeta">Starting…</div>
+      </div>
+    `;
+    document.body.appendChild(overlay);
+  }
+  return overlay;
+}
+
+function updateMushroomPreloadOverlay(progress = 0, text = '', meta = '') {
+  const overlay = ensureMushroomPreloadOverlay();
+  overlay.style.display = 'flex';
+
+  const clamped = Math.max(0, Math.min(100, Number(progress) || 0));
+  const bar = document.getElementById('mushroomPreloadBar');
+  const pct = document.getElementById('mushroomPreloadPercent');
+  const textEl = document.getElementById('mushroomPreloadText');
+  const metaEl = document.getElementById('mushroomPreloadMeta');
+
+  if (bar) bar.style.width = `${clamped}%`;
+  if (pct) pct.textContent = `${Math.round(clamped)}%`;
+  if (textEl && text) textEl.textContent = text;
+  if (metaEl && meta) metaEl.textContent = meta;
+}
+
+function hideMushroomPreloadOverlay() {
+  const overlay = document.getElementById('mushroomPreloadOverlay');
+  if (overlay) overlay.style.display = 'none';
+}
+
+function preloadSingleImage(src) {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => resolve({ src, ok: true });
+    img.onerror = () => resolve({ src, ok: false });
+    img.src = src;
+  });
+}
+
+async function preloadMushroomCatalogAndAssets() {
+  const state = window.MUSHROOM_PRELOAD;
+  if (state?.rowsLoaded && state?.imagesLoaded) {
+    return {
+      total: state.totalCount || 0,
+      loaded: state.loadedCount || 0,
+      failed: state.failedCount || 0
+    };
+  }
+
+  updateMushroomPreloadOverlay(0, 'Loading mushroom catalog…', 'Reading mushroom_catalog.csv');
+  const rows = await loadMushroomCatalogRows();
+
+  const sources = Array.from(new Set(
+    rows
+      .map(row => resolveCatalogImagePath(row.filename || row.imagefilename || row.image))
+      .filter(Boolean)
+      .concat([
+        'TexturePack/mushroom_pack/sky_mushroom/rainbow_mushroom.png'
+      ])
+  ));
+
+  state.totalCount = sources.length;
+  state.loadedCount = 0;
+  state.failedCount = 0;
+  state.statusBySrc = Object.create(null);
+
+  if (!sources.length) {
+    state.imagesLoaded = true;
+    updateMushroomPreloadOverlay(100, 'No mushroom images found in catalog.', '');
+    await new Promise(r => setTimeout(r, 250));
+    hideMushroomPreloadOverlay();
+    return { total: 0, loaded: 0, failed: 0 };
+  }
+
+  updateMushroomPreloadOverlay(0, 'Preloading mushroom images…', `0 / ${sources.length}`);
+
+  const concurrency = 10;
+  let cursor = 0;
+
+  async function worker() {
+    while (cursor < sources.length) {
+      const index = cursor++;
+      const src = sources[index];
+      const result = await preloadSingleImage(src);
+      state.statusBySrc[src] = result;
+      if (result.ok) state.loadedCount += 1;
+      else state.failedCount += 1;
+
+      const done = state.loadedCount + state.failedCount;
+      const pct = sources.length ? (done / sources.length) * 100 : 100;
+      updateMushroomPreloadOverlay(
+        pct,
+        'Preloading mushroom images…',
+        `${done} / ${sources.length} loaded • ${state.failedCount} failed`
+      );
+    }
+  }
+
+  const workers = [];
+  for (let i = 0; i < Math.min(concurrency, sources.length); i++) workers.push(worker());
+  await Promise.all(workers);
+
+  state.imagesLoaded = true;
+  if (state.failedCount > 0) {
+    console.warn(`[mushroom preload] ${state.failedCount} image(s) failed to load and will be skipped during the task.`);
+  }
+
+  updateMushroomPreloadOverlay(
+    100,
+    'Mushroom preload complete.',
+    `${state.loadedCount} loaded • ${state.failedCount} failed`
+  );
+  await new Promise(r => setTimeout(r, 350));
+  hideMushroomPreloadOverlay();
+
+  return {
+    total: sources.length,
+    loaded: state.loadedCount,
+    failed: state.failedCount
+  };
+}
+
 function injectConsentGateIntoWelcome() {
   const welcome = document.getElementById('welcome');
   if (!welcome || document.getElementById('consentGateWrap')) return;
@@ -376,6 +696,15 @@ async function startWithID() {
       showSessionEndedPage(
         'This participant ID already has a completed or closed session. You cannot restart the experiment.'
       );
+      return;
+    }
+
+    try {
+      await preloadMushroomCatalogAndAssets();
+    } catch (err) {
+      console.error('[task] Mushroom preload failed:', err);
+      hideMushroomPreloadOverlay();
+      alert('Could not preload the mushroom catalog/images. Please refresh and try again.');
       return;
     }
 
@@ -900,6 +1229,13 @@ function maybeStartImmediateDecisionFreeze() {
       if (!m) m = mushrooms.find(m => m.isVisible);
 
       if (m) {
+        if (typeof isRenderableMushroomObject === 'function' && !isRenderableMushroomObject(m)) {
+          if (typeof skipBuggedMushroomTrial === 'function') {
+            skipBuggedMushroomTrial('explore_revealed_mushroom_image_missing', m);
+          }
+          return;
+        }
+
         markMushroomSeenOnce(m, currentRoom);
 
         activeMushroom = m;
@@ -968,6 +1304,14 @@ function updateGame(currentTime) {
       if (!allowedKeys.includes(key)) {
         keys[key] = false; // Disable any other key
       }
+    }
+
+    if (typeof isRenderableMushroomObject === 'function' && !isRenderableMushroomObject(activeMushroom)) {
+      if (typeof skipBuggedMushroomTrial === 'function') {
+        skipBuggedMushroomTrial('explore_active_mushroom_image_missing', activeMushroom);
+      }
+      requestAnimationFrame(updateGame);
+      return;
     }
 
     if (freezeTime > 0) {

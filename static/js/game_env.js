@@ -31,6 +31,78 @@ let regeneratingMushrooms = false;  // NEW: prevent double-regeneration
 let explorationCompleteTriggered = false;
 
 
+function getMushroomPreloadStatusBySrc() {
+  return window.MUSHROOM_PRELOAD?.statusBySrc || Object.create(null);
+}
+
+function getMushroomAssetStatus(src) {
+  const resolved = String(src || '').trim();
+  if (!resolved) return null;
+  return getMushroomPreloadStatusBySrc()[resolved] || null;
+}
+
+function isUsableMushroomAsset(src) {
+  const status = getMushroomAssetStatus(src);
+  if (!status) return true;
+  return status.ok === true;
+}
+
+function isRenderableMushroomObject(mushroomObj) {
+  if (!mushroomObj) return false;
+  if (mushroomObj.imageError === true) return false;
+  if (mushroomObj.imageLoaded === true) return true;
+  const img = mushroomObj.image;
+  return !!(img && img.complete && img.naturalWidth > 0);
+}
+
+function removeSpecificMushroom(mushroomObj) {
+  if (!Array.isArray(mushrooms) || !mushroomObj) return;
+  const idx = mushrooms.indexOf(mushroomObj);
+  if (idx !== -1) mushrooms.splice(idx, 1);
+}
+
+function logBuggedMushroomTrial(reason, mushroomObj, extra = {}) {
+  if (typeof participantData === 'undefined' || !participantData?.trials) return;
+  participantData.trials.push({
+    id: participantData.id,
+    trial_type: 'bugged_trial',
+    bug_reason: reason || 'unknown_mushroom_bug',
+    stimulus: mushroomObj?.imagefilename || mushroomObj?.filename || mushroomObj?.image?.src || null,
+    value: mushroomObj?.value ?? null,
+    room: String(currentRoom || '').trim().toLowerCase() || null,
+    room_repetition: roomRepetitionMap?.[currentRoom] || null,
+    hp: character?.hp ?? null,
+    mushroom_x: mushroomObj?.x ?? null,
+    mushroom_y: mushroomObj?.y ?? null,
+    time_elapsed: participantData?.startTime ? (performance.now() - participantData.startTime) : null,
+    ...extra
+  });
+}
+
+function skipBuggedMushroomTrial(reason, mushroomObj, extra = {}) {
+  if (!mushroomObj || mushroomObj._bugLogged) {
+    if (mushroomObj === activeMushroom) {
+      activeMushroom = null;
+      freezeState = false;
+      mushroomDecisionStartTime = null;
+    }
+    return;
+  }
+
+  mushroomObj._bugLogged = true;
+  logBuggedMushroomTrial(reason, mushroomObj, extra);
+  removeSpecificMushroom(mushroomObj);
+
+  if (mushroomObj === activeMushroom) {
+    activeMushroom = null;
+    freezeState = false;
+    mushroomDecisionStartTime = null;
+    mushroomDecisionTimer = 0;
+    revealOnlyValue = false;
+  }
+}
+
+
 const MIN_ROOM_ENTRIES_BEFORE_CLEAR = 3;
 const roomEntryCount = Object.create(null); // room -> #door entries
 
@@ -848,7 +920,7 @@ async function generateMushroom(count = 5) {
   if (!plats.length) return [];
 
   // ---- full catalog ----
-  const allRows = (window.mushroomCatalogRows || []);
+  const allRows = (window.mushroomCatalogRows || []).filter(row => row && row.filename && isUsableMushroomAsset(row.filename));
   if (!allRows.length) return [];
 
   // Normalize env name
@@ -1074,10 +1146,13 @@ async function generateMushroom(count = 5) {
     for (let j = 0; j < xs.length && rowIdx < chosenRows.length; j++) {
       const r = chosenRows[rowIdx++];
       const img = new Image();
+      const preloadStatus = getMushroomAssetStatus(r.filename);
+      img.onload = () => { item.imageLoaded = true; item.imageError = false; };
+      img.onerror = () => { item.imageLoaded = false; item.imageError = true; };
       img.src = r.filename;  // or resolveImgSrc(r.filename) if you prefer
       const expId = expTypeKeyFromRow(r);
 
-      items.push({
+      const item = {
         x: xs[j],
         y: boxTopY,
         type: 0,
@@ -1091,7 +1166,10 @@ async function generateMushroom(count = 5) {
         image: img,
         groundPlatformIndex: pi,
         _expId: expId,
-      });
+        imageLoaded: preloadStatus ? preloadStatus.ok === true : false,
+        imageError: preloadStatus ? preloadStatus.ok === false : false,
+      };
+      items.push(item);
     }
   }
 
@@ -1102,9 +1180,12 @@ async function generateMushroom(count = 5) {
 
     const r = chosenRows[rowIdx++];
     const img = new Image();
+    const preloadStatus = getMushroomAssetStatus(r.filename);
+    img.onload = () => { item.imageLoaded = true; item.imageError = false; };
+    img.onerror = () => { item.imageLoaded = false; item.imageError = true; };
     img.src = r.filename;
     const expId = expTypeKeyFromRow(r);
-    items.push({
+    const item = {
       x: x0,
       y: y0,
       type: 0,
@@ -1118,7 +1199,10 @@ async function generateMushroom(count = 5) {
       image: img,
       groundPlatformIndex: 0,
       _expId: expId,
-    });
+      imageLoaded: preloadStatus ? preloadStatus.ok === true : false,
+      imageError: preloadStatus ? preloadStatus.ok === false : false,
+    };
+    items.push(item);
   }
 
   return items;
@@ -1355,6 +1439,11 @@ function drawMysBox() {
 
     // draw mushroom ONLY IF revealed by head-hit
     if (mushroom.isVisible) {
+      if (!isRenderableMushroomObject(mushroom)) {
+        skipBuggedMushroomTrial('explore_visible_mushroom_image_missing', mushroom);
+        return;
+      }
+
       if (!mushroom.growthComplete) {
         mushroom.growthFactor = Math.min(mushroom.growthFactor + mushroom.growthSpeed, 1);
         if (mushroom.growthFactor === 1) {
@@ -1826,6 +1915,10 @@ function handleMovement_canvas4() {
 
 function drawMushroomQuestionBox() {
   if (!activeMushroom) return;
+  if (!isRenderableMushroomObject(activeMushroom)) {
+    skipBuggedMushroomTrial('explore_decision_box_image_missing', activeMushroom);
+    return;
+  }
 
   const sz = window.MUSHROOM_DISPLAY_SIZE || 150;  // same as OOO
   const boxMargin = 100;
