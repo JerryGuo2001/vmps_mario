@@ -285,7 +285,7 @@ async function preloadMushroomCatalogAndAssets() {
     return { total: 0, loaded: 0, failed: 0 };
   }
 
-  updateMushroomPreloadOverlay(0, 'Preloading mushroom images…', `0 / ${sources.length}`);
+  updateMushroomPreloadOverlay(0, 'Preloading mushroom images…', `...`);
 
   const concurrency = 10;
   let cursor = 0;
