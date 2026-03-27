@@ -304,7 +304,6 @@ async function preloadMushroomCatalogAndAssets() {
       updateMushroomPreloadOverlay(
         pct,
         'Preloading mushroom images…',
-        `${done} / ${sources.length} loaded • ${state.failedCount} failed`
       );
     }
   }
