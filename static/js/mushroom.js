@@ -8,12 +8,23 @@
  *******************************************************/
 
 /* ==================== CONFIG ==================== */
+//mushroom_version determinents
+let version_mushroom='original'
+if (version_mushroom=='original'){
+  const MUSHROOM_CATALOG_CSV_URL = 'TexturePack/mushroom_pack_original/mushroom_catalog.csv';
+  const MUSHROOM_IMAGE_BASE_DIR = 'TexturePack/mushroom_pack_original/images_balanced/';
+  const MUSHROOM_IMG_BASE = 'TexturePack/mushroom_pack_original';
+  const CATALOG_CSV_URL   = 'TexturePack/mushroom_pack_original/mushroom_catalog.csv';
+}else if(version_mushroom=='color_changed'){
+  const MUSHROOM_CATALOG_CSV_URL = 'TexturePack/mushroom_pack_second_version/mushroom_catalog.csv';
+  const MUSHROOM_IMAGE_BASE_DIR = 'TexturePack/mushroom_pack_second_version/images_balanced/';
+  const MUSHROOM_IMG_BASE = 'TexturePack/mushroom_pack_original';
+  const CATALOG_CSV_URL   = 'TexturePack/mushroom_pack_original/mushroom_catalog.csv';
+}
+
 
 const MAX_TRIALS = 100;
 const IMG_LOAD_TIMEOUT_MS = 5000;
-
-const MUSHROOM_IMG_BASE = 'TexturePack/mushroom_pack';
-const CATALOG_CSV_URL   = 'TexturePack/mushroom_pack/mushroom_catalog.csv';
 
 const EIGHT_COLORS = ['black','white','red','green','blue','cyan','magenta','yellow'];
 

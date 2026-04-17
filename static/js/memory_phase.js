@@ -1,13 +1,4 @@
 // ========================= MEMORY PHASE (2AFC VALUE CHOICE) =========================
-//mushroom_version determinents
-let version_mushroom='original'
-if (version_mushroom=='original'){
-  const MUSHROOM_CATALOG_CSV_URL = 'TexturePack/mushroom_pack_original/mushroom_catalog.csv';
-  const MUSHROOM_IMAGE_BASE_DIR = 'TexturePack/mushroom_pack_original/images_balanced/';
-}else if(version_mushroom=='color_changed'){
-  const MUSHROOM_CATALOG_CSV_URL = 'TexturePack/mushroom_pack_second_version/mushroom_catalog.csv';
-  const MUSHROOM_IMAGE_BASE_DIR = 'TexturePack/mushroom_pack_second_version/images_balanced/';
-}
 
 // --- Global state for memory phase ---
 let memory_currentQuestion = 0;
