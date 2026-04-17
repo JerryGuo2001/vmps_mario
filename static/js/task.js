@@ -13,9 +13,6 @@ let emptyRoomHintUntil = 0;
 
 const CONSENT_PDF_URL = 'TexturePack/consent/2019-5110_Study_Information_Sheet_Foraging.pdf';
 
-
-const MUSHROOM_CATALOG_CSV_URL = 'TexturePack/mushroom_pack/mushroom_catalog.csv';
-const MUSHROOM_IMAGE_BASE_DIR = 'TexturePack/mushroom_pack/images_balanced/';
 window.mushroomCatalogRows = Array.isArray(window.mushroomCatalogRows) ? window.mushroomCatalogRows : [];
 window.MUSHROOM_PRELOAD = window.MUSHROOM_PRELOAD || {
   rowsLoaded: false,
