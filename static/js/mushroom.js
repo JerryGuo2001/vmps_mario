@@ -9,17 +9,19 @@
 
 /* ==================== CONFIG ==================== */
 //mushroom_version determinents
+let MUSHROOM_CATALOG_CSV_URL,MUSHROOM_IMAGE_BASE_DIR,MUSHROOM_IMG_BASE,CATALOG_CSV_URL
+
 let version_mushroom='original'
 if (version_mushroom=='original'){
-  const MUSHROOM_CATALOG_CSV_URL = 'TexturePack/mushroom_pack_original/mushroom_catalog.csv';
-  const MUSHROOM_IMAGE_BASE_DIR = 'TexturePack/mushroom_pack_original/images_balanced/';
-  const MUSHROOM_IMG_BASE = 'TexturePack/mushroom_pack_original';
-  const CATALOG_CSV_URL   = 'TexturePack/mushroom_pack_original/mushroom_catalog.csv';
+  MUSHROOM_CATALOG_CSV_URL = 'TexturePack/mushroom_pack_original/mushroom_catalog.csv';
+  MUSHROOM_IMAGE_BASE_DIR = 'TexturePack/mushroom_pack_original/images_balanced/';
+  MUSHROOM_IMG_BASE = 'TexturePack/mushroom_pack_original';
+  CATALOG_CSV_URL   = 'TexturePack/mushroom_pack_original/mushroom_catalog.csv';
 }else if(version_mushroom=='color_changed'){
-  const MUSHROOM_CATALOG_CSV_URL = 'TexturePack/mushroom_pack_second_version/mushroom_catalog.csv';
-  const MUSHROOM_IMAGE_BASE_DIR = 'TexturePack/mushroom_pack_second_version/images_balanced/';
-  const MUSHROOM_IMG_BASE = 'TexturePack/mushroom_pack_original';
-  const CATALOG_CSV_URL   = 'TexturePack/mushroom_pack_original/mushroom_catalog.csv';
+  MUSHROOM_CATALOG_CSV_URL = 'TexturePack/mushroom_pack_second_version/mushroom_catalog.csv';
+  MUSHROOM_IMAGE_BASE_DIR = 'TexturePack/mushroom_pack_second_version/images_balanced/';
+  MUSHROOM_IMG_BASE = 'TexturePack/mushroom_pack_original';
+  CATALOG_CSV_URL   = 'TexturePack/mushroom_pack_original/mushroom_catalog.csv';
 }
 
 
