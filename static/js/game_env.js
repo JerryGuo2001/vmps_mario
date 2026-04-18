@@ -640,23 +640,44 @@ const NON_SKY_ROOMS = ['desert', 'ocean', 'forest', 'cave', 'lava'];
  *
  * You can change this mapping as you like, as long as the pattern holds.
  */
-const ROOM_COLOR_MAP = {
-  // 5 unique colors (each belongs to 1 room)
-  yellow:  ['desert'],   // only desert
-  magenta:    ['ocean'],    // only ocean
-  green:   ['forest'],   // only forest
-  black:   ['cave'],     // only cave
-  red:     ['lava'],     // only lava
+let ROOM_COLOR_MAP
+if (version_mushroom=='original'){
+  ROOM_COLOR_MAP = {
+    // 5 unique colors (each belongs to 1 room)
+    yellow:  ['desert'],   // only desert
+    magenta:    ['ocean'],    // only ocean
+    green:   ['forest'],   // only forest
+    black:   ['cave'],     // only cave
+    red:     ['lava'],     // only lava
 
-  // 1 color shared by exactly 2 rooms
-  cyan:    ['desert', 'cave'],
+    // 1 color shared by exactly 2 rooms
+    cyan:    ['desert', 'cave'],
 
-  // 1 color shared by exactly 3 rooms
-  white:   ['ocean', 'forest', 'lava'],
+    // 1 color shared by exactly 3 rooms
+    white:   ['ocean', 'forest', 'lava'],
 
-  // 1 color shared by all 5 rooms
-  blue:   ['desert', 'ocean', 'forest', 'cave', 'lava']
-};
+    // 1 color shared by all 5 rooms
+    blue:   ['desert', 'ocean', 'forest', 'cave', 'lava']
+  };
+}else if(version_mushroom=='second_version'){
+  ROOM_COLOR_MAP = {
+    // 5 unique colors (each belongs to 1 room)
+    cyan:  ['desert'],   // only desert
+    green:    ['ocean'],    // only ocean
+    magenta:   ['forest'],   // only forest
+    blue:   ['cave'],     // only cave
+    white:     ['lava'],     // only lava
+
+    // 1 color shared by exactly 2 rooms
+    yellow:    ['desert', 'cave'],
+
+    // 1 color shared by exactly 3 rooms
+    red:   ['ocean', 'forest', 'lava'],
+
+    // 1 color shared by all 5 rooms
+    black:   ['desert', 'ocean', 'forest', 'cave', 'lava']
+  }
+}
 
 /**
  * Global per-room HP threshold:
