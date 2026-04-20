@@ -926,7 +926,7 @@ function getGroundY(xPosition) {
 }
 
 // ================= SKY (RAINBOW) MUSHROOM ONLY =================
-const SKY_RAINBOW_MUSHROOM_SRC   = 'TexturePack/mushroom_pack/sky_mushroom/rainbow_mushroom.png';
+const SKY_RAINBOW_MUSHROOM_SRC   = 'TexturePack/mushroom_pack_original/sky_mushroom/rainbow_mushroom.png';
 const SKY_RAINBOW_MUSHROOM_VALUE = 2;
 
 // Optional: give it stable attributes so any type-key code won’t produce NA.
