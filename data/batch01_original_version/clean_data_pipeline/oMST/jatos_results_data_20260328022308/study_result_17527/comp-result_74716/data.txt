@@ -1,0 +1,1 @@
+[{"rt":6008,"response":{"idcode":"5ea37c11733b42302b54b64c"},"trial_type":"survey-html-form","trial_index":0,"time_elapsed":6012,"internal_node_id":"0.0-0.0","task":"getid","date":"3/27/2026"}]

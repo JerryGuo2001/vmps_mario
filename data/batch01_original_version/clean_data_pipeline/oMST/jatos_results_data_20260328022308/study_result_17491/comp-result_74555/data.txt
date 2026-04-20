@@ -1,0 +1,1 @@
+{"task":"end-SCAN","msg":"study ended","date":"Wed Mar 25 2026 20:38:11 GMT-0700 (Pacific Daylight Time)"}
