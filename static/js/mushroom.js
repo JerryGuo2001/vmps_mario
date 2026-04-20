@@ -11,7 +11,7 @@
 //mushroom_version determinents
 let MUSHROOM_CATALOG_CSV_URL,MUSHROOM_IMAGE_BASE_DIR,MUSHROOM_IMG_BASE,CATALOG_CSV_URL
 
-let version_mushroom='original'
+let version_mushroom='second_version'
 if (version_mushroom=='original'){
   MUSHROOM_CATALOG_CSV_URL = 'TexturePack/mushroom_pack_original/mushroom_catalog.csv';
   MUSHROOM_IMAGE_BASE_DIR = 'TexturePack/mushroom_pack_original/images_balanced/';
