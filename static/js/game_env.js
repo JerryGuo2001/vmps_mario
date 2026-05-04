@@ -662,20 +662,20 @@ if (version_mushroom=='original'){
 }else if(version_mushroom=='second_version'){
   ROOM_COLOR_MAP = {
     // 5 unique colors (each belongs to 1 room)
-    cyan:  ['desert'],   // only desert
-    green:    ['ocean'],    // only ocean
-    magenta:   ['forest'],   // only forest
-    blue:   ['cave'],     // only cave
-    white:     ['lava'],     // only lava
+    cyan:  ['lava'],   // only desert
+    green:    ['cave'],    // only ocean
+    magenta:   ['desert'],   // only forest
+    blue:   ['ocean'],     // only cave
+    white:     ['forest'],     // only lava
 
     // 1 color shared by exactly 2 rooms
-    yellow:    ['desert', 'cave'],
+    yellow:    ['lava', 'ocean'],
 
     // 1 color shared by exactly 3 rooms
-    red:   ['ocean', 'forest', 'lava'],
+    red:   ['cave', 'desert', 'forest'],
 
     // 1 color shared by all 5 rooms
-    black:   ['desert', 'ocean', 'forest', 'cave', 'lava']
+    black:   ['lava', 'cave', 'desert', 'ocean', 'forest']
   }
 }
 
