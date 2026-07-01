@@ -8,7 +8,7 @@ let memory_promptStartTime = null; // for optional old/new/similar RT
 let memory_awaitingAnswer = false;
 let memory_chosenMushroom = null;
 let memory_totalQuestions;
-let Memory_debug = true;
+let Memory_debug = false;
 
 let memory_promptMushroom = null; // the mushroom shown in the similarity/old-new prompt
 
@@ -948,51 +948,52 @@ async function preloadMushroomPairs() {
   bMushrooms = combined.map(tr => tr.right);
   memory_totalQuestions = combined.length;
 
-  // ===================== DEBUG PRINTS =====================
-  console.log(`[memory] Base trials=${baseTrials.length}, Extra trials=${extraTrials.length}, Total=${combined.length}`);
-  console.log(`[memory] lure cutoff (norm)=${MEMORY_LURE_DISTANCE_CUTOFF_NORM}`);
+  if (Memory_debug) {
+    console.log(`[memory] Base trials=${baseTrials.length}, Extra trials=${extraTrials.length}, Total=${combined.length}`);
+    console.log(`[memory] lure cutoff (norm)=${MEMORY_LURE_DISTANCE_CUTOFF_NORM}`);
 
-  const seq = combined.map((tr, i) => ({
-    trial: i + 1,
-    extra: tr.is_extra ? 1 : 0,
-    color: tr.color || null,
+    const seq = combined.map((tr, i) => ({
+      trial: i + 1,
+      extra: tr.is_extra ? 1 : 0,
+      color: tr.color || null,
 
-    L_status: tr.left?.memory_status || null,
-    L_type: tr.left?.type_key || null,
-    L_img: tr.left?.imagefilename || null,
-    L_lure_bin: tr.left?.lure_bin ?? null,
-    L_lure_d: Number.isFinite(tr.left?.lure_distance_norm) ? Number(tr.left.lure_distance_norm.toFixed(3)) : null,
+      L_status: tr.left?.memory_status || null,
+      L_type: tr.left?.type_key || null,
+      L_img: tr.left?.imagefilename || null,
+      L_lure_bin: tr.left?.lure_bin ?? null,
+      L_lure_d: Number.isFinite(tr.left?.lure_distance_norm) ? Number(tr.left.lure_distance_norm.toFixed(3)) : null,
 
-    R_status: tr.right?.memory_status || null,
-    R_type: tr.right?.type_key || null,
-    R_img: tr.right?.imagefilename || null,
-    R_lure_bin: tr.right?.lure_bin ?? null,
-    R_lure_d: Number.isFinite(tr.right?.lure_distance_norm) ? Number(tr.right.lure_distance_norm.toFixed(3)) : null,
+      R_status: tr.right?.memory_status || null,
+      R_type: tr.right?.type_key || null,
+      R_img: tr.right?.imagefilename || null,
+      R_lure_bin: tr.right?.lure_bin ?? null,
+      R_lure_d: Number.isFinite(tr.right?.lure_distance_norm) ? Number(tr.right.lure_distance_norm.toFixed(3)) : null,
 
-    trial_lure_bin: tr.lure_bin ?? null,
-    lure_bins_present: Array.isArray(tr.lure_bins_present) ? tr.lure_bins_present.join(',') : null,
-    lure_side: tr.lure_side || null,
-    lure_sides: Array.isArray(tr.lure_sides) ? tr.lure_sides.join(',') : null,
-    desired_lure_bin: tr.desired_lure_bin ?? null,
-    lure_bin_source: tr.lure_bin_source || null,
-    lure_anchor_scope: tr.lure_anchor_scope || null,
-    extra_reason: tr.extra_reason || null,
-  }));
-  console.table(seq);
+      trial_lure_bin: tr.lure_bin ?? null,
+      lure_bins_present: Array.isArray(tr.lure_bins_present) ? tr.lure_bins_present.join(',') : null,
+      lure_side: tr.lure_side || null,
+      lure_sides: Array.isArray(tr.lure_sides) ? tr.lure_sides.join(',') : null,
+      desired_lure_bin: tr.desired_lure_bin ?? null,
+      lure_bin_source: tr.lure_bin_source || null,
+      lure_anchor_scope: tr.lure_anchor_scope || null,
+      extra_reason: tr.extra_reason || null,
+    }));
+    console.table(seq);
 
-  const baseBinCounts = { 1: 0, 2: 0, null: 0 };
-  const extraBinCounts = { 1: 0, 2: 0, null: 0 };
+    const baseBinCounts = { 1: 0, 2: 0, null: 0 };
+    const extraBinCounts = { 1: 0, 2: 0, null: 0 };
 
-  for (const tr of combined) {
-    const bucket = tr.is_extra ? extraBinCounts : baseBinCounts;
-    for (const m of [tr.left, tr.right]) {
-      if (!_isNewForLure(m)) continue;
-      const k = (m?.lure_bin == null) ? 'null' : String(m.lure_bin);
-      bucket[k] = (bucket[k] || 0) + 1;
+    for (const tr of combined) {
+      const bucket = tr.is_extra ? extraBinCounts : baseBinCounts;
+      for (const m of [tr.left, tr.right]) {
+        if (!_isNewForLure(m)) continue;
+        const k = (m?.lure_bin == null) ? 'null' : String(m.lure_bin);
+        bucket[k] = (bucket[k] || 0) + 1;
+      }
     }
+    console.log('[memory] base new-mushroom lure-bin counts:', baseBinCounts);
+    console.log('[memory] extra new-mushroom lure-bin counts:', extraBinCounts);
   }
-  console.log('[memory] base new-mushroom lure-bin counts:', baseBinCounts);
-  console.log('[memory] extra new-mushroom lure-bin counts:', extraBinCounts);
 
   if (!Memory_debug && extraTrials.length < EXTRA_WITHIN_COLOR_TRIALS_TOTAL) {
     console.warn(`[memory] WARNING: requested extra=${EXTRA_WITHIN_COLOR_TRIALS_TOTAL}, built=${extraTrials.length}. Check seen/unseen coverage per color/type.`);

@@ -191,7 +191,7 @@
         [
           "Confirm mushroom.js loads BEFORE PostSurvey.js in your HTML.",
           "Confirm the catalog CSV path is valid and reachable:",
-          "  TexturePack/mushroom_pack/mushroom_catalog.csv",
+          `  ${typeof MUSHROOM_CATALOG_CSV_URL !== "undefined" ? MUSHROOM_CATALOG_CSV_URL : "TexturePack/mushroom_pack_original/mushroom_catalog.csv"}`,
           "Open DevTools → Network and verify the CSV returns 200.",
           "Also verify window.mushroomCatalogRows is populated at runtime."
         ].join("\n")

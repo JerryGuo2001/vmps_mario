@@ -1,6 +1,115 @@
 // Set up canvas and context for Mushroom Identification Task
 let idenCanvas,idenCtx,participantResponses,currentMushroomIndex, questionRepetitionCount,iden_total_repetition,responseTimeout,warningTimeout,responseGiven;
 let check_type
+let mushroom_ident_list = [];
+let iden_shuffled_list = [];
+
+const IDEN_COLOR_RGB = {
+    black: [0, 0, 0],
+    white: [255, 255, 255],
+    red: [255, 0, 0],
+    green: [0, 128, 0],
+    blue: [0, 0, 255],
+    cyan: [0, 255, 255],
+    magenta: [255, 0, 255],
+    yellow: [255, 255, 0]
+};
+
+function resolveIdenMushroomSrc(rawFilename) {
+    const raw = String(rawFilename || '').trim();
+    if (!raw) return '';
+
+    if (typeof resolveImgSrc === 'function') {
+        return resolveImgSrc(raw);
+    }
+
+    const imageBaseDir = (typeof MUSHROOM_IMAGE_BASE_DIR !== 'undefined' && MUSHROOM_IMAGE_BASE_DIR)
+        ? MUSHROOM_IMAGE_BASE_DIR
+        : 'TexturePack/mushroom_pack_original/images_balanced/';
+    const packBase = (typeof MUSHROOM_IMG_BASE !== 'undefined' && MUSHROOM_IMG_BASE)
+        ? MUSHROOM_IMG_BASE
+        : 'TexturePack/mushroom_pack_original';
+    const normalized = raw.replace(/\\/g, '/');
+
+    if (/^(https?:)?\/\//i.test(normalized) || normalized.startsWith('data:') || normalized.startsWith('/') || normalized.startsWith('TexturePack/')) {
+        return normalized;
+    }
+    if (/^images_balanced\//i.test(normalized)) {
+        return `${packBase.replace(/\/+$/, '')}/${normalized}`;
+    }
+    if (!normalized.includes('/')) {
+        return `${imageBaseDir.replace(/\/+$/, '')}/${normalized}`;
+    }
+    return normalized;
+}
+
+function parseIdenRGB(value) {
+    if (Array.isArray(value) && value.length >= 3) {
+        return value.slice(0, 3).map(Number);
+    }
+    const nums = String(value || '').match(/\d+(?:\.\d+)?/g);
+    if (!nums || nums.length < 3) return null;
+    return nums.slice(0, 3).map(Number);
+}
+
+function nearestIdenColorName(targetRGB) {
+    const rgb = parseIdenRGB(targetRGB);
+    if (!rgb || rgb.some(n => !Number.isFinite(n))) return '';
+
+    let bestColor = '';
+    let bestDistance = Infinity;
+    for (const [color, colorRGB] of Object.entries(IDEN_COLOR_RGB)) {
+        const d2 = colorRGB.reduce((sum, channel, i) => {
+            const delta = channel - rgb[i];
+            return sum + delta * delta;
+        }, 0);
+        if (d2 < bestDistance) {
+            bestDistance = d2;
+            bestColor = color;
+        }
+    }
+    return bestColor;
+}
+
+function getIdenCatalogRows() {
+    return Array.isArray(window.mushroomCatalogRows) ? window.mushroomCatalogRows : [];
+}
+
+function getIdenRowFilename(row) {
+    return row?.filename || row?.imagefilename || row?.image_relpath || row?.image_webpath || row?.image || row?.img || '';
+}
+
+function pickIdenRowForColor(color) {
+    const normalizedColor = String(color || '').trim().toLowerCase();
+    const rows = getIdenCatalogRows().filter(row => {
+        const rowColor = String(row?.color_name ?? row?.color ?? '').trim().toLowerCase();
+        return rowColor === normalizedColor && getIdenRowFilename(row);
+    });
+    if (!rows.length) return null;
+    return rows[Math.floor(rows.length / 2)];
+}
+
+async function findMushroomByRGB(targetRGB) {
+    const color = nearestIdenColorName(targetRGB);
+    const row = pickIdenRowForColor(color);
+    return getIdenRowFilename(row);
+}
+
+function getIdenSourceList() {
+    if (Array.isArray(window.mushroom_ident_list) && window.mushroom_ident_list.length) {
+        return window.mushroom_ident_list;
+    }
+    if (Array.isArray(mushroom_ident_list) && mushroom_ident_list.length) {
+        return mushroom_ident_list;
+    }
+    return [];
+}
+
+function prepareIdenStimuli() {
+    const source = getIdenSourceList();
+    iden_shuffled_list = source.length ? shuffleWithNoSamePosition(source, iden_total_repetition) : [];
+}
+
 function init_iden(a="idenCanvas"){
     check_type=a
     // Set up canvas and context for Mushroom Identification Task
@@ -15,6 +124,7 @@ function init_iden(a="idenCanvas"){
     responseTimeout; // Timeout for waiting for a response
     warningTimeout; // Timeout for showing warning if no response
     responseGiven = false; // Flag to ensure only one response is allowed per question
+    prepareIdenStimuli();
 }
 
 function shuffleWithNoSamePosition(originalList, idenTotalRepetition = 1) {
@@ -45,12 +155,20 @@ function shuffleWithNoSamePosition(originalList, idenTotalRepetition = 1) {
 
 // Function to display the mushroom on the canvas based on the targetRGB
 async function displayMushroom(index) {
+    const prompt = iden_shuffled_list[index] || {};
     // Find the closest mushroom image based on the targetRGB
-    let mushroomFilename = await findMushroomByRGB(iden_shuffled_list[index].targetRGB);
+    let mushroomFilename = prompt.filename || prompt.imagefilename || prompt.image || prompt.img;
+    if (!mushroomFilename) {
+        mushroomFilename = await findMushroomByRGB(prompt.targetRGB);
+    }
+    if (!mushroomFilename) {
+        console.warn('[iden] No mushroom image available for identification prompt:', prompt);
+        return;
+    }
 
     // Load the mushroom image
     let mushroomImage = new Image();
-    mushroomImage.src = 'TexturePack/mushroom_pack/' + mushroomFilename;
+    mushroomImage.src = resolveIdenMushroomSrc(mushroomFilename);
 
     // Ensure the mushroom image is loaded before drawing it
     mushroomImage.onload = function() {
@@ -150,6 +268,12 @@ function displayNextQuestion() {
     // Clear the canvas
     enableKeyIntake()
     idenCtx.clearRect(0, 0, idenCanvas.width, idenCanvas.height);
+
+    if (!iden_shuffled_list.length) {
+        idenCtx.font = "20px Arial";
+        idenCtx.fillText("No identification stimuli available.", 20, 100);
+        return;
+    }
 
     // Display the mushroom
     displayMushroom(currentMushroomIndex);

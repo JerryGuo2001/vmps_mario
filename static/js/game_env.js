@@ -2,9 +2,9 @@
 
 // Global Variables
 let character, gravity, keys, currentCanvas, showPrompt, currentQuestion, totalMushrooms, collectedMushrooms, atRightEdge, change_detect_right, change_detect_left,totalQuestions,totalQuestions_setup;
-let exploration_debug=true
+let exploration_debug=false
 // turn it off when you don't want practice
-let practice_explore_on_off=true
+let practice_explore_on_off=on
 if (practice_explore_on_off){
   totalQuestions=1
 }
@@ -926,7 +926,7 @@ function getGroundY(xPosition) {
 }
 
 // ================= SKY (RAINBOW) MUSHROOM ONLY =================
-const SKY_RAINBOW_MUSHROOM_SRC   = 'TexturePack/mushroom_pack_original/sky_mushroom/rainbow_mushroom.png';
+const SKY_RAINBOW_MUSHROOM_SRC   = `${MUSHROOM_IMG_BASE}/sky_mushroom/rainbow_mushroom.png`;
 const SKY_RAINBOW_MUSHROOM_VALUE = 2;
 
 // Optional: give it stable attributes so any type-key code won’t produce NA.

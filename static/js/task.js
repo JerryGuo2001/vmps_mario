@@ -87,9 +87,25 @@ function toMaybeNumber(value) {
   return Number.isFinite(num) ? num : raw;
 }
 
+function valueFromMushroomFilename(rawPath) {
+  const raw = String(rawPath || '').trim();
+  if (!raw) return undefined;
+  const basename = raw.split(/[\\/]/).pop().split('?')[0].split('#')[0];
+  const newFormat = basename.match(/-(?:clean|n\d+-a\d+p\d+)-([+-]?\d+)-r[01]-(?:none|top|middle|bottom)-p\d+\.(?:png|jpg|jpeg|webp)$/i);
+  const oldFormat = basename.match(/-([+-]?\d+)\.(?:png|jpg|jpeg|webp)$/i);
+  const valueText = newFormat?.[1] ?? oldFormat?.[1];
+  if (valueText == null) return undefined;
+  const value = Number(valueText);
+  return Number.isFinite(value) ? value : undefined;
+}
+
 function resolveCatalogImagePath(rawPath) {
   const raw = String(rawPath || '').trim();
   if (!raw) return '';
+  const imagesBalanced = raw.match(/(?:^|[\\/])images_balanced[\\/](.+)$/i);
+  if (imagesBalanced) {
+    return `${MUSHROOM_IMAGE_BASE_DIR}${imagesBalanced[1]}`;
+  }
   if (/^(https?:)?\/\//i.test(raw) || raw.startsWith('data:') || raw.startsWith('/') || raw.startsWith('TexturePack/')) {
     return raw;
   }
@@ -100,15 +116,18 @@ function resolveCatalogImagePath(rawPath) {
 }
 
 function normalizeCatalogRow(row) {
-  const filenameRaw = firstDefinedValue(row, ['filename', 'imagefilename', 'image', 'img', 'file', 'path']);
+  const filenameRaw = firstDefinedValue(row, ['image_relpath', 'image_webpath', 'filename', 'imagefilename', 'image', 'img', 'file', 'path', 'image_filename_abs', 'basename', 'name']);
   const colorRaw = firstDefinedValue(row, ['color', 'color_name']);
+  const valueRaw = firstDefinedValue(row, ['assigned_value', 'value', 'reward', 'val', 'points']);
+  const assignedValue = toMaybeNumber(valueRaw ?? valueFromMushroomFilename(filenameRaw));
   const out = {
     ...row,
     filename: resolveCatalogImagePath(filenameRaw),
     imagefilename: resolveCatalogImagePath(filenameRaw),
     color: String(colorRaw ?? '').trim().toLowerCase(),
     color_name: String(colorRaw ?? '').trim().toLowerCase(),
-    value: toMaybeNumber(firstDefinedValue(row, ['value', 'reward', 'points'])),
+    value: assignedValue,
+    assigned_value: assignedValue,
     stem_width: toMaybeNumber(firstDefinedValue(row, ['stem_width', 'stem'])),
     stem: toMaybeNumber(firstDefinedValue(row, ['stem_width', 'stem'])),
     cap_roundness: toMaybeNumber(firstDefinedValue(row, ['cap_roundness', 'cap'])),
@@ -116,6 +135,16 @@ function normalizeCatalogRow(row) {
     room: String(firstDefinedValue(row, ['room', 'env', 'environment']) ?? '').trim().toLowerCase()
   };
   return out;
+}
+
+function getSkyMushroomImagePath() {
+  if (typeof SKY_RAINBOW_MUSHROOM_SRC !== 'undefined') {
+    return SKY_RAINBOW_MUSHROOM_SRC;
+  }
+  const packBase = (typeof MUSHROOM_IMG_BASE !== 'undefined' && MUSHROOM_IMG_BASE)
+    ? MUSHROOM_IMG_BASE
+    : 'TexturePack/mushroom_pack_original';
+  return `${String(packBase).replace(/\/+$/, '')}/sky_mushroom/rainbow_mushroom.png`;
 }
 
 async function loadMushroomCatalogRows() {
@@ -265,7 +294,7 @@ async function preloadMushroomCatalogAndAssets() {
       .map(row => resolveCatalogImagePath(row.filename || row.imagefilename || row.image))
       .filter(Boolean)
       .concat([
-        'TexturePack/mushroom_pack/sky_mushroom/rainbow_mushroom.png'
+        getSkyMushroomImagePath()
       ])
   ));
 
