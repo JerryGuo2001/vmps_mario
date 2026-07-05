@@ -94,14 +94,14 @@ function ensureOOOPreloadUI(container, totalToLoad) {
 
     const title = document.createElement('h3');
     title.id = 'oooPreloadTitle';
-    title.textContent = 'Preparing images...';
+    title.textContent = 'Loading';
     title.style.marginBottom = '8px';
 
     const sub = document.createElement('div');
     sub.id = 'oooPreloadText';
     sub.style.fontSize = '14px';
     sub.style.marginBottom = '10px';
-    sub.textContent = `Loading...`;
+    sub.textContent = '0%';
 
     const outer = document.createElement('div');
     outer.id = 'oooPreloadOuter';
@@ -132,7 +132,7 @@ function updateOOOPreloadUI(done, total) {
   const inner = document.getElementById('oooPreloadInner');
 
   const pct = total > 0 ? Math.round((done / total) * 100) : 100;
-  if (text) text.textContent = `Loading ${done}/${total} (${pct}%)`;
+  if (text) text.textContent = `${pct}%`;
   if (inner) {
     inner.style.width = `${pct}%`;
   }

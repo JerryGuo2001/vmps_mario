@@ -1296,7 +1296,7 @@ function _buildExtraWithinColorTrials({ pool, byType, usedImgSet, perColor, tota
 // ========================== IMAGE PRELOADING (MEMORY) ==========================
 const memoryImagePreloadCache = new Map(); // src -> Promise<boolean>
 
-function showMemoryLoadingOverlay(msg = 'Loading images...') {
+function showMemoryLoadingOverlay(msg = 'Loading') {
   let ov = document.getElementById('memoryLoadingOverlay');
   if (!ov) {
     ov = document.createElement('div');
@@ -1315,7 +1315,7 @@ function showMemoryLoadingOverlay(msg = 'Loading images...') {
     const card = document.createElement('div');
     card.style.background = '#fff';
     card.style.padding = '18px 22px';
-    card.style.borderRadius = '12px';
+    card.style.borderRadius = '8px';
     card.style.fontFamily = 'Arial, sans-serif';
     card.style.textAlign = 'center';
     card.style.maxWidth = '520px';
@@ -1369,7 +1369,7 @@ function updateMemoryLoadingProgress(done, total, failed = 0) {
   const bar = document.getElementById('memoryLoadingBar');
   const pct = total > 0 ? Math.round((done / total) * 100) : 100;
   if (bar) bar.style.width = `${Math.max(0, Math.min(100, pct))}%`;
-  setMemoryLoadingSub(`Loading ${done}/${total} (${pct}%)${failed ? ` • ${failed} failed` : ''}`);
+  setMemoryLoadingSub(`${pct}%`);
 }
 
 function hideMemoryLoadingOverlay() {
@@ -1536,7 +1536,7 @@ async function Memory_initGame() {
   updateMemoryProgressBar();
 
   // HARD PRELOAD all trial images (after shuffling)
-  showMemoryLoadingOverlay('Loading images for the next task...');
+  showMemoryLoadingOverlay('Loading');
   const { okCount, failCount, failedSrcs } = await preloadMemoryTrialImages(15000);
   hideMemoryLoadingOverlay();
 

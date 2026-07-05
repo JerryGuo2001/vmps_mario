@@ -359,7 +359,7 @@ function ensureMushroomPreloadOverlay() {
       #mushroomPreloadOverlay {
         position: fixed;
         inset: 0;
-        z-index: 100001;
+        z-index: 1000000;
         display: none;
         align-items: center;
         justify-content: center;
@@ -370,7 +370,7 @@ function ensureMushroomPreloadOverlay() {
         width: min(560px, 92vw);
         background: #ffffff;
         color: #111827;
-        border-radius: 16px;
+        border-radius: 8px;
         box-shadow: 0 18px 60px rgba(0,0,0,0.28);
         padding: 24px;
         font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
@@ -417,11 +417,11 @@ function ensureMushroomPreloadOverlay() {
     overlay.id = 'mushroomPreloadOverlay';
     overlay.innerHTML = `
       <div id="mushroomPreloadCard">
-        <div id="mushroomPreloadTitle">Loading mushroom images</div>
-        <div id="mushroomPreloadText">Preparing mushroom assets from the catalog before the task starts.</div>
+        <div id="mushroomPreloadTitle">Loading</div>
+        <div id="mushroomPreloadText">Please wait.</div>
         <div id="mushroomPreloadBarWrap"><div id="mushroomPreloadBar"></div></div>
         <div id="mushroomPreloadPercent">0%</div>
-        <div id="mushroomPreloadMeta">Starting…</div>
+        <div id="mushroomPreloadMeta"></div>
       </div>
     `;
     document.body.appendChild(overlay);
@@ -442,7 +442,7 @@ function updateMushroomPreloadOverlay(progress = 0, text = '', meta = '') {
   if (bar) bar.style.width = `${clamped}%`;
   if (pct) pct.textContent = `${Math.round(clamped)}%`;
   if (textEl && text) textEl.textContent = text;
-  if (metaEl && meta) metaEl.textContent = meta;
+  if (metaEl) metaEl.textContent = meta || '';
 }
 
 function hideMushroomPreloadOverlay() {
@@ -570,7 +570,7 @@ async function preloadMushroomCatalogAndAssets() {
     };
   }
 
-  updateMushroomPreloadOverlay(0, 'Loading mushroom catalog…', 'Reading mushroom_catalog.csv');
+  updateMushroomPreloadOverlay(0, 'Please wait.', '');
   const rows = await loadMushroomCatalogRows();
 
   const sources = Array.from(new Set(
@@ -589,13 +589,13 @@ async function preloadMushroomCatalogAndAssets() {
 
   if (!sources.length) {
     state.imagesLoaded = true;
-    updateMushroomPreloadOverlay(100, 'No mushroom images found in catalog.', '');
+    updateMushroomPreloadOverlay(100, 'Please wait.', '');
     await new Promise(r => setTimeout(r, 250));
     hideMushroomPreloadOverlay();
     return { total: 0, loaded: 0, failed: 0 };
   }
 
-  updateMushroomPreloadOverlay(0, 'Preloading mushroom images…', `...`);
+  updateMushroomPreloadOverlay(0, 'Please wait.', '');
 
   const concurrency = MUSHROOM_PRELOAD_CONCURRENCY;
   let cursor = 0;
@@ -613,8 +613,8 @@ async function preloadMushroomCatalogAndAssets() {
       const pct = sources.length ? (done / sources.length) * 100 : 100;
       updateMushroomPreloadOverlay(
         pct,
-        'Preloading mushroom images…',
-        `${done}/${sources.length} loaded • ${state.failedCount} failed • ${mushroomAssetBasename(src)}`
+        'Please wait.',
+        ''
       );
     }
   }
@@ -640,8 +640,8 @@ async function preloadMushroomCatalogAndAssets() {
   state.imagesLoaded = true;
   updateMushroomPreloadOverlay(
     100,
-    'Mushroom preload complete.',
-    `${state.loadedCount} loaded • ${state.failedCount} failed`
+    'Please wait.',
+    ''
   );
   await new Promise(r => setTimeout(r, 350));
   hideMushroomPreloadOverlay();
@@ -998,13 +998,13 @@ async function startWithID() {
   if (startWithID._busy) return;
   startWithID._busy = true;
 
-  const consentCheckbox = document.getElementById('consentAgreeCheckbox');
-  if (!consentCheckbox || !consentCheckbox.checked) {
-    alert('Please read the consent form and check the consent box before continuing.');
-    return;
-  }
-
   try {
+    const consentCheckbox = document.getElementById('consentAgreeCheckbox');
+    if (!consentCheckbox || !consentCheckbox.checked) {
+      alert('Please read the consent form and check the consent box before continuing.');
+      return;
+    }
+
     const idInput = document.getElementById('participantIdInput').value.trim();
     if (!idInput) {
       alert("Please enter your participant ID.");
