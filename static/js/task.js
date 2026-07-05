@@ -13,6 +13,12 @@ let emptyRoomHintUntil = 0;
 
 const CONSENT_PDF_URL = 'TexturePack/consent/2019-5110_Study_Information_Sheet_Foraging.pdf';
 
+// TEMP MUSHROOM PRELOAD DEBUG START
+// Remove this block and the helper calls below after deploy asset debugging is done.
+const MUSHROOM_PRELOAD_DEBUG = true;
+const MUSHROOM_PRELOAD_DEBUG_MAX_FAILURES = 20;
+// TEMP MUSHROOM PRELOAD DEBUG END
+
 window.mushroomCatalogRows = Array.isArray(window.mushroomCatalogRows) ? window.mushroomCatalogRows : [];
 window.MUSHROOM_PRELOAD = window.MUSHROOM_PRELOAD || {
   rowsLoaded: false,
@@ -114,6 +120,174 @@ function resolveCatalogImagePath(rawPath) {
   }
   return raw;
 }
+
+// TEMP MUSHROOM PRELOAD DEBUG START
+function mushroomPreloadBasename(src) {
+  return String(src || '').split(/[?#]/)[0].split(/[\\/]/).pop();
+}
+
+function mushroomPreloadBrowserUrl(src) {
+  try {
+    return new URL(String(src || ''), window.location.href).href;
+  } catch (_) {
+    return String(src || '');
+  }
+}
+
+function mushroomPreloadPlusEncodedUrl(src) {
+  try {
+    const url = new URL(String(src || ''), window.location.href);
+    url.pathname = url.pathname.replace(/\+/g, '%2B');
+    return url.href;
+  } catch (_) {
+    return String(src || '').replace(/\+/g, '%2B');
+  }
+}
+
+function mushroomPreloadCatalogMatches(rows, src) {
+  const basename = mushroomPreloadBasename(src);
+  const matches = [];
+
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i];
+    const candidates = [
+      row.filename,
+      row.imagefilename,
+      row.image,
+      row.img,
+      row.image_relpath,
+      row.image_webpath,
+      row.image_filename_abs,
+      row.slug ? `${row.slug}.png` : ''
+    ];
+
+    const matched = candidates.some(value => {
+      const raw = String(value || '').trim();
+      if (!raw) return false;
+      const resolved = resolveCatalogImagePath(raw);
+      return (
+        raw === src ||
+        resolved === src ||
+        mushroomPreloadBasename(raw) === basename ||
+        mushroomPreloadBasename(resolved) === basename
+      );
+    });
+
+    if (matched) {
+      matches.push({
+        catalogRowNumber: i + 2,
+        slug: row.slug || null,
+        filename: row.filename || null,
+        image_relpath: row.image_relpath || null,
+        image_webpath: row.image_webpath || null,
+        color: row.color || row.color_name || null,
+        assigned_value: row.assigned_value ?? row.value ?? null
+      });
+      if (matches.length >= 5) break;
+    }
+  }
+
+  return matches;
+}
+
+async function mushroomPreloadFetchProbe(url, method = 'HEAD') {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 5000);
+
+  try {
+    const res = await fetch(url, {
+      method,
+      cache: 'no-store',
+      signal: controller.signal
+    });
+    let bodySize = null;
+    let bodyType = null;
+    if (method === 'GET') {
+      const blob = await res.blob();
+      bodySize = blob.size;
+      bodyType = blob.type;
+    }
+    return {
+      method,
+      ok: res.ok,
+      status: res.status,
+      statusText: res.statusText,
+      type: res.type,
+      redirected: res.redirected,
+      finalUrl: res.url,
+      contentType: res.headers.get('content-type'),
+      contentLength: res.headers.get('content-length'),
+      bodySize,
+      bodyType
+    };
+  } catch (err) {
+    return {
+      method,
+      ok: false,
+      errorName: err?.name || null,
+      errorMessage: err?.message || String(err || 'unknown fetch error')
+    };
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
+async function logMushroomPreloadFailureDiagnostics(failedSources, rows) {
+  if (!MUSHROOM_PRELOAD_DEBUG || !failedSources.length) return;
+
+  const limitedSources = failedSources.slice(0, MUSHROOM_PRELOAD_DEBUG_MAX_FAILURES);
+  const groupFn = console.groupCollapsed || console.group;
+
+  if (groupFn) {
+    groupFn.call(console, `[mushroom preload debug] ${failedSources.length} failed image(s)`);
+  } else {
+    console.info(`[mushroom preload debug] ${failedSources.length} failed image(s)`);
+  }
+
+  console.info('[mushroom preload debug] page context', {
+    href: window.location.href,
+    origin: window.location.origin,
+    catalogUrl: typeof MUSHROOM_CATALOG_CSV_URL !== 'undefined' ? MUSHROOM_CATALOG_CSV_URL : null,
+    imageBaseDir: typeof MUSHROOM_IMAGE_BASE_DIR !== 'undefined' ? MUSHROOM_IMAGE_BASE_DIR : null,
+    userAgent: navigator.userAgent
+  });
+
+  for (const src of limitedSources) {
+    const browserUrl = mushroomPreloadBrowserUrl(src);
+    const plusEncodedUrl = mushroomPreloadPlusEncodedUrl(src);
+    const rawHeadProbe = await mushroomPreloadFetchProbe(browserUrl, 'HEAD');
+    const rawGetProbe = await mushroomPreloadFetchProbe(browserUrl, 'GET');
+    const encodedHeadProbe = plusEncodedUrl === browserUrl
+      ? null
+      : await mushroomPreloadFetchProbe(plusEncodedUrl, 'HEAD');
+    const encodedGetProbe = plusEncodedUrl === browserUrl
+      ? null
+      : await mushroomPreloadFetchProbe(plusEncodedUrl, 'GET');
+
+    console.info('[mushroom preload debug] failed image detail', {
+      src,
+      basename: mushroomPreloadBasename(src),
+      browserUrl,
+      plusEncodedUrl,
+      preloadStatus: window.MUSHROOM_PRELOAD?.statusBySrc?.[src] || null,
+      rawHeadProbe,
+      rawGetProbe,
+      encodedHeadProbe,
+      encodedGetProbe,
+      catalogMatches: mushroomPreloadCatalogMatches(rows, src)
+    });
+  }
+
+  if (failedSources.length > limitedSources.length) {
+    console.info(
+      `[mushroom preload debug] ${failedSources.length - limitedSources.length} additional failed image(s) omitted by debug cap.`,
+      failedSources.slice(limitedSources.length)
+    );
+  }
+
+  if (console.groupEnd) console.groupEnd();
+}
+// TEMP MUSHROOM PRELOAD DEBUG END
 
 function normalizeCatalogRow(row) {
   const filenameRaw = firstDefinedValue(row, ['image_relpath', 'image_webpath', 'filename', 'imagefilename', 'image', 'img', 'file', 'path', 'image_filename_abs', 'basename', 'name']);
@@ -345,6 +519,9 @@ async function preloadMushroomCatalogAndAssets() {
       `[mushroom preload] ${state.failedCount} image(s) failed to load and will be skipped during the task:\n` +
       failedSources.map(src => `- ${src}`).join('\n')
     );
+    // TEMP MUSHROOM PRELOAD DEBUG START
+    await logMushroomPreloadFailureDiagnostics(failedSources, rows);
+    // TEMP MUSHROOM PRELOAD DEBUG END
   }
 
   updateMushroomPreloadOverlay(
