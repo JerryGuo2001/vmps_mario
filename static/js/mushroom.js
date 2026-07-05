@@ -1188,8 +1188,12 @@ async function buildSetAForOOO(options = {}) {
 
   // Load catalog if needed
   if (!mushroomCatalogRows || mushroomCatalogRows.length === 0) {
-    console.warn('[OOO] Catalog not loaded yet; loading now…');
-    mushroomCatalogRows = await loadMushroomCatalogCSV();
+    if (Array.isArray(window.mushroomCatalogRows) && window.mushroomCatalogRows.length > 0) {
+      mushroomCatalogRows = window.mushroomCatalogRows;
+    } else {
+      console.warn('[OOO] Catalog not loaded yet; loading now…');
+      mushroomCatalogRows = await loadMushroomCatalogCSV();
+    }
   }
 
   if (!Array.isArray(mushroomCatalogRows) || mushroomCatalogRows.length < 3) {
@@ -1787,8 +1791,6 @@ function getPlatforms(overridePlatforms) {
 /* ==================== BOOTSTRAP ==================== */
 
 (async () => {
-  await buildSetAForOOO();
-
   window.mushroomCatalogRows   = mushroomCatalogRows;
   window.OOOTriplets           = OOOTriplets;
   window.getOOOTrial           = getOOOTrial;

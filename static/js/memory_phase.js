@@ -32,13 +32,12 @@ function memoryKnownGoodMushroomSrc(src) {
 
 function isKnownBadMemoryMushroomSrc(src) {
   const status = getMemoryMushroomAssetStatus(src);
-  return !!(status && status.ok === false && !status.softFailure);
+  return !!(status && status.ok === false);
 }
 
 function isUsableMemoryMushroomSrc(src) {
   const status = getMemoryMushroomAssetStatus(src);
   if (!status) return true;
-  if (status.softFailure) return true;
   return status.ok === true;
 }
 
@@ -1383,7 +1382,7 @@ function _preloadOneImage(src, timeoutMs = 15000) {
   if (memoryImagePreloadCache.has(src)) return memoryImagePreloadCache.get(src);
 
   const knownStatus = getMemoryMushroomAssetStatus(src);
-  if (knownStatus && !knownStatus.softFailure) {
+  if (knownStatus) {
     const knownPromise = Promise.resolve(knownStatus.ok === true);
     memoryImagePreloadCache.set(src, knownPromise);
     return knownPromise;

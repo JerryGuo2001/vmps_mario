@@ -13,13 +13,10 @@ let emptyRoomHintUntil = 0;
 
 const CONSENT_PDF_URL = 'TexturePack/consent/2019-5110_Study_Information_Sheet_Foraging.pdf';
 
-const MUSHROOM_BLOCKING_FULL_PRELOAD = false;
-const MUSHROOM_BACKGROUND_PRELOAD_ENABLED = true;
-const MUSHROOM_BACKGROUND_PRELOAD_CONCURRENCY = 1;
-const MUSHROOM_BACKGROUND_PRELOAD_MAX_ATTEMPTS = 1;
-const MUSHROOM_PRELOAD_MAX_ATTEMPTS = 3;
+const MUSHROOM_PRELOAD_CONCURRENCY = 3;
+const MUSHROOM_PRELOAD_MAX_ATTEMPTS = 4;
 const MUSHROOM_PRELOAD_ATTEMPT_TIMEOUT_MS = 8000;
-const MUSHROOM_PRELOAD_RETRY_DELAY_MS = 1000;
+const MUSHROOM_PRELOAD_RETRY_DELAY_MS = 1500;
 
 // TEMP MUSHROOM PRELOAD DEBUG START
 // Remove this block and the helper calls below after deploy asset debugging is done.
@@ -35,8 +32,6 @@ window.MUSHROOM_PRELOAD = window.MUSHROOM_PRELOAD || {
   loadedCount: 0,
   failedCount: 0,
   totalCount: 0,
-  backgroundStarted: false,
-  backgroundComplete: false,
   lastError: null
 };
 
@@ -455,96 +450,6 @@ function hideMushroomPreloadOverlay() {
   if (overlay) overlay.style.display = 'none';
 }
 
-function ensureMushroomWarmupProgress() {
-  if (!document.getElementById('mushroom-warmup-style')) {
-    const style = document.createElement('style');
-    style.id = 'mushroom-warmup-style';
-    style.textContent = `
-      #mushroomWarmupProgress {
-        position: fixed;
-        right: 16px;
-        bottom: 16px;
-        z-index: 10000;
-        width: min(320px, calc(100vw - 32px));
-        display: none;
-        background: rgba(255,255,255,0.96);
-        color: #111827;
-        border: 1px solid rgba(17,24,39,0.16);
-        border-radius: 8px;
-        box-shadow: 0 10px 30px rgba(0,0,0,0.18);
-        padding: 10px 12px;
-        font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
-      }
-      #mushroomWarmupLabel {
-        font-size: 12px;
-        line-height: 1.35;
-        font-weight: 650;
-        margin-bottom: 7px;
-      }
-      #mushroomWarmupBarWrap {
-        height: 8px;
-        background: #e5e7eb;
-        border-radius: 999px;
-        overflow: hidden;
-      }
-      #mushroomWarmupBar {
-        height: 100%;
-        width: 0%;
-        background: #2563eb;
-        transition: width 0.16s ease;
-      }
-      #mushroomWarmupMeta {
-        margin-top: 6px;
-        font-size: 11px;
-        color: #4b5563;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-      }
-    `;
-    document.head.appendChild(style);
-  }
-
-  let wrap = document.getElementById('mushroomWarmupProgress');
-  if (!wrap) {
-    wrap = document.createElement('div');
-    wrap.id = 'mushroomWarmupProgress';
-    wrap.innerHTML = `
-      <div id="mushroomWarmupLabel">Warming mushroom images</div>
-      <div id="mushroomWarmupBarWrap"><div id="mushroomWarmupBar"></div></div>
-      <div id="mushroomWarmupMeta">Starting...</div>
-    `;
-    document.body.appendChild(wrap);
-  }
-
-  return wrap;
-}
-
-function updateMushroomWarmupProgress(done, total, failed = 0, currentSrc = '') {
-  const wrap = ensureMushroomWarmupProgress();
-  wrap.style.display = 'block';
-
-  const pct = total > 0 ? Math.max(0, Math.min(100, (done / total) * 100)) : 100;
-  const label = document.getElementById('mushroomWarmupLabel');
-  const bar = document.getElementById('mushroomWarmupBar');
-  const meta = document.getElementById('mushroomWarmupMeta');
-
-  if (label) label.textContent = `Warming mushroom images ${done}/${total}`;
-  if (bar) bar.style.width = `${pct}%`;
-  if (meta) {
-    const failedText = failed > 0 ? ` • ${failed} failed` : '';
-    const currentText = currentSrc ? ` • ${mushroomAssetBasename(currentSrc)}` : '';
-    meta.textContent = `${Math.round(pct)}%${failedText}${currentText}`;
-  }
-}
-
-function hideMushroomWarmupProgress(delayMs = 1200) {
-  setTimeout(() => {
-    const wrap = document.getElementById('mushroomWarmupProgress');
-    if (wrap) wrap.style.display = 'none';
-  }, delayMs);
-}
-
 function mushroomPreloadDelay(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
@@ -655,88 +560,6 @@ async function preloadSingleImage(src, options = {}) {
   };
 }
 
-function startBackgroundMushroomPreload(sources, rows) {
-  const state = window.MUSHROOM_PRELOAD;
-  if (!MUSHROOM_BACKGROUND_PRELOAD_ENABLED || state.backgroundStarted) return;
-
-  state.backgroundStarted = true;
-  state.backgroundComplete = false;
-
-  const run = async () => {
-    const total = sources.length;
-    let cursor = 0;
-
-    updateMushroomWarmupProgress(state.loadedCount + state.failedCount, total, state.failedCount);
-
-    async function worker() {
-      while (cursor < total) {
-        const index = cursor++;
-        const src = sources[index];
-        updateMushroomWarmupProgress(
-          state.loadedCount + state.failedCount,
-          total,
-          state.failedCount,
-          src
-        );
-
-        const result = await preloadSingleImage(src, {
-          maxAttempts: MUSHROOM_BACKGROUND_PRELOAD_MAX_ATTEMPTS,
-          retryDelayMs: MUSHROOM_PRELOAD_RETRY_DELAY_MS
-        });
-        if (!result.ok) {
-          result.softFailure = true;
-          result.backgroundWarmup = true;
-        }
-
-        const existingStatus = state.statusBySrc[src];
-        if (!(existingStatus?.ok === true && result.ok === false)) {
-          state.statusBySrc[src] = result;
-        }
-        if (result.ok || existingStatus?.ok === true) state.loadedCount += 1;
-        else state.failedCount += 1;
-
-        updateMushroomWarmupProgress(
-          state.loadedCount + state.failedCount,
-          total,
-          state.failedCount,
-          src
-        );
-      }
-    }
-
-    const workers = [];
-    for (let i = 0; i < Math.min(MUSHROOM_BACKGROUND_PRELOAD_CONCURRENCY, total); i++) {
-      workers.push(worker());
-    }
-    await Promise.all(workers);
-
-    state.imagesLoaded = true;
-    state.backgroundComplete = true;
-
-    if (state.failedCount > 0) {
-      const failedSources = sources.filter(src => state.statusBySrc[src]?.ok === false);
-      const previewFailedSources = failedSources.slice(0, 50);
-      console.warn(
-        `[mushroom preload] ${state.failedCount} image(s) failed during background warmup and will retry if needed:\n` +
-        previewFailedSources.map(src => `- ${src}`).join('\n') +
-        (failedSources.length > previewFailedSources.length ? `\n... ${failedSources.length - previewFailedSources.length} more` : '')
-      );
-      // TEMP MUSHROOM PRELOAD DEBUG START
-      await logMushroomPreloadFailureDiagnostics(failedSources, rows);
-      // TEMP MUSHROOM PRELOAD DEBUG END
-    }
-
-    updateMushroomWarmupProgress(total, total, state.failedCount);
-    hideMushroomWarmupProgress();
-  };
-
-  state.backgroundPromise = run().catch(err => {
-    state.lastError = err;
-    console.warn('[mushroom preload] Background warmup failed:', err);
-    hideMushroomWarmupProgress(2500);
-  });
-}
-
 async function preloadMushroomCatalogAndAssets() {
   const state = window.MUSHROOM_PRELOAD;
   if (state?.rowsLoaded && state?.imagesLoaded) {
@@ -772,28 +595,9 @@ async function preloadMushroomCatalogAndAssets() {
     return { total: 0, loaded: 0, failed: 0 };
   }
 
-  if (!MUSHROOM_BLOCKING_FULL_PRELOAD) {
-    state.imagesLoaded = false;
-    state.preloadSources = sources;
-    updateMushroomPreloadOverlay(
-      100,
-      'Mushroom catalog ready.',
-      `${sources.length} images will warm in the background`
-    );
-    startBackgroundMushroomPreload(sources, rows);
-    await new Promise(r => setTimeout(r, 350));
-    hideMushroomPreloadOverlay();
-    return {
-      total: sources.length,
-      loaded: state.loadedCount,
-      failed: state.failedCount,
-      background: true
-    };
-  }
-
   updateMushroomPreloadOverlay(0, 'Preloading mushroom images…', `...`);
 
-  const concurrency = 10;
+  const concurrency = MUSHROOM_PRELOAD_CONCURRENCY;
   let cursor = 0;
 
   async function worker() {
@@ -819,7 +623,6 @@ async function preloadMushroomCatalogAndAssets() {
   for (let i = 0; i < Math.min(concurrency, sources.length); i++) workers.push(worker());
   await Promise.all(workers);
 
-  state.imagesLoaded = true;
   if (state.failedCount > 0) {
     const failedSources = sources.filter(src => state.statusBySrc[src]?.ok === false);
     const previewFailedSources = failedSources.slice(0, 50);
@@ -831,8 +634,10 @@ async function preloadMushroomCatalogAndAssets() {
     // TEMP MUSHROOM PRELOAD DEBUG START
     await logMushroomPreloadFailureDiagnostics(failedSources, rows);
     // TEMP MUSHROOM PRELOAD DEBUG END
+    throw new Error(`Mushroom preload incomplete: ${state.failedCount} image(s) failed after retries.`);
   }
 
+  state.imagesLoaded = true;
   updateMushroomPreloadOverlay(
     100,
     'Mushroom preload complete.',

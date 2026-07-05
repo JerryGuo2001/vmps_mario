@@ -34,7 +34,7 @@ function getOOOAssetStatus(src) {
 
 function isKnownBadOOOAsset(src) {
   const status = getOOOAssetStatus(src);
-  return !!(status && status.ok === false && !status.softFailure);
+  return !!(status && status.ok === false);
 }
 
 function isRenderableOOOImage(imgEl) {

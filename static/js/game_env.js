@@ -44,7 +44,6 @@ function getMushroomAssetStatus(src) {
 function isUsableMushroomAsset(src) {
   const status = getMushroomAssetStatus(src);
   if (!status) return true;
-  if (status.softFailure) return true;
   return status.ok === true;
 }
 
