@@ -11,8 +11,8 @@ let memory_totalQuestions;
 let Memory_debug = false;
 
 let memory_promptMushroom = null; // the mushroom shown in the similarity/old-new prompt
-const MEMORY_IMAGE_LOAD_MAX_ATTEMPTS = 3;
-const MEMORY_IMAGE_LOAD_RETRY_DELAY_MS = 250;
+const MEMORY_IMAGE_LOAD_MAX_ATTEMPTS = 4;
+const MEMORY_IMAGE_LOAD_RETRY_DELAY_MS = 1200;
 
 
 function getMemoryMushroomPreloadStatusBySrc() {
@@ -32,12 +32,13 @@ function memoryKnownGoodMushroomSrc(src) {
 
 function isKnownBadMemoryMushroomSrc(src) {
   const status = getMemoryMushroomAssetStatus(src);
-  return !!(status && status.ok === false);
+  return !!(status && status.ok === false && !status.softFailure);
 }
 
 function isUsableMemoryMushroomSrc(src) {
   const status = getMemoryMushroomAssetStatus(src);
   if (!status) return true;
+  if (status.softFailure) return true;
   return status.ok === true;
 }
 
@@ -1331,8 +1332,27 @@ function showMemoryLoadingOverlay(msg = 'Loading images...') {
     sub.style.marginTop = '8px';
     sub.textContent = '';
 
+    const barWrap = document.createElement('div');
+    barWrap.id = 'memoryLoadingBarWrap';
+    barWrap.style.width = '260px';
+    barWrap.style.maxWidth = '70vw';
+    barWrap.style.height = '10px';
+    barWrap.style.background = '#e5e7eb';
+    barWrap.style.borderRadius = '999px';
+    barWrap.style.overflow = 'hidden';
+    barWrap.style.margin = '12px auto 0';
+
+    const bar = document.createElement('div');
+    bar.id = 'memoryLoadingBar';
+    bar.style.width = '0%';
+    bar.style.height = '100%';
+    bar.style.background = '#2563eb';
+    bar.style.transition = 'width 0.16s ease';
+
+    barWrap.appendChild(bar);
     card.appendChild(t);
     card.appendChild(sub);
+    card.appendChild(barWrap);
     ov.appendChild(card);
     document.body.appendChild(ov);
   } else {
@@ -1346,6 +1366,13 @@ function setMemoryLoadingSub(msg = '') {
   if (sub) sub.textContent = msg;
 }
 
+function updateMemoryLoadingProgress(done, total, failed = 0) {
+  const bar = document.getElementById('memoryLoadingBar');
+  const pct = total > 0 ? Math.round((done / total) * 100) : 100;
+  if (bar) bar.style.width = `${Math.max(0, Math.min(100, pct))}%`;
+  setMemoryLoadingSub(`Loading ${done}/${total} (${pct}%)${failed ? ` • ${failed} failed` : ''}`);
+}
+
 function hideMemoryLoadingOverlay() {
   const ov = document.getElementById('memoryLoadingOverlay');
   if (ov) ov.remove();
@@ -1356,7 +1383,7 @@ function _preloadOneImage(src, timeoutMs = 15000) {
   if (memoryImagePreloadCache.has(src)) return memoryImagePreloadCache.get(src);
 
   const knownStatus = getMemoryMushroomAssetStatus(src);
-  if (knownStatus) {
+  if (knownStatus && !knownStatus.softFailure) {
     const knownPromise = Promise.resolve(knownStatus.ok === true);
     memoryImagePreloadCache.set(src, knownPromise);
     return knownPromise;
@@ -1436,7 +1463,17 @@ async function _preloadOneImageWithRetry(src, timeoutMs = 15000) {
     for (const candidateSrc of candidates) {
       const attemptedSrc = memoryImageRetrySrc(candidateSrc, attempt);
       const ok = await _preloadOneImageAttempt(attemptedSrc, timeoutMs);
-      if (ok) return true;
+      if (ok) {
+        if (window.MUSHROOM_PRELOAD?.statusBySrc) {
+          window.MUSHROOM_PRELOAD.statusBySrc[src] = {
+            src,
+            ok: true,
+            loadedSrc: attemptedSrc,
+            recoveredDuringUse: true
+          };
+        }
+        return true;
+      }
     }
 
     if (attempt < MEMORY_IMAGE_LOAD_MAX_ATTEMPTS) {
@@ -1444,6 +1481,13 @@ async function _preloadOneImageWithRetry(src, timeoutMs = 15000) {
     }
   }
 
+  if (window.MUSHROOM_PRELOAD?.statusBySrc) {
+    window.MUSHROOM_PRELOAD.statusBySrc[src] = {
+      src,
+      ok: false,
+      attemptedDuringUse: true
+    };
+  }
   return false;
 }
 
@@ -1459,11 +1503,13 @@ async function preloadMemoryTrialImages(timeoutPerImageMs = 15000) {
 
   let okCount = 0;
   const failed = [];
+  updateMemoryLoadingProgress(0, list.length, 0);
 
   for (let i = 0; i < list.length; i++) {
     const ok = await _preloadOneImage(list[i], timeoutPerImageMs);
     if (ok) okCount++;
     else failed.push(list[i]);
+    updateMemoryLoadingProgress(i + 1, list.length, failed.length);
   }
 
   return { okCount, failCount: failed.length, failedSrcs: failed };

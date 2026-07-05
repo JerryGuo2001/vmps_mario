@@ -44,6 +44,7 @@ function getMushroomAssetStatus(src) {
 function isUsableMushroomAsset(src) {
   const status = getMushroomAssetStatus(src);
   if (!status) return true;
+  if (status.softFailure) return true;
   return status.ok === true;
 }
 
@@ -53,6 +54,118 @@ function isRenderableMushroomObject(mushroomObj) {
   if (mushroomObj.imageLoaded === true) return true;
   const img = mushroomObj.image;
   return !!(img && img.complete && img.naturalWidth > 0);
+}
+
+const EXPLORE_MUSHROOM_IMAGE_MAX_ATTEMPTS = 4;
+const EXPLORE_MUSHROOM_IMAGE_TIMEOUT_MS = 8000;
+const EXPLORE_MUSHROOM_IMAGE_RETRY_DELAY_MS = 1200;
+
+function exploreMushroomImageDelay(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function explorePlusEncodedImageSrc(src) {
+  if (/^data:/i.test(String(src || '').trim())) return src;
+  try {
+    const url = new URL(String(src || ''), window.location.href);
+    url.pathname = url.pathname.replace(/\+/g, '%2B');
+    return url.href;
+  } catch (_) {
+    return String(src || '').replace(/\+/g, '%2B');
+  }
+}
+
+function exploreImageRetrySrc(src, attempt) {
+  if (attempt <= 1) return src;
+  if (/^data:/i.test(String(src || '').trim())) return src;
+  try {
+    const url = new URL(String(src || ''), window.location.href);
+    url.searchParams.set('_mushroom_retry', `${attempt}_${Date.now()}`);
+    return url.href;
+  } catch (_) {
+    const sep = String(src || '').includes('?') ? '&' : '?';
+    return `${src}${sep}_mushroom_retry=${attempt}_${Date.now()}`;
+  }
+}
+
+function exploreImageSrcCandidates(src) {
+  const raw = String(src || '').trim();
+  return Array.from(new Set([raw, explorePlusEncodedImageSrc(raw)].filter(Boolean)));
+}
+
+function loadExploreMushroomImageAttempt(img, src, timeoutMs = EXPLORE_MUSHROOM_IMAGE_TIMEOUT_MS) {
+  return new Promise((resolve) => {
+    let done = false;
+
+    const cleanup = () => {
+      clearTimeout(timer);
+      img.onload = null;
+      img.onerror = null;
+    };
+
+    const finish = (ok) => {
+      if (done) return;
+      done = true;
+      cleanup();
+      resolve(!!ok);
+    };
+
+    const timer = setTimeout(() => {
+      img.src = '';
+      finish(false);
+    }, timeoutMs);
+
+    img.onload = () => finish(true);
+    img.onerror = () => finish(false);
+    img.src = src;
+  });
+}
+
+async function loadExploreMushroomImageWithRetry(img, src, mushroomObj) {
+  if (!img || !src) return false;
+
+  const candidates = exploreImageSrcCandidates(src);
+  mushroomObj.imageLoaded = false;
+  mushroomObj.imageError = false;
+  mushroomObj.imageLoading = true;
+
+  for (let attempt = 1; attempt <= EXPLORE_MUSHROOM_IMAGE_MAX_ATTEMPTS; attempt++) {
+    for (const candidateSrc of candidates) {
+      const attemptedSrc = exploreImageRetrySrc(candidateSrc, attempt);
+      const ok = await loadExploreMushroomImageAttempt(img, attemptedSrc);
+      if (ok) {
+        mushroomObj.imageLoadSrc = attemptedSrc;
+        mushroomObj.imageLoaded = true;
+        mushroomObj.imageError = false;
+        mushroomObj.imageLoading = false;
+        if (window.MUSHROOM_PRELOAD?.statusBySrc && mushroomObj.imagefilename) {
+          window.MUSHROOM_PRELOAD.statusBySrc[mushroomObj.imagefilename] = {
+            src: mushroomObj.imagefilename,
+            ok: true,
+            loadedSrc: attemptedSrc,
+            recoveredDuringUse: true
+          };
+        }
+        return true;
+      }
+    }
+
+    if (attempt < EXPLORE_MUSHROOM_IMAGE_MAX_ATTEMPTS) {
+      await exploreMushroomImageDelay(EXPLORE_MUSHROOM_IMAGE_RETRY_DELAY_MS * attempt);
+    }
+  }
+
+  mushroomObj.imageLoaded = false;
+  mushroomObj.imageError = true;
+  mushroomObj.imageLoading = false;
+  if (window.MUSHROOM_PRELOAD?.statusBySrc && mushroomObj.imagefilename) {
+    window.MUSHROOM_PRELOAD.statusBySrc[mushroomObj.imagefilename] = {
+      src: mushroomObj.imagefilename,
+      ok: false,
+      attemptedDuringUse: true
+    };
+  }
+  return false;
 }
 
 function removeSpecificMushroom(mushroomObj) {
@@ -1169,9 +1282,6 @@ async function generateMushroom(count = 5) {
       const img = new Image();
       const preloadStatus = getMushroomAssetStatus(r.filename);
       const imageSrc = preloadStatus?.loadedSrc || r.filename;
-      img.onload = () => { item.imageLoaded = true; item.imageError = false; };
-      img.onerror = () => { item.imageLoaded = false; item.imageError = true; };
-      img.src = imageSrc;  // Use the known-good preloaded URL when retries/fallbacks found one.
       const expId = expTypeKeyFromRow(r);
 
       const item = {
@@ -1192,6 +1302,7 @@ async function generateMushroom(count = 5) {
         imageLoaded: preloadStatus ? preloadStatus.ok === true : false,
         imageError: preloadStatus ? preloadStatus.ok === false : false,
       };
+      loadExploreMushroomImageWithRetry(img, imageSrc, item);
       items.push(item);
     }
   }
@@ -1205,9 +1316,6 @@ async function generateMushroom(count = 5) {
     const img = new Image();
     const preloadStatus = getMushroomAssetStatus(r.filename);
     const imageSrc = preloadStatus?.loadedSrc || r.filename;
-    img.onload = () => { item.imageLoaded = true; item.imageError = false; };
-    img.onerror = () => { item.imageLoaded = false; item.imageError = true; };
-    img.src = imageSrc;
     const expId = expTypeKeyFromRow(r);
     const item = {
       x: x0,
@@ -1227,6 +1335,7 @@ async function generateMushroom(count = 5) {
       imageLoaded: preloadStatus ? preloadStatus.ok === true : false,
       imageError: preloadStatus ? preloadStatus.ok === false : false,
     };
+    loadExploreMushroomImageWithRetry(img, imageSrc, item);
     items.push(item);
   }
 
@@ -1465,6 +1574,7 @@ function drawMysBox() {
     // draw mushroom ONLY IF revealed by head-hit
     if (mushroom.isVisible) {
       if (!isRenderableMushroomObject(mushroom)) {
+        if (mushroom.imageLoading) return;
         skipBuggedMushroomTrial('explore_visible_mushroom_image_missing', mushroom);
         return;
       }
@@ -1543,6 +1653,11 @@ function removeActiveMushroom() {
 async function handleMushroomCollision_canvas4() {
   mushrooms.forEach((mushroom, index) => {
     if (!mushroom.isVisible) return;
+    if (!isRenderableMushroomObject(mushroom)) {
+      if (mushroom.imageLoading) return;
+      skipBuggedMushroomTrial('explore_visible_mushroom_image_missing', mushroom);
+      return;
+    }
 
     if (!mushroom.growthComplete) {
       mushroom.growthFactor = Math.min(mushroom.growthFactor + mushroom.growthSpeed, 1);

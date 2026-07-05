@@ -27,8 +27,8 @@ if (version_mushroom=='original'){
 
 const MAX_TRIALS = 100;
 const IMG_LOAD_TIMEOUT_MS = 5000;
-const IMG_LOAD_MAX_ATTEMPTS = 3;
-const IMG_LOAD_RETRY_DELAY_MS = 250;
+const IMG_LOAD_MAX_ATTEMPTS = 4;
+const IMG_LOAD_RETRY_DELAY_MS = 1200;
 
 const EIGHT_COLORS = ['black','white','red','green','blue','cyan','magenta','yellow'];
 
@@ -114,7 +114,16 @@ async function _loadImageWithRetry(src, timeoutMs = IMG_LOAD_TIMEOUT_MS) {
     for (const candidateSrc of candidates) {
       const attemptedSrc = _imageRetrySrc(candidateSrc, attempt);
       try {
-        return await _loadImageAttempt(attemptedSrc, timeoutMs);
+        const img = await _loadImageAttempt(attemptedSrc, timeoutMs);
+        if (window.MUSHROOM_PRELOAD?.statusBySrc) {
+          window.MUSHROOM_PRELOAD.statusBySrc[src] = {
+            src,
+            ok: true,
+            loadedSrc: attemptedSrc,
+            recoveredDuringUse: true
+          };
+        }
+        return img;
       } catch (err) {
         lastError = err;
       }
@@ -125,6 +134,13 @@ async function _loadImageWithRetry(src, timeoutMs = IMG_LOAD_TIMEOUT_MS) {
     }
   }
 
+  if (window.MUSHROOM_PRELOAD?.statusBySrc) {
+    window.MUSHROOM_PRELOAD.statusBySrc[src] = {
+      src,
+      ok: false,
+      attemptedDuringUse: true
+    };
+  }
   throw lastError || new Error(`Failed to load: ${src}`);
 }
 

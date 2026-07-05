@@ -19,7 +19,7 @@ if (OOO_debug==true){
 const OOO_PRELOAD_BEFORE_START = true;
 
 // Concurrency for faster preload without flooding browser/network
-const OOO_PRELOAD_CONCURRENCY = 6;
+const OOO_PRELOAD_CONCURRENCY = 3;
 
 
 function getOOOPreloadStatusBySrc() {
@@ -34,7 +34,7 @@ function getOOOAssetStatus(src) {
 
 function isKnownBadOOOAsset(src) {
   const status = getOOOAssetStatus(src);
-  return !!(status && status.ok === false);
+  return !!(status && status.ok === false && !status.softFailure);
 }
 
 function isRenderableOOOImage(imgEl) {
@@ -131,9 +131,9 @@ function updateOOOPreloadUI(done, total) {
   const text = document.getElementById('oooPreloadText');
   const inner = document.getElementById('oooPreloadInner');
 
-  if (text) text.textContent = `Loading...`;
+  const pct = total > 0 ? Math.round((done / total) * 100) : 100;
+  if (text) text.textContent = `Loading ${done}/${total} (${pct}%)`;
   if (inner) {
-    const pct = total > 0 ? Math.round((done / total) * 100) : 100;
     inner.style.width = `${pct}%`;
   }
 }
