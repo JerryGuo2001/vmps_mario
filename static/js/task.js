@@ -13,14 +13,15 @@ let emptyRoomHintUntil = 0;
 
 const CONSENT_PDF_URL = 'TexturePack/consent/2019-5110_Study_Information_Sheet_Foraging.pdf';
 
-const MUSHROOM_PRELOAD_CONCURRENCY = 3;
-const MUSHROOM_PRELOAD_MAX_ATTEMPTS = 4;
-const MUSHROOM_PRELOAD_ATTEMPT_TIMEOUT_MS = 8000;
-const MUSHROOM_PRELOAD_RETRY_DELAY_MS = 1500;
+const MUSHROOM_PRELOAD_CONCURRENCY = 12;
+const MUSHROOM_PRELOAD_MAX_ATTEMPTS = 3;
+const MUSHROOM_PRELOAD_ATTEMPT_TIMEOUT_MS = 6000;
+const MUSHROOM_PRELOAD_RETRY_DELAY_MS = 500;
+const MUSHROOM_PRELOAD_COMPLETE_PAUSE_MS = 75;
 
 // TEMP MUSHROOM PRELOAD DEBUG START
 // Remove this block and the helper calls below after deploy asset debugging is done.
-const MUSHROOM_PRELOAD_DEBUG = true;
+const MUSHROOM_PRELOAD_DEBUG = false;
 const MUSHROOM_PRELOAD_DEBUG_MAX_FAILURES = 20;
 // TEMP MUSHROOM PRELOAD DEBUG END
 
@@ -590,7 +591,7 @@ async function preloadMushroomCatalogAndAssets() {
   if (!sources.length) {
     state.imagesLoaded = true;
     updateMushroomPreloadOverlay(100, 'Please wait.', '');
-    await new Promise(r => setTimeout(r, 250));
+    await new Promise(r => setTimeout(r, MUSHROOM_PRELOAD_COMPLETE_PAUSE_MS));
     hideMushroomPreloadOverlay();
     return { total: 0, loaded: 0, failed: 0 };
   }
@@ -643,7 +644,7 @@ async function preloadMushroomCatalogAndAssets() {
     'Please wait.',
     ''
   );
-  await new Promise(r => setTimeout(r, 350));
+  await new Promise(r => setTimeout(r, MUSHROOM_PRELOAD_COMPLETE_PAUSE_MS));
   hideMushroomPreloadOverlay();
 
   return {
