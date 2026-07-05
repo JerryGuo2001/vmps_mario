@@ -27,6 +27,8 @@ if (version_mushroom=='original'){
 
 const MAX_TRIALS = 100;
 const IMG_LOAD_TIMEOUT_MS = 5000;
+const IMG_LOAD_MAX_ATTEMPTS = 3;
+const IMG_LOAD_RETRY_DELAY_MS = 250;
 
 const EIGHT_COLORS = ['black','white','red','green','blue','cyan','magenta','yellow'];
 
@@ -58,9 +60,41 @@ function resolveImgSrc(filename) {
 
 const _imageCache = new Map(); // src -> Promise<HTMLImageElement>
 
-function _loadImageOnce(src, timeoutMs = IMG_LOAD_TIMEOUT_MS) {
-  if (_imageCache.has(src)) return _imageCache.get(src);
-  const p = new Promise((resolve, reject) => {
+function _imageLoadDelay(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function _plusEncodedImageSrc(src) {
+  if (/^data:/i.test(String(src || '').trim())) return src;
+  try {
+    const url = new URL(String(src || ''), window.location.href);
+    url.pathname = url.pathname.replace(/\+/g, '%2B');
+    return url.href;
+  } catch (_) {
+    return String(src || '').replace(/\+/g, '%2B');
+  }
+}
+
+function _imageRetrySrc(src, attempt) {
+  if (attempt <= 1) return src;
+  if (/^data:/i.test(String(src || '').trim())) return src;
+  try {
+    const url = new URL(String(src || ''), window.location.href);
+    url.searchParams.set('_mushroom_retry', `${attempt}_${Date.now()}`);
+    return url.href;
+  } catch (_) {
+    const sep = String(src || '').includes('?') ? '&' : '?';
+    return `${src}${sep}_mushroom_retry=${attempt}_${Date.now()}`;
+  }
+}
+
+function _imageSrcCandidates(src) {
+  const raw = String(src || '').trim();
+  return Array.from(new Set([raw, _plusEncodedImageSrc(raw)].filter(Boolean)));
+}
+
+function _loadImageAttempt(src, timeoutMs = IMG_LOAD_TIMEOUT_MS) {
+  return new Promise((resolve, reject) => {
     const img = new Image();
     const timer = setTimeout(() => {
       img.src = '';
@@ -69,6 +103,36 @@ function _loadImageOnce(src, timeoutMs = IMG_LOAD_TIMEOUT_MS) {
     img.onload  = () => { clearTimeout(timer); resolve(img); };
     img.onerror = () => { clearTimeout(timer); reject(new Error(`Failed to load: ${src}`)); };
     img.src = src;
+  });
+}
+
+async function _loadImageWithRetry(src, timeoutMs = IMG_LOAD_TIMEOUT_MS) {
+  let lastError = null;
+  const candidates = _imageSrcCandidates(src);
+
+  for (let attempt = 1; attempt <= IMG_LOAD_MAX_ATTEMPTS; attempt++) {
+    for (const candidateSrc of candidates) {
+      const attemptedSrc = _imageRetrySrc(candidateSrc, attempt);
+      try {
+        return await _loadImageAttempt(attemptedSrc, timeoutMs);
+      } catch (err) {
+        lastError = err;
+      }
+    }
+
+    if (attempt < IMG_LOAD_MAX_ATTEMPTS) {
+      await _imageLoadDelay(IMG_LOAD_RETRY_DELAY_MS * attempt);
+    }
+  }
+
+  throw lastError || new Error(`Failed to load: ${src}`);
+}
+
+function _loadImageOnce(src, timeoutMs = IMG_LOAD_TIMEOUT_MS) {
+  if (_imageCache.has(src)) return _imageCache.get(src);
+  const p = _loadImageWithRetry(src, timeoutMs).catch(err => {
+    _imageCache.delete(src);
+    throw err;
   });
   _imageCache.set(src, p);
   return p;

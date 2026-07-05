@@ -1168,9 +1168,10 @@ async function generateMushroom(count = 5) {
       const r = chosenRows[rowIdx++];
       const img = new Image();
       const preloadStatus = getMushroomAssetStatus(r.filename);
+      const imageSrc = preloadStatus?.loadedSrc || r.filename;
       img.onload = () => { item.imageLoaded = true; item.imageError = false; };
       img.onerror = () => { item.imageLoaded = false; item.imageError = true; };
-      img.src = r.filename;  // or resolveImgSrc(r.filename) if you prefer
+      img.src = imageSrc;  // Use the known-good preloaded URL when retries/fallbacks found one.
       const expId = expTypeKeyFromRow(r);
 
       const item = {
@@ -1184,6 +1185,7 @@ async function generateMushroom(count = 5) {
         growthComplete: false,
         color: r.color,
         imagefilename: r.filename,
+        imageLoadSrc: imageSrc,
         image: img,
         groundPlatformIndex: pi,
         _expId: expId,
@@ -1202,9 +1204,10 @@ async function generateMushroom(count = 5) {
     const r = chosenRows[rowIdx++];
     const img = new Image();
     const preloadStatus = getMushroomAssetStatus(r.filename);
+    const imageSrc = preloadStatus?.loadedSrc || r.filename;
     img.onload = () => { item.imageLoaded = true; item.imageError = false; };
     img.onerror = () => { item.imageLoaded = false; item.imageError = true; };
-    img.src = r.filename;
+    img.src = imageSrc;
     const expId = expTypeKeyFromRow(r);
     const item = {
       x: x0,
@@ -1217,6 +1220,7 @@ async function generateMushroom(count = 5) {
       growthComplete: false,
       color: r.color,
       imagefilename: r.filename,
+      imageLoadSrc: imageSrc,
       image: img,
       groundPlatformIndex: 0,
       _expId: expId,

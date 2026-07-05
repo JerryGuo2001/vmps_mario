@@ -13,6 +13,10 @@ let emptyRoomHintUntil = 0;
 
 const CONSENT_PDF_URL = 'TexturePack/consent/2019-5110_Study_Information_Sheet_Foraging.pdf';
 
+const MUSHROOM_PRELOAD_MAX_ATTEMPTS = 3;
+const MUSHROOM_PRELOAD_ATTEMPT_TIMEOUT_MS = 8000;
+const MUSHROOM_PRELOAD_RETRY_DELAY_MS = 250;
+
 // TEMP MUSHROOM PRELOAD DEBUG START
 // Remove this block and the helper calls below after deploy asset debugging is done.
 const MUSHROOM_PRELOAD_DEBUG = true;
@@ -441,13 +445,112 @@ function hideMushroomPreloadOverlay() {
   if (overlay) overlay.style.display = 'none';
 }
 
-function preloadSingleImage(src) {
+function mushroomPreloadDelay(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function mushroomPreloadPlusEncodedSrc(src) {
+  if (/^data:/i.test(String(src || '').trim())) return src;
+  try {
+    const url = new URL(String(src || ''), window.location.href);
+    url.pathname = url.pathname.replace(/\+/g, '%2B');
+    return url.href;
+  } catch (_) {
+    return String(src || '').replace(/\+/g, '%2B');
+  }
+}
+
+function mushroomPreloadAddRetryParam(src, attempt) {
+  if (attempt <= 1) return src;
+  if (/^data:/i.test(String(src || '').trim())) return src;
+  try {
+    const url = new URL(String(src || ''), window.location.href);
+    url.searchParams.set('_mushroom_retry', `${attempt}_${Date.now()}`);
+    return url.href;
+  } catch (_) {
+    const sep = String(src || '').includes('?') ? '&' : '?';
+    return `${src}${sep}_mushroom_retry=${attempt}_${Date.now()}`;
+  }
+}
+
+function mushroomPreloadCandidateSrcs(src) {
+  const raw = String(src || '').trim();
+  const plusEncoded = mushroomPreloadPlusEncodedSrc(raw);
+  return Array.from(new Set([raw, plusEncoded].filter(Boolean)));
+}
+
+function preloadSingleImageAttempt(src, timeoutMs = MUSHROOM_PRELOAD_ATTEMPT_TIMEOUT_MS) {
   return new Promise((resolve) => {
     const img = new Image();
-    img.onload = () => resolve({ src, ok: true });
-    img.onerror = () => resolve({ src, ok: false });
+    let done = false;
+
+    const finish = (ok, errorType = null) => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      resolve({
+        attemptedSrc: src,
+        ok: !!ok,
+        errorType,
+        naturalWidth: img.naturalWidth || 0,
+        naturalHeight: img.naturalHeight || 0
+      });
+    };
+
+    const timer = setTimeout(() => {
+      img.src = '';
+      finish(false, 'timeout');
+    }, timeoutMs);
+
+    img.onload = () => finish(true);
+    img.onerror = () => finish(false, 'error');
     img.src = src;
   });
+}
+
+async function preloadSingleImage(src) {
+  const candidateSrcs = mushroomPreloadCandidateSrcs(src);
+  const failures = [];
+
+  for (let attempt = 1; attempt <= MUSHROOM_PRELOAD_MAX_ATTEMPTS; attempt++) {
+    for (const candidateSrc of candidateSrcs) {
+      const attemptedSrc = mushroomPreloadAddRetryParam(candidateSrc, attempt);
+      const result = await preloadSingleImageAttempt(attemptedSrc);
+
+      if (result.ok) {
+        return {
+          src,
+          ok: true,
+          loadedSrc: attemptedSrc,
+          candidateSrc,
+          attemptedSrc,
+          attempt,
+          usedFallbackSrc: candidateSrc !== src,
+          naturalWidth: result.naturalWidth,
+          naturalHeight: result.naturalHeight,
+          failures
+        };
+      }
+
+      failures.push({
+        attempt,
+        attemptedSrc,
+        errorType: result.errorType
+      });
+    }
+
+    if (attempt < MUSHROOM_PRELOAD_MAX_ATTEMPTS) {
+      await mushroomPreloadDelay(MUSHROOM_PRELOAD_RETRY_DELAY_MS * attempt);
+    }
+  }
+
+  return {
+    src,
+    ok: false,
+    attemptedSrc: failures.length ? failures[failures.length - 1].attemptedSrc : src,
+    attempts: MUSHROOM_PRELOAD_MAX_ATTEMPTS,
+    failures
+  };
 }
 
 async function preloadMushroomCatalogAndAssets() {

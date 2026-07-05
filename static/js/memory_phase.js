@@ -11,6 +11,8 @@ let memory_totalQuestions;
 let Memory_debug = false;
 
 let memory_promptMushroom = null; // the mushroom shown in the similarity/old-new prompt
+const MEMORY_IMAGE_LOAD_MAX_ATTEMPTS = 3;
+const MEMORY_IMAGE_LOAD_RETRY_DELAY_MS = 250;
 
 
 function getMemoryMushroomPreloadStatusBySrc() {
@@ -21,6 +23,11 @@ function getMemoryMushroomAssetStatus(src) {
   const resolved = String(src || '').trim();
   if (!resolved) return null;
   return getMemoryMushroomPreloadStatusBySrc()[resolved] || null;
+}
+
+function memoryKnownGoodMushroomSrc(src) {
+  const status = getMemoryMushroomAssetStatus(src);
+  return status?.loadedSrc || src;
 }
 
 function isKnownBadMemoryMushroomSrc(src) {
@@ -1355,34 +1362,89 @@ function _preloadOneImage(src, timeoutMs = 15000) {
     return knownPromise;
   }
 
-  const p = new Promise((resolve) => {
+  const p = _preloadOneImageWithRetry(src, timeoutMs);
+
+  memoryImagePreloadCache.set(src, p);
+  return p;
+}
+
+function memoryImageLoadDelay(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function memoryPlusEncodedImageSrc(src) {
+  if (/^data:/i.test(String(src || '').trim())) return src;
+  try {
+    const url = new URL(String(src || ''), window.location.href);
+    url.pathname = url.pathname.replace(/\+/g, '%2B');
+    return url.href;
+  } catch (_) {
+    return String(src || '').replace(/\+/g, '%2B');
+  }
+}
+
+function memoryImageRetrySrc(src, attempt) {
+  if (attempt <= 1) return src;
+  if (/^data:/i.test(String(src || '').trim())) return src;
+  try {
+    const url = new URL(String(src || ''), window.location.href);
+    url.searchParams.set('_mushroom_retry', `${attempt}_${Date.now()}`);
+    return url.href;
+  } catch (_) {
+    const sep = String(src || '').includes('?') ? '&' : '?';
+    return `${src}${sep}_mushroom_retry=${attempt}_${Date.now()}`;
+  }
+}
+
+function memoryImageSrcCandidates(src) {
+  const raw = String(src || '').trim();
+  return Array.from(new Set([raw, memoryPlusEncodedImageSrc(raw)].filter(Boolean)));
+}
+
+function _preloadOneImageAttempt(src, timeoutMs = 15000) {
+  return new Promise((resolve) => {
     const img = new Image();
     let done = false;
 
     const finish = (ok) => {
       if (done) return;
       done = true;
+      clearTimeout(timer);
       resolve(!!ok);
     };
 
-    const timer = setTimeout(() => finish(false), timeoutMs);
+    const timer = setTimeout(() => {
+      img.src = '';
+      finish(false);
+    }, timeoutMs);
 
     img.onload = async () => {
-      clearTimeout(timer);
       try { if (img.decode) await img.decode(); } catch (_) {}
       finish(true);
     };
 
-    img.onerror = () => {
-      clearTimeout(timer);
-      finish(false);
-    };
+    img.onerror = () => finish(false);
 
     img.src = src;
   });
+}
 
-  memoryImagePreloadCache.set(src, p);
-  return p;
+async function _preloadOneImageWithRetry(src, timeoutMs = 15000) {
+  const candidates = memoryImageSrcCandidates(src);
+
+  for (let attempt = 1; attempt <= MEMORY_IMAGE_LOAD_MAX_ATTEMPTS; attempt++) {
+    for (const candidateSrc of candidates) {
+      const attemptedSrc = memoryImageRetrySrc(candidateSrc, attempt);
+      const ok = await _preloadOneImageAttempt(attemptedSrc, timeoutMs);
+      if (ok) return true;
+    }
+
+    if (attempt < MEMORY_IMAGE_LOAD_MAX_ATTEMPTS) {
+      await memoryImageLoadDelay(MEMORY_IMAGE_LOAD_RETRY_DELAY_MS * attempt);
+    }
+  }
+
+  return false;
 }
 
 async function preloadMemoryTrialImages(timeoutPerImageMs = 15000) {
@@ -1471,6 +1533,8 @@ async function showMushrooms() {
 
   const leftSrc = memoryImageSrc(a.imagefilename);
   const rightSrc = memoryImageSrc(b.imagefilename);
+  const leftDisplaySrc = memoryKnownGoodMushroomSrc(leftSrc);
+  const rightDisplaySrc = memoryKnownGoodMushroomSrc(rightSrc);
   const failedAssets = [leftSrc, rightSrc].filter(isKnownBadMemoryMushroomSrc);
 
   if (failedAssets.length > 0) {
@@ -1481,8 +1545,8 @@ async function showMushrooms() {
     return;
   }
 
-  if (leftImg) leftImg.src = leftSrc;
-  if (rightImg) rightImg.src = rightSrc;
+  if (leftImg) leftImg.src = leftDisplaySrc;
+  if (rightImg) rightImg.src = rightDisplaySrc;
 
   try {
     if (leftImg?.decode) await leftImg.decode();
@@ -1898,7 +1962,7 @@ function showMemoryChoicePrompt(mushroom) {
   promptDiv.style.zIndex = '1000';
 
   const img = document.createElement('img');
-  img.src = memoryImageSrc(mushroom.imagefilename);
+  img.src = memoryKnownGoodMushroomSrc(memoryImageSrc(mushroom.imagefilename));
   img.style.width = '80px';
   promptDiv.appendChild(img);
 
