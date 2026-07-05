@@ -340,7 +340,11 @@ async function preloadMushroomCatalogAndAssets() {
 
   state.imagesLoaded = true;
   if (state.failedCount > 0) {
-    console.warn(`[mushroom preload] ${state.failedCount} image(s) failed to load and will be skipped during the task.`);
+    const failedSources = sources.filter(src => state.statusBySrc[src]?.ok === false);
+    console.warn(
+      `[mushroom preload] ${state.failedCount} image(s) failed to load and will be skipped during the task:\n` +
+      failedSources.map(src => `- ${src}`).join('\n')
+    );
   }
 
   updateMushroomPreloadOverlay(
