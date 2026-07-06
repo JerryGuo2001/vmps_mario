@@ -901,7 +901,88 @@ function startExploreAssetLoads() {
   if (typeof startDoorImageLoads === 'function') startDoorImageLoads();
 }
 
+function getExploreImagePreloadEntries() {
+  return EXPLORE_IMAGE_SOURCES.map(([img, src]) => ({
+    label: src.split('/').pop() || src,
+    img,
+    src
+  }));
+}
+
+function getAllGameAssetPreloadEntries() {
+  const entries = getExploreImagePreloadEntries();
+  if (typeof window.getDoorImagePreloadEntries === 'function') {
+    entries.push(...window.getDoorImagePreloadEntries());
+  }
+  return entries;
+}
+
+function preloadImageElement(entry, timeoutMs = 15000) {
+  const img = entry.img;
+  const src = entry.src;
+  startImageLoadOnce(img, src);
+
+  if (img.complete && img.naturalWidth > 0) {
+    return Promise.resolve({ ...entry, ok: true });
+  }
+
+  return new Promise((resolve) => {
+    let done = false;
+
+    const finish = (ok, errorType = null) => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      img.removeEventListener('load', onLoad);
+      img.removeEventListener('error', onError);
+      resolve({
+        ...entry,
+        ok,
+        errorType,
+        naturalWidth: img.naturalWidth || 0,
+        naturalHeight: img.naturalHeight || 0
+      });
+    };
+
+    const onLoad = () => finish(true);
+    const onError = () => finish(false, 'error');
+    const timer = setTimeout(() => finish(false, 'timeout'), timeoutMs);
+
+    img.addEventListener('load', onLoad, { once: true });
+    img.addEventListener('error', onError, { once: true });
+  });
+}
+
+async function preloadExploreAssets(options = {}) {
+  const entries = getAllGameAssetPreloadEntries();
+  const onProgress = typeof options.onProgress === 'function' ? options.onProgress : () => {};
+  const timeoutMs = options.timeoutMs || 15000;
+  let done = 0;
+
+  onProgress(0, entries.length, null);
+
+  const results = await Promise.all(entries.map(async (entry) => {
+    const result = await preloadImageElement(entry, timeoutMs);
+    done += 1;
+    onProgress(done, entries.length, result);
+    return result;
+  }));
+
+  const failedAssets = results.filter(result => !result.ok);
+  if (failedAssets.length) {
+    console.warn('[game asset preload] Failed asset(s):', failedAssets);
+  }
+
+  return {
+    total: entries.length,
+    loaded: results.length - failedAssets.length,
+    failed: failedAssets.length,
+    failedAssets
+  };
+}
+
 window.startExploreAssetLoads = startExploreAssetLoads;
+window.preloadExploreAssets = preloadExploreAssets;
 
 // --- camera/coord helpers ---
 

@@ -29,12 +29,16 @@ window.mushroomCatalogRows = Array.isArray(window.mushroomCatalogRows) ? window.
 window.MUSHROOM_PRELOAD = window.MUSHROOM_PRELOAD || {
   rowsLoaded: false,
   imagesLoaded: false,
+  gameAssetsLoaded: false,
   statusBySrc: Object.create(null),
   loadedCount: 0,
   failedCount: 0,
   totalCount: 0,
   lastError: null
 };
+if (typeof window.MUSHROOM_PRELOAD.gameAssetsLoaded !== 'boolean') {
+  window.MUSHROOM_PRELOAD.gameAssetsLoaded = false;
+}
 
 function csvSplitLine(line) {
   const out = [];
@@ -587,11 +591,12 @@ async function preloadSingleImage(src, options = {}) {
 
 async function preloadMushroomCatalogAndAssets() {
   const state = window.MUSHROOM_PRELOAD;
-  if (state?.rowsLoaded && state?.imagesLoaded) {
+  if (state?.rowsLoaded && state?.imagesLoaded && state?.gameAssetsLoaded) {
     return {
       total: state.totalCount || 0,
       loaded: state.loadedCount || 0,
-      failed: state.failedCount || 0
+      failed: state.failedCount || 0,
+      gameAssets: state.gameAssets || null
     };
   }
 
@@ -614,10 +619,13 @@ async function preloadMushroomCatalogAndAssets() {
 
   if (!sources.length) {
     state.imagesLoaded = true;
-    updateMushroomPreloadOverlay(100, 'Please wait.', '');
+    const gameAssets = await preloadRequiredGameAssets();
+    state.gameAssets = gameAssets;
+    state.gameAssetsLoaded = true;
+    updateMushroomPreloadOverlay(100, 'Loading complete.', '');
     await new Promise(r => setTimeout(r, MUSHROOM_PRELOAD_COMPLETE_PAUSE_MS));
     hideMushroomPreloadOverlay();
-    return { total: 0, loaded: 0, failed: 0 };
+    return { total: 0, loaded: 0, failed: 0, gameAssets };
   }
 
   updateMushroomPreloadOverlay(0, 'Please wait.', '');
@@ -663,9 +671,12 @@ async function preloadMushroomCatalogAndAssets() {
   }
 
   state.imagesLoaded = true;
+  const gameAssets = await preloadRequiredGameAssets();
+  state.gameAssets = gameAssets;
+  state.gameAssetsLoaded = true;
   updateMushroomPreloadOverlay(
     100,
-    'Please wait.',
+    'Loading complete.',
     ''
   );
   await new Promise(r => setTimeout(r, MUSHROOM_PRELOAD_COMPLETE_PAUSE_MS));
@@ -674,8 +685,38 @@ async function preloadMushroomCatalogAndAssets() {
   return {
     total: sources.length,
     loaded: state.loadedCount,
-    failed: state.failedCount
+    failed: state.failedCount,
+    gameAssets
   };
+}
+
+async function preloadRequiredGameAssets() {
+  if (typeof window.preloadExploreAssets !== 'function') {
+    return { total: 0, loaded: 0, failed: 0, failedAssets: [] };
+  }
+
+  updateMushroomPreloadOverlay(0, 'Loading game assets.', '');
+
+  const result = await window.preloadExploreAssets({
+    onProgress(done, total) {
+      const pct = total ? (done / total) * 100 : 100;
+      updateMushroomPreloadOverlay(
+        pct,
+        'Loading game assets.',
+        total ? `${done} / ${total}` : ''
+      );
+    }
+  });
+
+  if (result.failed > 0) {
+    const failedPreview = result.failedAssets
+      .slice(0, 8)
+      .map(asset => asset.src || asset.label)
+      .join(', ');
+    throw new Error(`Game asset preload incomplete: ${result.failed} failed (${failedPreview})`);
+  }
+
+  return result;
 }
 
 function injectConsentGateIntoWelcome() {
@@ -1058,9 +1099,9 @@ async function startWithID() {
     try {
       await preloadMushroomCatalogAndAssets();
     } catch (err) {
-      console.error('[task] Mushroom preload failed:', err);
+      console.error('[task] Required image preload failed:', err);
       hideMushroomPreloadOverlay();
-      alert('Could not preload the mushroom catalog/images. Please refresh and try again.');
+      alert('Could not preload the required task images. Please refresh and try again.');
       return;
     }
 

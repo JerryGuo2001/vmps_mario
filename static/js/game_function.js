@@ -43,7 +43,16 @@ function startDoorImageLoads() {
     });
 }
 
+function getDoorImagePreloadEntries() {
+    return Object.entries(DOOR_IMAGE_SOURCES).map(([type, src]) => ({
+        label: `door:${type}`,
+        img: doorImages[type],
+        src
+    }));
+}
+
 window.startDoorImageLoads = startDoorImageLoads;
+window.getDoorImagePreloadEntries = getDoorImagePreloadEntries;
 
 async function enterRoomFromDoor(chosenRoom, chosenSide) {
     if (!chosenRoom) return;
