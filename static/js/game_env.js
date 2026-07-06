@@ -865,20 +865,43 @@ const OBJECT_TYPES = {
   MUSHROOM: 'mushroom'
 };
 
-// Load the brick texture
+// Game images are loaded when exploration starts, not on the welcome screen.
 let groundImage = new Image();
-groundImage.src = 'TexturePack/brick_texture.png'; // Replace with actual image path
 
 let marioSprite = new Image();
-marioSprite.src = "TexturePack/mario.png"; // Your uploaded sprite
 
-// Load the environment background images
-let skyImage = new Image();    skyImage.src = 'TexturePack/sky.png';
-let oceanImage = new Image();  oceanImage.src = 'TexturePack/ocean.png';
-let desertImage = new Image(); desertImage.src = 'TexturePack/desert.png';
-let forestImage = new Image(); forestImage.src = 'TexturePack/forest.png';
-let caveImage = new Image();   caveImage.src = 'TexturePack/cave.png';
-let lavaImage = new Image();   lavaImage.src = 'TexturePack/lava.png';
+let skyImage = new Image();
+let oceanImage = new Image();
+let desertImage = new Image();
+let forestImage = new Image();
+let caveImage = new Image();
+let lavaImage = new Image();
+const boxImage = new Image();
+
+const EXPLORE_IMAGE_SOURCES = [
+  [groundImage, 'TexturePack/brick_texture.png'],
+  [marioSprite, 'TexturePack/mario.png'],
+  [skyImage, 'TexturePack/sky.png'],
+  [oceanImage, 'TexturePack/ocean.png'],
+  [desertImage, 'TexturePack/desert.png'],
+  [forestImage, 'TexturePack/forest.png'],
+  [caveImage, 'TexturePack/cave.png'],
+  [lavaImage, 'TexturePack/lava.png'],
+  [boxImage, 'TexturePack/box.jpg']
+];
+
+function startImageLoadOnce(img, src) {
+  if (!img || !src || img.getAttribute('src')) return;
+  img.decoding = 'async';
+  img.src = src;
+}
+
+function startExploreAssetLoads() {
+  EXPLORE_IMAGE_SOURCES.forEach(([img, src]) => startImageLoadOnce(img, src));
+  if (typeof startDoorImageLoads === 'function') startDoorImageLoads();
+}
+
+window.startExploreAssetLoads = startExploreAssetLoads;
 
 // --- camera/coord helpers ---
 
@@ -920,7 +943,7 @@ function wrapWorldXLeftEdge(xWorld) {
 
   // If you pass the right edge, appear on the far left
   if (xWorld > maxX){
-    groundPlatforms = generateGroundPlatforms(worldWidth, 200, 400);
+    resetGroundPlatforms();
     generateMushroom(5).then(ms => { mushrooms = ms; }).catch(err => console.warn('[init mushrooms]', err));
     return 0;
   }
@@ -993,6 +1016,12 @@ function generateGroundPlatforms(worldWidth, minHeight, maxHeight, numSections =
   }
 
   return platforms;
+}
+
+function resetGroundPlatforms() {
+  groundPlatforms = generateGroundPlatforms(worldWidth, 200, 400);
+  window.groundPlatforms = groundPlatforms;
+  return groundPlatforms;
 }
 
 
@@ -1345,11 +1374,10 @@ async function generateMushroom(count = 5) {
 
 
 
-// Generate new platforms each time with varied height
-let groundPlatforms = generateGroundPlatforms(worldWidth, 200, 400);
-// Initial spawn
+// Generated when exploration starts.
+let groundPlatforms = [];
+window.groundPlatforms = groundPlatforms;
 let mushrooms = [];
-generateMushroom(5).then(ms => { mushrooms = ms; }).catch(err => console.warn('[init mushrooms]', err));
 
 function drawBackground_canvas4() {
   let Imagetouse;
@@ -1360,7 +1388,7 @@ function drawBackground_canvas4() {
   else if (env_deter == 'cave')   Imagetouse = caveImage;
   else if (env_deter == 'lava')   Imagetouse = lavaImage;
 
-  if (Imagetouse && Imagetouse.complete) {
+  if (Imagetouse && Imagetouse.complete && Imagetouse.naturalWidth > 0) {
     ctx.drawImage(Imagetouse, 0, 0, canvas.width, canvas.height);
   } else if (Imagetouse) {
     Imagetouse.onload = () => drawBackground_canvas4();
@@ -1370,7 +1398,7 @@ function drawBackground_canvas4() {
     let screenStartX = worldToScreenX(platform.startX);
     let screenEndX   = worldToScreenX(platform.endX);
 
-    if (groundImage.complete) {
+    if (groundImage.complete && groundImage.naturalWidth > 0) {
       for (let x = screenStartX; x < screenEndX; x += 50) {
         for (let y = platform.y; y < canvas.height; y += 50) {
           ctx.drawImage(groundImage, x, y, 50, 50);
@@ -1484,11 +1512,6 @@ function proceedFromRoom(reason = 'p') {
   doorsAssigned = false;
 }
 
-
-
-const boxImage = new Image();
-boxImage.src = 'TexturePack/box.jpg'; // Replace with the correct path to your box image
-
 function drawMysBox() {
   ensureWorldPosInit();
   let canJump = false;
@@ -1503,7 +1526,7 @@ function drawMysBox() {
     const boxBottom  = boxY_top + BOX_H;
 
     const boxX_screen = worldToScreenX(boxX_world);
-    if (boxImage && boxImage.complete) {
+    if (boxImage && boxImage.complete && boxImage.naturalWidth > 0) {
       ctx.drawImage(boxImage, boxX_screen - BOX_W/2, boxY_top, BOX_W, BOX_H);
     } else {
       ctx.fillStyle = 'rgba(0,0,0,0.2)';
@@ -2139,6 +2162,8 @@ function getMarioFrame() {
 }
 
 function drawCharacter_canvas4() {
+  if (!marioSprite.complete || marioSprite.naturalWidth <= 0) return;
+
   ensureWorldPosInit();
   const characterX = getCharacterScreenX();
   let frame = getMarioFrame();

@@ -451,6 +451,30 @@ function hideMushroomPreloadOverlay() {
   if (overlay) overlay.style.display = 'none';
 }
 
+function runWhenDomReady(fn) {
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', fn, { once: true });
+  } else {
+    fn();
+  }
+}
+
+function runAfterInitialPaint(fn) {
+  if (typeof requestAnimationFrame === 'function') {
+    requestAnimationFrame(() => requestAnimationFrame(fn));
+  } else {
+    setTimeout(fn, 0);
+  }
+}
+
+function runWhenBrowserIdle(fn, timeout = 2500) {
+  if (typeof requestIdleCallback === 'function') {
+    requestIdleCallback(fn, { timeout });
+  } else {
+    setTimeout(fn, 500);
+  }
+}
+
 function mushroomPreloadDelay(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
@@ -732,7 +756,7 @@ function injectConsentGateIntoWelcome() {
 
     <iframe
       id="consentPdfFrame"
-      src="${CONSENT_PDF_URL}#view=FitH"
+      loading="lazy"
       title="Consent form PDF"
     ></iframe>
 
@@ -777,16 +801,27 @@ function injectConsentGateIntoWelcome() {
 
   checkbox.addEventListener('change', syncConsentState);
   syncConsentState();
+
+  runAfterInitialPaint(() => {
+    const pdfFrame = document.getElementById('consentPdfFrame');
+    if (pdfFrame && !pdfFrame.getAttribute('src')) {
+      pdfFrame.src = `${CONSENT_PDF_URL}#view=FitH`;
+    }
+  });
 }
 
-window.onload = () => {
+function initInitialScreen() {
   const w = document.getElementById('welcome');
   if (w) w.style.display = 'block';
 
   injectConsentGateIntoWelcome();
 
-  preloadAllInstructions().catch(() => {/* ignore */});
-};
+  runWhenBrowserIdle(() => {
+    preloadAllInstructions().catch(() => {/* ignore */});
+  });
+}
+
+runWhenDomReady(initInitialScreen);
 
 const IDLE_TIMEOUT_MS = 5 * 60 * 1000;
 const IDLE_ACTIVITY_EVENTS = [
@@ -1463,6 +1498,10 @@ function pickXInPlatform(p, pickedXs, minMargin = 35, minSpacing = 120) {
 
 
 async function initGame() {
+  if (typeof startExploreAssetLoads === 'function') {
+    startExploreAssetLoads();
+  }
+
   canvas = document.getElementById('gameCanvas');
   canvas.width = 600;
   canvas.height = 500;
@@ -1505,6 +1544,19 @@ async function initGame() {
 
   if (typeof character.worldX !== 'number') character.worldX = cameraOffset + 30; else character.worldX = 30;
   character.y = 10;
+
+  if (typeof resetGroundPlatforms === 'function') {
+    resetGroundPlatforms();
+  } else {
+    groundPlatforms = generateGroundPlatforms(worldWidth, 200, 400);
+  }
+
+  try {
+    mushrooms = await generateMushroom(5);
+  } catch (err) {
+    console.warn('[init mushrooms]', err);
+    mushrooms = [];
+  }
 
   window.addEventListener('keydown', handleKeyDown);
   window.addEventListener('keyup', handleKeyUp);

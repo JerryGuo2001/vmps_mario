@@ -25,12 +25,25 @@ const doorImages = {
     cave: new Image()
 };
 
-// Set image sources
-doorImages.lava.src = 'TexturePack/lavaDoor.png';
-doorImages.forest.src = 'TexturePack/forestDoor.png';
-doorImages.ocean.src = 'TexturePack/oceanDoor.png';
-doorImages.desert.src = 'TexturePack/desertDoor.png';
-doorImages.cave.src = 'TexturePack/caveDoor.png';
+const DOOR_IMAGE_SOURCES = {
+    lava: 'TexturePack/lavaDoor.png',
+    forest: 'TexturePack/forestDoor.png',
+    ocean: 'TexturePack/oceanDoor.png',
+    desert: 'TexturePack/desertDoor.png',
+    cave: 'TexturePack/caveDoor.png'
+};
+
+function startDoorImageLoads() {
+    Object.entries(DOOR_IMAGE_SOURCES).forEach(([type, src]) => {
+        const img = doorImages[type];
+        if (img && !img.getAttribute('src')) {
+            img.decoding = 'async';
+            img.src = src;
+        }
+    });
+}
+
+window.startDoorImageLoads = startDoorImageLoads;
 
 async function enterRoomFromDoor(chosenRoom, chosenSide) {
     if (!chosenRoom) return;
@@ -48,7 +61,11 @@ async function enterRoomFromDoor(chosenRoom, chosenSide) {
 
     resetRoomVisitState();
 
-    groundPlatforms = generateGroundPlatforms(worldWidth, 200, 400);
+    if (typeof resetGroundPlatforms === 'function') {
+        resetGroundPlatforms();
+    } else {
+        groundPlatforms = generateGroundPlatforms(worldWidth, 200, 400);
+    }
     mushrooms = await generateMushroom(5);
     handleTextInteraction_canvas4();
 
@@ -144,18 +161,18 @@ async function drawObstacles() {
         const rightX  = canvas.width * 0.80 - doorWidth / 2;
 
         // Draw left door
-        if (leftDoorType && doorImages[leftDoorType]) {
+        if (leftDoorType && doorImages[leftDoorType]?.complete && doorImages[leftDoorType].naturalWidth > 0) {
             ctx.drawImage(doorImages[leftDoorType], leftX, doorY, doorWidth, doorHeight);
         }
 
         // Draw back door (center) if available
-        if (backDoorType && doorImages[backDoorType]) {
+        if (backDoorType && doorImages[backDoorType]?.complete && doorImages[backDoorType].naturalWidth > 0) {
             ctx.drawImage(doorImages[backDoorType], backX, doorY, doorWidth, doorHeight);
 
         }
 
         // Draw right door
-        if (rightDoorType && doorImages[rightDoorType]) {
+        if (rightDoorType && doorImages[rightDoorType]?.complete && doorImages[rightDoorType].naturalWidth > 0) {
             ctx.drawImage(doorImages[rightDoorType], rightX, doorY, doorWidth, doorHeight);
         }
 
@@ -342,7 +359,7 @@ function clearCanvas() {
 
 function drawBackground() {
     // Draw the sky background
-    if (skyImage.complete) {
+    if (skyImage.complete && skyImage.naturalWidth > 0) {
         ctx.drawImage(skyImage, 0, 0, canvas.width, canvas.height);
     } else {
         skyImage.onload = () => {
@@ -358,7 +375,7 @@ function drawBackground() {
     let screenStartX = 0;
     let screenEndX = canvas.width;
 
-    if (groundImage.complete) {
+    if (groundImage.complete && groundImage.naturalWidth > 0) {
         // Fill multiple rows
         for (let y = groundY; y < canvas.height; y += tileSize) {
             for (let x = screenStartX; x < screenEndX; x += tileSize) {
