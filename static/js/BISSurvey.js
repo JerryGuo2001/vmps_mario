@@ -18,8 +18,8 @@
     subtitle: 'BIS/BAS Scale',
     scaleMin: 1,
     scaleMax: 4,
-    minLabel: 'Strongly Agree',
-    maxLabel: 'Strongly Disagree',
+    minLabel: 'very false for me',
+    maxLabel: 'very true for me',
     itemsPerPage: 8,
     mergeIntoPostSurveyIfPresent: true,
     participantDataKey: 'bisbasSurvey'
